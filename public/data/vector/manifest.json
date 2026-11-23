@@ -1,0 +1,5352 @@
+{
+  "version": 1,
+  "chunkZoom": 13,
+  "bbox": {
+    "west": -108.02,
+    "south": 37.68,
+    "east": -107.25,
+    "north": 38.1
+  },
+  "worldBbox": [
+    -18235.2,
+    49367.5,
+    -18109.5,
+    28614.8
+  ],
+  "attribution": "Map data \u00a9 OpenStreetMap contributors (ODbL); Elevation USGS 3DEP / Mapzen Terrarium",
+  "stats": {
+    "chunks": 266,
+    "chunksBytes": 28679047,
+    "graphBytes": 2873756,
+    "trailEdges": 9175,
+    "waterways": 18372,
+    "lakes": 1203,
+    "waterfalls": 37,
+    "buildings": 7135,
+    "aerialways": 23,
+    "skiRuns": 695,
+    "pois": 435
+  },
+  "chunks": [
+    {
+      "tx": 1637,
+      "ty": 3156,
+      "file": "chunks/1637_3156.json",
+      "bounds": [
+        -21880.7,
+        -21965.7,
+        -18022.5,
+        -18107.5
+      ],
+      "counts": {
+        "trails": 9,
+        "waterways": 16,
+        "lakes": 3,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1637,
+      "ty": 3157,
+      "file": "chunks/1637_3157.json",
+      "bounds": [
+        -21880.7,
+        -18107.5,
+        -18022.5,
+        -14249.3
+      ],
+      "counts": {
+        "trails": 58,
+        "waterways": 16,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1637,
+      "ty": 3158,
+      "file": "chunks/1637_3158.json",
+      "bounds": [
+        -21880.7,
+        -14249.3,
+        -18022.5,
+        -10391.1
+      ],
+      "counts": {
+        "trails": 25,
+        "waterways": 12,
+        "lakes": 3,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1637,
+      "ty": 3159,
+      "file": "chunks/1637_3159.json",
+      "bounds": [
+        -21880.7,
+        -10391.1,
+        -18022.5,
+        -6532.9
+      ],
+      "counts": {
+        "trails": 45,
+        "waterways": 14,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1637,
+      "ty": 3160,
+      "file": "chunks/1637_3160.json",
+      "bounds": [
+        -21880.7,
+        -6532.9,
+        -18022.5,
+        -2674.7
+      ],
+      "counts": {
+        "trails": 34,
+        "waterways": 12,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1637,
+      "ty": 3161,
+      "file": "chunks/1637_3161.json",
+      "bounds": [
+        -21880.7,
+        -2674.7,
+        -18022.5,
+        1183.5
+      ],
+      "counts": {
+        "trails": 17,
+        "waterways": 11,
+        "lakes": 5,
+        "waterfalls": 0,
+        "buildings": 2,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1637,
+      "ty": 3162,
+      "file": "chunks/1637_3162.json",
+      "bounds": [
+        -21880.7,
+        1183.5,
+        -18022.5,
+        5041.7
+      ],
+      "counts": {
+        "trails": 28,
+        "waterways": 52,
+        "lakes": 9,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1637,
+      "ty": 3163,
+      "file": "chunks/1637_3163.json",
+      "bounds": [
+        -21880.7,
+        5041.7,
+        -18022.5,
+        8899.9
+      ],
+      "counts": {
+        "trails": 12,
+        "waterways": 93,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1637,
+      "ty": 3164,
+      "file": "chunks/1637_3164.json",
+      "bounds": [
+        -21880.7,
+        8899.9,
+        -18022.5,
+        12758.1
+      ],
+      "counts": {
+        "trails": 10,
+        "waterways": 160,
+        "lakes": 6,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1637,
+      "ty": 3165,
+      "file": "chunks/1637_3165.json",
+      "bounds": [
+        -21880.7,
+        12758.1,
+        -18022.5,
+        16616.3
+      ],
+      "counts": {
+        "trails": 13,
+        "waterways": 25,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 3,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1637,
+      "ty": 3166,
+      "file": "chunks/1637_3166.json",
+      "bounds": [
+        -21880.7,
+        16616.3,
+        -18022.5,
+        20474.5
+      ],
+      "counts": {
+        "trails": 13,
+        "waterways": 26,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1637,
+      "ty": 3167,
+      "file": "chunks/1637_3167.json",
+      "bounds": [
+        -21880.7,
+        20474.5,
+        -18022.5,
+        24332.8
+      ],
+      "counts": {
+        "trails": 9,
+        "waterways": 95,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1637,
+      "ty": 3168,
+      "file": "chunks/1637_3168.json",
+      "bounds": [
+        -21880.7,
+        24332.8,
+        -18022.5,
+        28191.0
+      ],
+      "counts": {
+        "trails": 201,
+        "waterways": 57,
+        "lakes": 18,
+        "waterfalls": 0,
+        "buildings": 291,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1637,
+      "ty": 3169,
+      "file": "chunks/1637_3169.json",
+      "bounds": [
+        -21880.7,
+        28191.0,
+        -18022.5,
+        32049.2
+      ],
+      "counts": {
+        "trails": 20,
+        "waterways": 72,
+        "lakes": 5,
+        "waterfalls": 0,
+        "buildings": 16,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1638,
+      "ty": 3156,
+      "file": "chunks/1638_3156.json",
+      "bounds": [
+        -18022.5,
+        -21965.7,
+        -14164.3,
+        -18107.5
+      ],
+      "counts": {
+        "trails": 44,
+        "waterways": 14,
+        "lakes": 8,
+        "waterfalls": 0,
+        "buildings": 3,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1638,
+      "ty": 3157,
+      "file": "chunks/1638_3157.json",
+      "bounds": [
+        -18022.5,
+        -18107.5,
+        -14164.3,
+        -14249.3
+      ],
+      "counts": {
+        "trails": 24,
+        "waterways": 15,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1638,
+      "ty": 3158,
+      "file": "chunks/1638_3158.json",
+      "bounds": [
+        -18022.5,
+        -14249.3,
+        -14164.3,
+        -10391.1
+      ],
+      "counts": {
+        "trails": 11,
+        "waterways": 17,
+        "lakes": 6,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1638,
+      "ty": 3159,
+      "file": "chunks/1638_3159.json",
+      "bounds": [
+        -18022.5,
+        -10391.1,
+        -14164.3,
+        -6532.9
+      ],
+      "counts": {
+        "trails": 73,
+        "waterways": 26,
+        "lakes": 8,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1638,
+      "ty": 3160,
+      "file": "chunks/1638_3160.json",
+      "bounds": [
+        -18022.5,
+        -6532.9,
+        -14164.3,
+        -2674.7
+      ],
+      "counts": {
+        "trails": 32,
+        "waterways": 18,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 2,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1638,
+      "ty": 3161,
+      "file": "chunks/1638_3161.json",
+      "bounds": [
+        -18022.5,
+        -2674.7,
+        -14164.3,
+        1183.5
+      ],
+      "counts": {
+        "trails": 47,
+        "waterways": 20,
+        "lakes": 16,
+        "waterfalls": 0,
+        "buildings": 3,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1638,
+      "ty": 3162,
+      "file": "chunks/1638_3162.json",
+      "bounds": [
+        -18022.5,
+        1183.5,
+        -14164.3,
+        5041.7
+      ],
+      "counts": {
+        "trails": 56,
+        "waterways": 108,
+        "lakes": 20,
+        "waterfalls": 0,
+        "buildings": 16,
+        "aerialways": 0,
+        "skiRuns": 2
+      }
+    },
+    {
+      "tx": 1638,
+      "ty": 3163,
+      "file": "chunks/1638_3163.json",
+      "bounds": [
+        -18022.5,
+        5041.7,
+        -14164.3,
+        8899.9
+      ],
+      "counts": {
+        "trails": 12,
+        "waterways": 94,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 7
+      }
+    },
+    {
+      "tx": 1638,
+      "ty": 3164,
+      "file": "chunks/1638_3164.json",
+      "bounds": [
+        -18022.5,
+        8899.9,
+        -14164.3,
+        12758.1
+      ],
+      "counts": {
+        "trails": 16,
+        "waterways": 73,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1638,
+      "ty": 3165,
+      "file": "chunks/1638_3165.json",
+      "bounds": [
+        -18022.5,
+        12758.1,
+        -14164.3,
+        16616.3
+      ],
+      "counts": {
+        "trails": 4,
+        "waterways": 82,
+        "lakes": 4,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1638,
+      "ty": 3166,
+      "file": "chunks/1638_3166.json",
+      "bounds": [
+        -18022.5,
+        16616.3,
+        -14164.3,
+        20474.5
+      ],
+      "counts": {
+        "trails": 23,
+        "waterways": 49,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1638,
+      "ty": 3167,
+      "file": "chunks/1638_3167.json",
+      "bounds": [
+        -18022.5,
+        20474.5,
+        -14164.3,
+        24332.8
+      ],
+      "counts": {
+        "trails": 5,
+        "waterways": 113,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1638,
+      "ty": 3168,
+      "file": "chunks/1638_3168.json",
+      "bounds": [
+        -18022.5,
+        24332.8,
+        -14164.3,
+        28191.0
+      ],
+      "counts": {
+        "trails": 5,
+        "waterways": 142,
+        "lakes": 3,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1638,
+      "ty": 3169,
+      "file": "chunks/1638_3169.json",
+      "bounds": [
+        -18022.5,
+        28191.0,
+        -14164.3,
+        32049.2
+      ],
+      "counts": {
+        "trails": 6,
+        "waterways": 119,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1639,
+      "ty": 3156,
+      "file": "chunks/1639_3156.json",
+      "bounds": [
+        -14164.3,
+        -21965.7,
+        -10306.1,
+        -18107.5
+      ],
+      "counts": {
+        "trails": 34,
+        "waterways": 18,
+        "lakes": 4,
+        "waterfalls": 0,
+        "buildings": 8,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1639,
+      "ty": 3157,
+      "file": "chunks/1639_3157.json",
+      "bounds": [
+        -14164.3,
+        -18107.5,
+        -10306.1,
+        -14249.3
+      ],
+      "counts": {
+        "trails": 34,
+        "waterways": 34,
+        "lakes": 9,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1639,
+      "ty": 3158,
+      "file": "chunks/1639_3158.json",
+      "bounds": [
+        -14164.3,
+        -14249.3,
+        -10306.1,
+        -10391.1
+      ],
+      "counts": {
+        "trails": 14,
+        "waterways": 74,
+        "lakes": 17,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1639,
+      "ty": 3159,
+      "file": "chunks/1639_3159.json",
+      "bounds": [
+        -14164.3,
+        -10391.1,
+        -10306.1,
+        -6532.9
+      ],
+      "counts": {
+        "trails": 18,
+        "waterways": 70,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1639,
+      "ty": 3160,
+      "file": "chunks/1639_3160.json",
+      "bounds": [
+        -14164.3,
+        -6532.9,
+        -10306.1,
+        -2674.7
+      ],
+      "counts": {
+        "trails": 38,
+        "waterways": 31,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 1
+      }
+    },
+    {
+      "tx": 1639,
+      "ty": 3161,
+      "file": "chunks/1639_3161.json",
+      "bounds": [
+        -14164.3,
+        -2674.7,
+        -10306.1,
+        1183.5
+      ],
+      "counts": {
+        "trails": 17,
+        "waterways": 21,
+        "lakes": 8,
+        "waterfalls": 0,
+        "buildings": 5,
+        "aerialways": 0,
+        "skiRuns": 1
+      }
+    },
+    {
+      "tx": 1639,
+      "ty": 3162,
+      "file": "chunks/1639_3162.json",
+      "bounds": [
+        -14164.3,
+        1183.5,
+        -10306.1,
+        5041.7
+      ],
+      "counts": {
+        "trails": 16,
+        "waterways": 53,
+        "lakes": 17,
+        "waterfalls": 0,
+        "buildings": 2,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1639,
+      "ty": 3163,
+      "file": "chunks/1639_3163.json",
+      "bounds": [
+        -14164.3,
+        5041.7,
+        -10306.1,
+        8899.9
+      ],
+      "counts": {
+        "trails": 7,
+        "waterways": 58,
+        "lakes": 7,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1639,
+      "ty": 3164,
+      "file": "chunks/1639_3164.json",
+      "bounds": [
+        -14164.3,
+        8899.9,
+        -10306.1,
+        12758.1
+      ],
+      "counts": {
+        "trails": 9,
+        "waterways": 127,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1639,
+      "ty": 3165,
+      "file": "chunks/1639_3165.json",
+      "bounds": [
+        -14164.3,
+        12758.1,
+        -10306.1,
+        16616.3
+      ],
+      "counts": {
+        "trails": 22,
+        "waterways": 71,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1639,
+      "ty": 3166,
+      "file": "chunks/1639_3166.json",
+      "bounds": [
+        -14164.3,
+        16616.3,
+        -10306.1,
+        20474.5
+      ],
+      "counts": {
+        "trails": 12,
+        "waterways": 31,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1639,
+      "ty": 3167,
+      "file": "chunks/1639_3167.json",
+      "bounds": [
+        -14164.3,
+        20474.5,
+        -10306.1,
+        24332.8
+      ],
+      "counts": {
+        "trails": 8,
+        "waterways": 90,
+        "lakes": 3,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1639,
+      "ty": 3168,
+      "file": "chunks/1639_3168.json",
+      "bounds": [
+        -14164.3,
+        24332.8,
+        -10306.1,
+        28191.0
+      ],
+      "counts": {
+        "trails": 6,
+        "waterways": 101,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1639,
+      "ty": 3169,
+      "file": "chunks/1639_3169.json",
+      "bounds": [
+        -14164.3,
+        28191.0,
+        -10306.1,
+        32049.2
+      ],
+      "counts": {
+        "trails": 5,
+        "waterways": 89,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1640,
+      "ty": 3156,
+      "file": "chunks/1640_3156.json",
+      "bounds": [
+        -10306.1,
+        -21965.7,
+        -6447.9,
+        -18107.5
+      ],
+      "counts": {
+        "trails": 12,
+        "waterways": 29,
+        "lakes": 18,
+        "waterfalls": 0,
+        "buildings": 11,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1640,
+      "ty": 3157,
+      "file": "chunks/1640_3157.json",
+      "bounds": [
+        -10306.1,
+        -18107.5,
+        -6447.9,
+        -14249.3
+      ],
+      "counts": {
+        "trails": 22,
+        "waterways": 38,
+        "lakes": 8,
+        "waterfalls": 0,
+        "buildings": 5,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1640,
+      "ty": 3158,
+      "file": "chunks/1640_3158.json",
+      "bounds": [
+        -10306.1,
+        -14249.3,
+        -6447.9,
+        -10391.1
+      ],
+      "counts": {
+        "trails": 15,
+        "waterways": 76,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1640,
+      "ty": 3159,
+      "file": "chunks/1640_3159.json",
+      "bounds": [
+        -10306.1,
+        -10391.1,
+        -6447.9,
+        -6532.9
+      ],
+      "counts": {
+        "trails": 3,
+        "waterways": 104,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1640,
+      "ty": 3160,
+      "file": "chunks/1640_3160.json",
+      "bounds": [
+        -10306.1,
+        -6532.9,
+        -6447.9,
+        -2674.7
+      ],
+      "counts": {
+        "trails": 44,
+        "waterways": 55,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 20,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1640,
+      "ty": 3161,
+      "file": "chunks/1640_3161.json",
+      "bounds": [
+        -10306.1,
+        -2674.7,
+        -6447.9,
+        1183.5
+      ],
+      "counts": {
+        "trails": 140,
+        "waterways": 52,
+        "lakes": 16,
+        "waterfalls": 0,
+        "buildings": 65,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1640,
+      "ty": 3162,
+      "file": "chunks/1640_3162.json",
+      "bounds": [
+        -10306.1,
+        1183.5,
+        -6447.9,
+        5041.7
+      ],
+      "counts": {
+        "trails": 45,
+        "waterways": 55,
+        "lakes": 17,
+        "waterfalls": 0,
+        "buildings": 12,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1640,
+      "ty": 3163,
+      "file": "chunks/1640_3163.json",
+      "bounds": [
+        -10306.1,
+        5041.7,
+        -6447.9,
+        8899.9
+      ],
+      "counts": {
+        "trails": 31,
+        "waterways": 79,
+        "lakes": 5,
+        "waterfalls": 0,
+        "buildings": 2,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1640,
+      "ty": 3164,
+      "file": "chunks/1640_3164.json",
+      "bounds": [
+        -10306.1,
+        8899.9,
+        -6447.9,
+        12758.1
+      ],
+      "counts": {
+        "trails": 48,
+        "waterways": 70,
+        "lakes": 9,
+        "waterfalls": 0,
+        "buildings": 2,
+        "aerialways": 0,
+        "skiRuns": 2
+      }
+    },
+    {
+      "tx": 1640,
+      "ty": 3165,
+      "file": "chunks/1640_3165.json",
+      "bounds": [
+        -10306.1,
+        12758.1,
+        -6447.9,
+        16616.3
+      ],
+      "counts": {
+        "trails": 49,
+        "waterways": 64,
+        "lakes": 6,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 15
+      }
+    },
+    {
+      "tx": 1640,
+      "ty": 3166,
+      "file": "chunks/1640_3166.json",
+      "bounds": [
+        -10306.1,
+        16616.3,
+        -6447.9,
+        20474.5
+      ],
+      "counts": {
+        "trails": 2,
+        "waterways": 57,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1640,
+      "ty": 3167,
+      "file": "chunks/1640_3167.json",
+      "bounds": [
+        -10306.1,
+        20474.5,
+        -6447.9,
+        24332.8
+      ],
+      "counts": {
+        "trails": 6,
+        "waterways": 76,
+        "lakes": 3,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1640,
+      "ty": 3168,
+      "file": "chunks/1640_3168.json",
+      "bounds": [
+        -10306.1,
+        24332.8,
+        -6447.9,
+        28191.0
+      ],
+      "counts": {
+        "trails": 15,
+        "waterways": 97,
+        "lakes": 14,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1640,
+      "ty": 3169,
+      "file": "chunks/1640_3169.json",
+      "bounds": [
+        -10306.1,
+        28191.0,
+        -6447.9,
+        32049.2
+      ],
+      "counts": {
+        "trails": 10,
+        "waterways": 75,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1641,
+      "ty": 3156,
+      "file": "chunks/1641_3156.json",
+      "bounds": [
+        -6447.9,
+        -21965.7,
+        -2589.7,
+        -18107.5
+      ],
+      "counts": {
+        "trails": 21,
+        "waterways": 57,
+        "lakes": 11,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1641,
+      "ty": 3157,
+      "file": "chunks/1641_3157.json",
+      "bounds": [
+        -6447.9,
+        -18107.5,
+        -2589.7,
+        -14249.3
+      ],
+      "counts": {
+        "trails": 9,
+        "waterways": 42,
+        "lakes": 11,
+        "waterfalls": 0,
+        "buildings": 2,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1641,
+      "ty": 3158,
+      "file": "chunks/1641_3158.json",
+      "bounds": [
+        -6447.9,
+        -14249.3,
+        -2589.7,
+        -10391.1
+      ],
+      "counts": {
+        "trails": 7,
+        "waterways": 90,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1641,
+      "ty": 3159,
+      "file": "chunks/1641_3159.json",
+      "bounds": [
+        -6447.9,
+        -10391.1,
+        -2589.7,
+        -6532.9
+      ],
+      "counts": {
+        "trails": 1,
+        "waterways": 49,
+        "lakes": 3,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1641,
+      "ty": 3160,
+      "file": "chunks/1641_3160.json",
+      "bounds": [
+        -6447.9,
+        -6532.9,
+        -2589.7,
+        -2674.7
+      ],
+      "counts": {
+        "trails": 56,
+        "waterways": 34,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 43,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1641,
+      "ty": 3161,
+      "file": "chunks/1641_3161.json",
+      "bounds": [
+        -6447.9,
+        -2674.7,
+        -2589.7,
+        1183.5
+      ],
+      "counts": {
+        "trails": 668,
+        "waterways": 85,
+        "lakes": 26,
+        "waterfalls": 0,
+        "buildings": 948,
+        "aerialways": 8,
+        "skiRuns": 158
+      }
+    },
+    {
+      "tx": 1641,
+      "ty": 3162,
+      "file": "chunks/1641_3162.json",
+      "bounds": [
+        -6447.9,
+        1183.5,
+        -2589.7,
+        5041.7
+      ],
+      "counts": {
+        "trails": 221,
+        "waterways": 90,
+        "lakes": 7,
+        "waterfalls": 0,
+        "buildings": 271,
+        "aerialways": 4,
+        "skiRuns": 70
+      }
+    },
+    {
+      "tx": 1641,
+      "ty": 3163,
+      "file": "chunks/1641_3163.json",
+      "bounds": [
+        -6447.9,
+        5041.7,
+        -2589.7,
+        8899.9
+      ],
+      "counts": {
+        "trails": 123,
+        "waterways": 78,
+        "lakes": 14,
+        "waterfalls": 2,
+        "buildings": 4,
+        "aerialways": 0,
+        "skiRuns": 1
+      }
+    },
+    {
+      "tx": 1641,
+      "ty": 3164,
+      "file": "chunks/1641_3164.json",
+      "bounds": [
+        -6447.9,
+        8899.9,
+        -2589.7,
+        12758.1
+      ],
+      "counts": {
+        "trails": 75,
+        "waterways": 90,
+        "lakes": 7,
+        "waterfalls": 0,
+        "buildings": 2,
+        "aerialways": 0,
+        "skiRuns": 83
+      }
+    },
+    {
+      "tx": 1641,
+      "ty": 3165,
+      "file": "chunks/1641_3165.json",
+      "bounds": [
+        -6447.9,
+        12758.1,
+        -2589.7,
+        16616.3
+      ],
+      "counts": {
+        "trails": 28,
+        "waterways": 56,
+        "lakes": 4,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 4
+      }
+    },
+    {
+      "tx": 1641,
+      "ty": 3166,
+      "file": "chunks/1641_3166.json",
+      "bounds": [
+        -6447.9,
+        16616.3,
+        -2589.7,
+        20474.5
+      ],
+      "counts": {
+        "trails": 3,
+        "waterways": 95,
+        "lakes": 7,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1641,
+      "ty": 3167,
+      "file": "chunks/1641_3167.json",
+      "bounds": [
+        -6447.9,
+        20474.5,
+        -2589.7,
+        24332.8
+      ],
+      "counts": {
+        "trails": 17,
+        "waterways": 112,
+        "lakes": 1,
+        "waterfalls": 1,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1641,
+      "ty": 3168,
+      "file": "chunks/1641_3168.json",
+      "bounds": [
+        -6447.9,
+        24332.8,
+        -2589.7,
+        28191.0
+      ],
+      "counts": {
+        "trails": 16,
+        "waterways": 74,
+        "lakes": 0,
+        "waterfalls": 1,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1641,
+      "ty": 3169,
+      "file": "chunks/1641_3169.json",
+      "bounds": [
+        -6447.9,
+        28191.0,
+        -2589.7,
+        32049.2
+      ],
+      "counts": {
+        "trails": 4,
+        "waterways": 72,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1642,
+      "ty": 3156,
+      "file": "chunks/1642_3156.json",
+      "bounds": [
+        -2589.7,
+        -21965.7,
+        1268.5,
+        -18107.5
+      ],
+      "counts": {
+        "trails": 30,
+        "waterways": 33,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 40,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1642,
+      "ty": 3157,
+      "file": "chunks/1642_3157.json",
+      "bounds": [
+        -2589.7,
+        -18107.5,
+        1268.5,
+        -14249.3
+      ],
+      "counts": {
+        "trails": 15,
+        "waterways": 39,
+        "lakes": 13,
+        "waterfalls": 0,
+        "buildings": 10,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1642,
+      "ty": 3158,
+      "file": "chunks/1642_3158.json",
+      "bounds": [
+        -2589.7,
+        -14249.3,
+        1268.5,
+        -10391.1
+      ],
+      "counts": {
+        "trails": 40,
+        "waterways": 84,
+        "lakes": 6,
+        "waterfalls": 0,
+        "buildings": 2,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1642,
+      "ty": 3159,
+      "file": "chunks/1642_3159.json",
+      "bounds": [
+        -2589.7,
+        -10391.1,
+        1268.5,
+        -6532.9
+      ],
+      "counts": {
+        "trails": 15,
+        "waterways": 53,
+        "lakes": 9,
+        "waterfalls": 3,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1642,
+      "ty": 3160,
+      "file": "chunks/1642_3160.json",
+      "bounds": [
+        -2589.7,
+        -6532.9,
+        1268.5,
+        -2674.7
+      ],
+      "counts": {
+        "trails": 16,
+        "waterways": 69,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1642,
+      "ty": 3161,
+      "file": "chunks/1642_3161.json",
+      "bounds": [
+        -2589.7,
+        -2674.7,
+        1268.5,
+        1183.5
+      ],
+      "counts": {
+        "trails": 643,
+        "waterways": 68,
+        "lakes": 5,
+        "waterfalls": 0,
+        "buildings": 1249,
+        "aerialways": 6,
+        "skiRuns": 124
+      }
+    },
+    {
+      "tx": 1642,
+      "ty": 3162,
+      "file": "chunks/1642_3162.json",
+      "bounds": [
+        -2589.7,
+        1183.5,
+        1268.5,
+        5041.7
+      ],
+      "counts": {
+        "trails": 86,
+        "waterways": 56,
+        "lakes": 4,
+        "waterfalls": 1,
+        "buildings": 10,
+        "aerialways": 7,
+        "skiRuns": 113
+      }
+    },
+    {
+      "tx": 1642,
+      "ty": 3163,
+      "file": "chunks/1642_3163.json",
+      "bounds": [
+        -2589.7,
+        5041.7,
+        1268.5,
+        8899.9
+      ],
+      "counts": {
+        "trails": 59,
+        "waterways": 62,
+        "lakes": 5,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 1,
+        "skiRuns": 28
+      }
+    },
+    {
+      "tx": 1642,
+      "ty": 3164,
+      "file": "chunks/1642_3164.json",
+      "bounds": [
+        -2589.7,
+        8899.9,
+        1268.5,
+        12758.1
+      ],
+      "counts": {
+        "trails": 95,
+        "waterways": 80,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 2,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1642,
+      "ty": 3165,
+      "file": "chunks/1642_3165.json",
+      "bounds": [
+        -2589.7,
+        12758.1,
+        1268.5,
+        16616.3
+      ],
+      "counts": {
+        "trails": 49,
+        "waterways": 107,
+        "lakes": 12,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1642,
+      "ty": 3166,
+      "file": "chunks/1642_3166.json",
+      "bounds": [
+        -2589.7,
+        16616.3,
+        1268.5,
+        20474.5
+      ],
+      "counts": {
+        "trails": 21,
+        "waterways": 64,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1642,
+      "ty": 3167,
+      "file": "chunks/1642_3167.json",
+      "bounds": [
+        -2589.7,
+        20474.5,
+        1268.5,
+        24332.8
+      ],
+      "counts": {
+        "trails": 22,
+        "waterways": 166,
+        "lakes": 16,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1642,
+      "ty": 3168,
+      "file": "chunks/1642_3168.json",
+      "bounds": [
+        -2589.7,
+        24332.8,
+        1268.5,
+        28191.0
+      ],
+      "counts": {
+        "trails": 20,
+        "waterways": 141,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1642,
+      "ty": 3169,
+      "file": "chunks/1642_3169.json",
+      "bounds": [
+        -2589.7,
+        28191.0,
+        1268.5,
+        32049.2
+      ],
+      "counts": {
+        "trails": 72,
+        "waterways": 55,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 36,
+        "aerialways": 0,
+        "skiRuns": 1
+      }
+    },
+    {
+      "tx": 1643,
+      "ty": 3156,
+      "file": "chunks/1643_3156.json",
+      "bounds": [
+        1268.5,
+        -21965.7,
+        5126.7,
+        -18107.5
+      ],
+      "counts": {
+        "trails": 40,
+        "waterways": 48,
+        "lakes": 10,
+        "waterfalls": 0,
+        "buildings": 24,
+        "aerialways": 0,
+        "skiRuns": 7
+      }
+    },
+    {
+      "tx": 1643,
+      "ty": 3157,
+      "file": "chunks/1643_3157.json",
+      "bounds": [
+        1268.5,
+        -18107.5,
+        5126.7,
+        -14249.3
+      ],
+      "counts": {
+        "trails": 65,
+        "waterways": 31,
+        "lakes": 5,
+        "waterfalls": 0,
+        "buildings": 119,
+        "aerialways": 0,
+        "skiRuns": 1
+      }
+    },
+    {
+      "tx": 1643,
+      "ty": 3158,
+      "file": "chunks/1643_3158.json",
+      "bounds": [
+        1268.5,
+        -14249.3,
+        5126.7,
+        -10391.1
+      ],
+      "counts": {
+        "trails": 9,
+        "waterways": 78,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 1
+      }
+    },
+    {
+      "tx": 1643,
+      "ty": 3159,
+      "file": "chunks/1643_3159.json",
+      "bounds": [
+        1268.5,
+        -10391.1,
+        5126.7,
+        -6532.9
+      ],
+      "counts": {
+        "trails": 10,
+        "waterways": 53,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1643,
+      "ty": 3160,
+      "file": "chunks/1643_3160.json",
+      "bounds": [
+        1268.5,
+        -6532.9,
+        5126.7,
+        -2674.7
+      ],
+      "counts": {
+        "trails": 64,
+        "waterways": 41,
+        "lakes": 3,
+        "waterfalls": 6,
+        "buildings": 2,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1643,
+      "ty": 3161,
+      "file": "chunks/1643_3161.json",
+      "bounds": [
+        1268.5,
+        -2674.7,
+        5126.7,
+        1183.5
+      ],
+      "counts": {
+        "trails": 76,
+        "waterways": 69,
+        "lakes": 6,
+        "waterfalls": 0,
+        "buildings": 34,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1643,
+      "ty": 3162,
+      "file": "chunks/1643_3162.json",
+      "bounds": [
+        1268.5,
+        1183.5,
+        5126.7,
+        5041.7
+      ],
+      "counts": {
+        "trails": 45,
+        "waterways": 91,
+        "lakes": 6,
+        "waterfalls": 3,
+        "buildings": 3,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1643,
+      "ty": 3163,
+      "file": "chunks/1643_3163.json",
+      "bounds": [
+        1268.5,
+        5041.7,
+        5126.7,
+        8899.9
+      ],
+      "counts": {
+        "trails": 25,
+        "waterways": 110,
+        "lakes": 26,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1643,
+      "ty": 3164,
+      "file": "chunks/1643_3164.json",
+      "bounds": [
+        1268.5,
+        8899.9,
+        5126.7,
+        12758.1
+      ],
+      "counts": {
+        "trails": 29,
+        "waterways": 86,
+        "lakes": 7,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1643,
+      "ty": 3165,
+      "file": "chunks/1643_3165.json",
+      "bounds": [
+        1268.5,
+        12758.1,
+        5126.7,
+        16616.3
+      ],
+      "counts": {
+        "trails": 48,
+        "waterways": 121,
+        "lakes": 4,
+        "waterfalls": 1,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1643,
+      "ty": 3166,
+      "file": "chunks/1643_3166.json",
+      "bounds": [
+        1268.5,
+        16616.3,
+        5126.7,
+        20474.5
+      ],
+      "counts": {
+        "trails": 11,
+        "waterways": 69,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 2,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1643,
+      "ty": 3167,
+      "file": "chunks/1643_3167.json",
+      "bounds": [
+        1268.5,
+        20474.5,
+        5126.7,
+        24332.8
+      ],
+      "counts": {
+        "trails": 13,
+        "waterways": 90,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1643,
+      "ty": 3168,
+      "file": "chunks/1643_3168.json",
+      "bounds": [
+        1268.5,
+        24332.8,
+        5126.7,
+        28191.0
+      ],
+      "counts": {
+        "trails": 22,
+        "waterways": 121,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1643,
+      "ty": 3169,
+      "file": "chunks/1643_3169.json",
+      "bounds": [
+        1268.5,
+        28191.0,
+        5126.7,
+        32049.2
+      ],
+      "counts": {
+        "trails": 25,
+        "waterways": 182,
+        "lakes": 16,
+        "waterfalls": 0,
+        "buildings": 12,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1644,
+      "ty": 3156,
+      "file": "chunks/1644_3156.json",
+      "bounds": [
+        5126.7,
+        -21965.7,
+        8984.9,
+        -18107.5
+      ],
+      "counts": {
+        "trails": 63,
+        "waterways": 34,
+        "lakes": 6,
+        "waterfalls": 0,
+        "buildings": 154,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1644,
+      "ty": 3157,
+      "file": "chunks/1644_3157.json",
+      "bounds": [
+        5126.7,
+        -18107.5,
+        8984.9,
+        -14249.3
+      ],
+      "counts": {
+        "trails": 88,
+        "waterways": 55,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 138,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1644,
+      "ty": 3158,
+      "file": "chunks/1644_3158.json",
+      "bounds": [
+        5126.7,
+        -14249.3,
+        8984.9,
+        -10391.1
+      ],
+      "counts": {
+        "trails": 17,
+        "waterways": 123,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1644,
+      "ty": 3159,
+      "file": "chunks/1644_3159.json",
+      "bounds": [
+        5126.7,
+        -10391.1,
+        8984.9,
+        -6532.9
+      ],
+      "counts": {
+        "trails": 2,
+        "waterways": 235,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1644,
+      "ty": 3160,
+      "file": "chunks/1644_3160.json",
+      "bounds": [
+        5126.7,
+        -6532.9,
+        8984.9,
+        -2674.7
+      ],
+      "counts": {
+        "trails": 40,
+        "waterways": 67,
+        "lakes": 5,
+        "waterfalls": 0,
+        "buildings": 10,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1644,
+      "ty": 3161,
+      "file": "chunks/1644_3161.json",
+      "bounds": [
+        5126.7,
+        -2674.7,
+        8984.9,
+        1183.5
+      ],
+      "counts": {
+        "trails": 122,
+        "waterways": 38,
+        "lakes": 2,
+        "waterfalls": 1,
+        "buildings": 2,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1644,
+      "ty": 3162,
+      "file": "chunks/1644_3162.json",
+      "bounds": [
+        5126.7,
+        1183.5,
+        8984.9,
+        5041.7
+      ],
+      "counts": {
+        "trails": 73,
+        "waterways": 86,
+        "lakes": 34,
+        "waterfalls": 0,
+        "buildings": 2,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1644,
+      "ty": 3163,
+      "file": "chunks/1644_3163.json",
+      "bounds": [
+        5126.7,
+        5041.7,
+        8984.9,
+        8899.9
+      ],
+      "counts": {
+        "trails": 63,
+        "waterways": 116,
+        "lakes": 7,
+        "waterfalls": 1,
+        "buildings": 14,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1644,
+      "ty": 3164,
+      "file": "chunks/1644_3164.json",
+      "bounds": [
+        5126.7,
+        8899.9,
+        8984.9,
+        12758.1
+      ],
+      "counts": {
+        "trails": 20,
+        "waterways": 144,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 3,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1644,
+      "ty": 3165,
+      "file": "chunks/1644_3165.json",
+      "bounds": [
+        5126.7,
+        12758.1,
+        8984.9,
+        16616.3
+      ],
+      "counts": {
+        "trails": 13,
+        "waterways": 140,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 3,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1644,
+      "ty": 3166,
+      "file": "chunks/1644_3166.json",
+      "bounds": [
+        5126.7,
+        16616.3,
+        8984.9,
+        20474.5
+      ],
+      "counts": {
+        "trails": 16,
+        "waterways": 62,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1644,
+      "ty": 3167,
+      "file": "chunks/1644_3167.json",
+      "bounds": [
+        5126.7,
+        20474.5,
+        8984.9,
+        24332.8
+      ],
+      "counts": {
+        "trails": 72,
+        "waterways": 65,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1644,
+      "ty": 3168,
+      "file": "chunks/1644_3168.json",
+      "bounds": [
+        5126.7,
+        24332.8,
+        8984.9,
+        28191.0
+      ],
+      "counts": {
+        "trails": 5,
+        "waterways": 122,
+        "lakes": 5,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1644,
+      "ty": 3169,
+      "file": "chunks/1644_3169.json",
+      "bounds": [
+        5126.7,
+        28191.0,
+        8984.9,
+        32049.2
+      ],
+      "counts": {
+        "trails": 26,
+        "waterways": 203,
+        "lakes": 6,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1645,
+      "ty": 3156,
+      "file": "chunks/1645_3156.json",
+      "bounds": [
+        8984.9,
+        -21965.7,
+        12843.1,
+        -18107.5
+      ],
+      "counts": {
+        "trails": 1,
+        "waterways": 70,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1645,
+      "ty": 3157,
+      "file": "chunks/1645_3157.json",
+      "bounds": [
+        8984.9,
+        -18107.5,
+        12843.1,
+        -14249.3
+      ],
+      "counts": {
+        "trails": 165,
+        "waterways": 69,
+        "lakes": 4,
+        "waterfalls": 0,
+        "buildings": 174,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1645,
+      "ty": 3158,
+      "file": "chunks/1645_3158.json",
+      "bounds": [
+        8984.9,
+        -14249.3,
+        12843.1,
+        -10391.1
+      ],
+      "counts": {
+        "trails": 207,
+        "waterways": 70,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 242,
+        "aerialways": 0,
+        "skiRuns": 9
+      }
+    },
+    {
+      "tx": 1645,
+      "ty": 3159,
+      "file": "chunks/1645_3159.json",
+      "bounds": [
+        8984.9,
+        -10391.1,
+        12843.1,
+        -6532.9
+      ],
+      "counts": {
+        "trails": 667,
+        "waterways": 167,
+        "lakes": 4,
+        "waterfalls": 0,
+        "buildings": 590,
+        "aerialways": 1,
+        "skiRuns": 2
+      }
+    },
+    {
+      "tx": 1645,
+      "ty": 3160,
+      "file": "chunks/1645_3160.json",
+      "bounds": [
+        8984.9,
+        -6532.9,
+        12843.1,
+        -2674.7
+      ],
+      "counts": {
+        "trails": 7,
+        "waterways": 96,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 2,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1645,
+      "ty": 3161,
+      "file": "chunks/1645_3161.json",
+      "bounds": [
+        8984.9,
+        -2674.7,
+        12843.1,
+        1183.5
+      ],
+      "counts": {
+        "trails": 70,
+        "waterways": 80,
+        "lakes": 5,
+        "waterfalls": 0,
+        "buildings": 7,
+        "aerialways": 0,
+        "skiRuns": 26
+      }
+    },
+    {
+      "tx": 1645,
+      "ty": 3162,
+      "file": "chunks/1645_3162.json",
+      "bounds": [
+        8984.9,
+        1183.5,
+        12843.1,
+        5041.7
+      ],
+      "counts": {
+        "trails": 145,
+        "waterways": 126,
+        "lakes": 6,
+        "waterfalls": 0,
+        "buildings": 25,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1645,
+      "ty": 3163,
+      "file": "chunks/1645_3163.json",
+      "bounds": [
+        8984.9,
+        5041.7,
+        12843.1,
+        8899.9
+      ],
+      "counts": {
+        "trails": 36,
+        "waterways": 138,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 13,
+        "aerialways": 0,
+        "skiRuns": 6
+      }
+    },
+    {
+      "tx": 1645,
+      "ty": 3164,
+      "file": "chunks/1645_3164.json",
+      "bounds": [
+        8984.9,
+        8899.9,
+        12843.1,
+        12758.1
+      ],
+      "counts": {
+        "trails": 40,
+        "waterways": 151,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 2,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1645,
+      "ty": 3165,
+      "file": "chunks/1645_3165.json",
+      "bounds": [
+        8984.9,
+        12758.1,
+        12843.1,
+        16616.3
+      ],
+      "counts": {
+        "trails": 268,
+        "waterways": 71,
+        "lakes": 11,
+        "waterfalls": 0,
+        "buildings": 221,
+        "aerialways": 0,
+        "skiRuns": 3
+      }
+    },
+    {
+      "tx": 1645,
+      "ty": 3166,
+      "file": "chunks/1645_3166.json",
+      "bounds": [
+        8984.9,
+        16616.3,
+        12843.1,
+        20474.5
+      ],
+      "counts": {
+        "trails": 33,
+        "waterways": 68,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 2,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1645,
+      "ty": 3167,
+      "file": "chunks/1645_3167.json",
+      "bounds": [
+        8984.9,
+        20474.5,
+        12843.1,
+        24332.8
+      ],
+      "counts": {
+        "trails": 135,
+        "waterways": 161,
+        "lakes": 10,
+        "waterfalls": 0,
+        "buildings": 4,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1645,
+      "ty": 3168,
+      "file": "chunks/1645_3168.json",
+      "bounds": [
+        8984.9,
+        24332.8,
+        12843.1,
+        28191.0
+      ],
+      "counts": {
+        "trails": 3,
+        "waterways": 251,
+        "lakes": 27,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1645,
+      "ty": 3169,
+      "file": "chunks/1645_3169.json",
+      "bounds": [
+        8984.9,
+        28191.0,
+        12843.1,
+        32049.2
+      ],
+      "counts": {
+        "trails": 1,
+        "waterways": 299,
+        "lakes": 3,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1646,
+      "ty": 3156,
+      "file": "chunks/1646_3156.json",
+      "bounds": [
+        12843.1,
+        -21965.7,
+        16701.3,
+        -18107.5
+      ],
+      "counts": {
+        "trails": 1,
+        "waterways": 139,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1646,
+      "ty": 3157,
+      "file": "chunks/1646_3157.json",
+      "bounds": [
+        12843.1,
+        -18107.5,
+        16701.3,
+        -14249.3
+      ],
+      "counts": {
+        "trails": 12,
+        "waterways": 162,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1646,
+      "ty": 3158,
+      "file": "chunks/1646_3158.json",
+      "bounds": [
+        12843.1,
+        -14249.3,
+        16701.3,
+        -10391.1
+      ],
+      "counts": {
+        "trails": 20,
+        "waterways": 226,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1646,
+      "ty": 3159,
+      "file": "chunks/1646_3159.json",
+      "bounds": [
+        12843.1,
+        -10391.1,
+        16701.3,
+        -6532.9
+      ],
+      "counts": {
+        "trails": 106,
+        "waterways": 198,
+        "lakes": 1,
+        "waterfalls": 3,
+        "buildings": 5,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1646,
+      "ty": 3160,
+      "file": "chunks/1646_3160.json",
+      "bounds": [
+        12843.1,
+        -6532.9,
+        16701.3,
+        -2674.7
+      ],
+      "counts": {
+        "trails": 19,
+        "waterways": 72,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1646,
+      "ty": 3161,
+      "file": "chunks/1646_3161.json",
+      "bounds": [
+        12843.1,
+        -2674.7,
+        16701.3,
+        1183.5
+      ],
+      "counts": {
+        "trails": 113,
+        "waterways": 85,
+        "lakes": 8,
+        "waterfalls": 0,
+        "buildings": 3,
+        "aerialways": 0,
+        "skiRuns": 5
+      }
+    },
+    {
+      "tx": 1646,
+      "ty": 3162,
+      "file": "chunks/1646_3162.json",
+      "bounds": [
+        12843.1,
+        1183.5,
+        16701.3,
+        5041.7
+      ],
+      "counts": {
+        "trails": 50,
+        "waterways": 67,
+        "lakes": 10,
+        "waterfalls": 0,
+        "buildings": 4,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1646,
+      "ty": 3163,
+      "file": "chunks/1646_3163.json",
+      "bounds": [
+        12843.1,
+        5041.7,
+        16701.3,
+        8899.9
+      ],
+      "counts": {
+        "trails": 45,
+        "waterways": 16,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 11,
+        "aerialways": 1,
+        "skiRuns": 55
+      }
+    },
+    {
+      "tx": 1646,
+      "ty": 3164,
+      "file": "chunks/1646_3164.json",
+      "bounds": [
+        12843.1,
+        8899.9,
+        16701.3,
+        12758.1
+      ],
+      "counts": {
+        "trails": 36,
+        "waterways": 34,
+        "lakes": 4,
+        "waterfalls": 0,
+        "buildings": 7,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1646,
+      "ty": 3165,
+      "file": "chunks/1646_3165.json",
+      "bounds": [
+        12843.1,
+        12758.1,
+        16701.3,
+        16616.3
+      ],
+      "counts": {
+        "trails": 547,
+        "waterways": 21,
+        "lakes": 8,
+        "waterfalls": 0,
+        "buildings": 525,
+        "aerialways": 1,
+        "skiRuns": 35
+      }
+    },
+    {
+      "tx": 1646,
+      "ty": 3166,
+      "file": "chunks/1646_3166.json",
+      "bounds": [
+        12843.1,
+        16616.3,
+        16701.3,
+        20474.5
+      ],
+      "counts": {
+        "trails": 15,
+        "waterways": 35,
+        "lakes": 6,
+        "waterfalls": 0,
+        "buildings": 3,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1646,
+      "ty": 3167,
+      "file": "chunks/1646_3167.json",
+      "bounds": [
+        12843.1,
+        20474.5,
+        16701.3,
+        24332.8
+      ],
+      "counts": {
+        "trails": 7,
+        "waterways": 283,
+        "lakes": 3,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1646,
+      "ty": 3168,
+      "file": "chunks/1646_3168.json",
+      "bounds": [
+        12843.1,
+        24332.8,
+        16701.3,
+        28191.0
+      ],
+      "counts": {
+        "trails": 0,
+        "waterways": 221,
+        "lakes": 6,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1646,
+      "ty": 3169,
+      "file": "chunks/1646_3169.json",
+      "bounds": [
+        12843.1,
+        28191.0,
+        16701.3,
+        32049.2
+      ],
+      "counts": {
+        "trails": 0,
+        "waterways": 206,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1647,
+      "ty": 3156,
+      "file": "chunks/1647_3156.json",
+      "bounds": [
+        16701.3,
+        -21965.7,
+        20559.5,
+        -18107.5
+      ],
+      "counts": {
+        "trails": 1,
+        "waterways": 140,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1647,
+      "ty": 3157,
+      "file": "chunks/1647_3157.json",
+      "bounds": [
+        16701.3,
+        -18107.5,
+        20559.5,
+        -14249.3
+      ],
+      "counts": {
+        "trails": 4,
+        "waterways": 144,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1647,
+      "ty": 3158,
+      "file": "chunks/1647_3158.json",
+      "bounds": [
+        16701.3,
+        -14249.3,
+        20559.5,
+        -10391.1
+      ],
+      "counts": {
+        "trails": 3,
+        "waterways": 183,
+        "lakes": 0,
+        "waterfalls": 2,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1647,
+      "ty": 3159,
+      "file": "chunks/1647_3159.json",
+      "bounds": [
+        16701.3,
+        -10391.1,
+        20559.5,
+        -6532.9
+      ],
+      "counts": {
+        "trails": 16,
+        "waterways": 148,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1647,
+      "ty": 3160,
+      "file": "chunks/1647_3160.json",
+      "bounds": [
+        16701.3,
+        -6532.9,
+        20559.5,
+        -2674.7
+      ],
+      "counts": {
+        "trails": 55,
+        "waterways": 80,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 2,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1647,
+      "ty": 3161,
+      "file": "chunks/1647_3161.json",
+      "bounds": [
+        16701.3,
+        -2674.7,
+        20559.5,
+        1183.5
+      ],
+      "counts": {
+        "trails": 48,
+        "waterways": 62,
+        "lakes": 22,
+        "waterfalls": 0,
+        "buildings": 5,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1647,
+      "ty": 3162,
+      "file": "chunks/1647_3162.json",
+      "bounds": [
+        16701.3,
+        1183.5,
+        20559.5,
+        5041.7
+      ],
+      "counts": {
+        "trails": 52,
+        "waterways": 29,
+        "lakes": 4,
+        "waterfalls": 0,
+        "buildings": 2,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1647,
+      "ty": 3163,
+      "file": "chunks/1647_3163.json",
+      "bounds": [
+        16701.3,
+        5041.7,
+        20559.5,
+        8899.9
+      ],
+      "counts": {
+        "trails": 13,
+        "waterways": 23,
+        "lakes": 2,
+        "waterfalls": 1,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1647,
+      "ty": 3164,
+      "file": "chunks/1647_3164.json",
+      "bounds": [
+        16701.3,
+        8899.9,
+        20559.5,
+        12758.1
+      ],
+      "counts": {
+        "trails": 34,
+        "waterways": 17,
+        "lakes": 4,
+        "waterfalls": 0,
+        "buildings": 24,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1647,
+      "ty": 3165,
+      "file": "chunks/1647_3165.json",
+      "bounds": [
+        16701.3,
+        12758.1,
+        20559.5,
+        16616.3
+      ],
+      "counts": {
+        "trails": 66,
+        "waterways": 21,
+        "lakes": 6,
+        "waterfalls": 1,
+        "buildings": 7,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1647,
+      "ty": 3166,
+      "file": "chunks/1647_3166.json",
+      "bounds": [
+        16701.3,
+        16616.3,
+        20559.5,
+        20474.5
+      ],
+      "counts": {
+        "trails": 46,
+        "waterways": 125,
+        "lakes": 7,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1647,
+      "ty": 3167,
+      "file": "chunks/1647_3167.json",
+      "bounds": [
+        16701.3,
+        20474.5,
+        20559.5,
+        24332.8
+      ],
+      "counts": {
+        "trails": 17,
+        "waterways": 184,
+        "lakes": 13,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1647,
+      "ty": 3168,
+      "file": "chunks/1647_3168.json",
+      "bounds": [
+        16701.3,
+        24332.8,
+        20559.5,
+        28191.0
+      ],
+      "counts": {
+        "trails": 9,
+        "waterways": 179,
+        "lakes": 7,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1647,
+      "ty": 3169,
+      "file": "chunks/1647_3169.json",
+      "bounds": [
+        16701.3,
+        28191.0,
+        20559.5,
+        32049.2
+      ],
+      "counts": {
+        "trails": 2,
+        "waterways": 145,
+        "lakes": 7,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1648,
+      "ty": 3156,
+      "file": "chunks/1648_3156.json",
+      "bounds": [
+        20559.5,
+        -21965.7,
+        24417.8,
+        -18107.5
+      ],
+      "counts": {
+        "trails": 7,
+        "waterways": 181,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1648,
+      "ty": 3157,
+      "file": "chunks/1648_3157.json",
+      "bounds": [
+        20559.5,
+        -18107.5,
+        24417.8,
+        -14249.3
+      ],
+      "counts": {
+        "trails": 3,
+        "waterways": 151,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1648,
+      "ty": 3158,
+      "file": "chunks/1648_3158.json",
+      "bounds": [
+        20559.5,
+        -14249.3,
+        24417.8,
+        -10391.1
+      ],
+      "counts": {
+        "trails": 2,
+        "waterways": 152,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1648,
+      "ty": 3159,
+      "file": "chunks/1648_3159.json",
+      "bounds": [
+        20559.5,
+        -10391.1,
+        24417.8,
+        -6532.9
+      ],
+      "counts": {
+        "trails": 2,
+        "waterways": 64,
+        "lakes": 5,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1648,
+      "ty": 3160,
+      "file": "chunks/1648_3160.json",
+      "bounds": [
+        20559.5,
+        -6532.9,
+        24417.8,
+        -2674.7
+      ],
+      "counts": {
+        "trails": 42,
+        "waterways": 31,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 7,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1648,
+      "ty": 3161,
+      "file": "chunks/1648_3161.json",
+      "bounds": [
+        20559.5,
+        -2674.7,
+        24417.8,
+        1183.5
+      ],
+      "counts": {
+        "trails": 83,
+        "waterways": 19,
+        "lakes": 4,
+        "waterfalls": 0,
+        "buildings": 13,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1648,
+      "ty": 3162,
+      "file": "chunks/1648_3162.json",
+      "bounds": [
+        20559.5,
+        1183.5,
+        24417.8,
+        5041.7
+      ],
+      "counts": {
+        "trails": 45,
+        "waterways": 15,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 2,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1648,
+      "ty": 3163,
+      "file": "chunks/1648_3163.json",
+      "bounds": [
+        20559.5,
+        5041.7,
+        24417.8,
+        8899.9
+      ],
+      "counts": {
+        "trails": 42,
+        "waterways": 15,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 6,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1648,
+      "ty": 3164,
+      "file": "chunks/1648_3164.json",
+      "bounds": [
+        20559.5,
+        8899.9,
+        24417.8,
+        12758.1
+      ],
+      "counts": {
+        "trails": 28,
+        "waterways": 10,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 5,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1648,
+      "ty": 3165,
+      "file": "chunks/1648_3165.json",
+      "bounds": [
+        20559.5,
+        12758.1,
+        24417.8,
+        16616.3
+      ],
+      "counts": {
+        "trails": 62,
+        "waterways": 46,
+        "lakes": 5,
+        "waterfalls": 0,
+        "buildings": 3,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1648,
+      "ty": 3166,
+      "file": "chunks/1648_3166.json",
+      "bounds": [
+        20559.5,
+        16616.3,
+        24417.8,
+        20474.5
+      ],
+      "counts": {
+        "trails": 23,
+        "waterways": 140,
+        "lakes": 19,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1648,
+      "ty": 3167,
+      "file": "chunks/1648_3167.json",
+      "bounds": [
+        20559.5,
+        20474.5,
+        24417.8,
+        24332.8
+      ],
+      "counts": {
+        "trails": 16,
+        "waterways": 146,
+        "lakes": 10,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1648,
+      "ty": 3168,
+      "file": "chunks/1648_3168.json",
+      "bounds": [
+        20559.5,
+        24332.8,
+        24417.8,
+        28191.0
+      ],
+      "counts": {
+        "trails": 7,
+        "waterways": 134,
+        "lakes": 10,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1648,
+      "ty": 3169,
+      "file": "chunks/1648_3169.json",
+      "bounds": [
+        20559.5,
+        28191.0,
+        24417.8,
+        32049.2
+      ],
+      "counts": {
+        "trails": 3,
+        "waterways": 129,
+        "lakes": 9,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1649,
+      "ty": 3156,
+      "file": "chunks/1649_3156.json",
+      "bounds": [
+        24417.8,
+        -21965.7,
+        28276.0,
+        -18107.5
+      ],
+      "counts": {
+        "trails": 4,
+        "waterways": 157,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1649,
+      "ty": 3157,
+      "file": "chunks/1649_3157.json",
+      "bounds": [
+        24417.8,
+        -18107.5,
+        28276.0,
+        -14249.3
+      ],
+      "counts": {
+        "trails": 6,
+        "waterways": 160,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1649,
+      "ty": 3158,
+      "file": "chunks/1649_3158.json",
+      "bounds": [
+        24417.8,
+        -14249.3,
+        28276.0,
+        -10391.1
+      ],
+      "counts": {
+        "trails": 20,
+        "waterways": 55,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1649,
+      "ty": 3159,
+      "file": "chunks/1649_3159.json",
+      "bounds": [
+        24417.8,
+        -10391.1,
+        28276.0,
+        -6532.9
+      ],
+      "counts": {
+        "trails": 15,
+        "waterways": 49,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1649,
+      "ty": 3160,
+      "file": "chunks/1649_3160.json",
+      "bounds": [
+        24417.8,
+        -6532.9,
+        28276.0,
+        -2674.7
+      ],
+      "counts": {
+        "trails": 9,
+        "waterways": 16,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1649,
+      "ty": 3161,
+      "file": "chunks/1649_3161.json",
+      "bounds": [
+        24417.8,
+        -2674.7,
+        28276.0,
+        1183.5
+      ],
+      "counts": {
+        "trails": 24,
+        "waterways": 18,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 5,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1649,
+      "ty": 3162,
+      "file": "chunks/1649_3162.json",
+      "bounds": [
+        24417.8,
+        1183.5,
+        28276.0,
+        5041.7
+      ],
+      "counts": {
+        "trails": 11,
+        "waterways": 24,
+        "lakes": 12,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1649,
+      "ty": 3163,
+      "file": "chunks/1649_3163.json",
+      "bounds": [
+        24417.8,
+        5041.7,
+        28276.0,
+        8899.9
+      ],
+      "counts": {
+        "trails": 5,
+        "waterways": 41,
+        "lakes": 12,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1649,
+      "ty": 3164,
+      "file": "chunks/1649_3164.json",
+      "bounds": [
+        24417.8,
+        8899.9,
+        28276.0,
+        12758.1
+      ],
+      "counts": {
+        "trails": 8,
+        "waterways": 56,
+        "lakes": 11,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1649,
+      "ty": 3165,
+      "file": "chunks/1649_3165.json",
+      "bounds": [
+        24417.8,
+        12758.1,
+        28276.0,
+        16616.3
+      ],
+      "counts": {
+        "trails": 10,
+        "waterways": 72,
+        "lakes": 8,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1649,
+      "ty": 3166,
+      "file": "chunks/1649_3166.json",
+      "bounds": [
+        24417.8,
+        16616.3,
+        28276.0,
+        20474.5
+      ],
+      "counts": {
+        "trails": 5,
+        "waterways": 91,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1649,
+      "ty": 3167,
+      "file": "chunks/1649_3167.json",
+      "bounds": [
+        24417.8,
+        20474.5,
+        28276.0,
+        24332.8
+      ],
+      "counts": {
+        "trails": 12,
+        "waterways": 98,
+        "lakes": 5,
+        "waterfalls": 1,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1649,
+      "ty": 3168,
+      "file": "chunks/1649_3168.json",
+      "bounds": [
+        24417.8,
+        24332.8,
+        28276.0,
+        28191.0
+      ],
+      "counts": {
+        "trails": 22,
+        "waterways": 122,
+        "lakes": 11,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1649,
+      "ty": 3169,
+      "file": "chunks/1649_3169.json",
+      "bounds": [
+        24417.8,
+        28191.0,
+        28276.0,
+        32049.2
+      ],
+      "counts": {
+        "trails": 5,
+        "waterways": 94,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1650,
+      "ty": 3156,
+      "file": "chunks/1650_3156.json",
+      "bounds": [
+        28276.0,
+        -21965.7,
+        32134.2,
+        -18107.5
+      ],
+      "counts": {
+        "trails": 2,
+        "waterways": 90,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1650,
+      "ty": 3157,
+      "file": "chunks/1650_3157.json",
+      "bounds": [
+        28276.0,
+        -18107.5,
+        32134.2,
+        -14249.3
+      ],
+      "counts": {
+        "trails": 7,
+        "waterways": 86,
+        "lakes": 4,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1650,
+      "ty": 3158,
+      "file": "chunks/1650_3158.json",
+      "bounds": [
+        28276.0,
+        -14249.3,
+        32134.2,
+        -10391.1
+      ],
+      "counts": {
+        "trails": 17,
+        "waterways": 94,
+        "lakes": 5,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1650,
+      "ty": 3159,
+      "file": "chunks/1650_3159.json",
+      "bounds": [
+        28276.0,
+        -10391.1,
+        32134.2,
+        -6532.9
+      ],
+      "counts": {
+        "trails": 28,
+        "waterways": 23,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 11,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1650,
+      "ty": 3160,
+      "file": "chunks/1650_3160.json",
+      "bounds": [
+        28276.0,
+        -6532.9,
+        32134.2,
+        -2674.7
+      ],
+      "counts": {
+        "trails": 7,
+        "waterways": 23,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1650,
+      "ty": 3161,
+      "file": "chunks/1650_3161.json",
+      "bounds": [
+        28276.0,
+        -2674.7,
+        32134.2,
+        1183.5
+      ],
+      "counts": {
+        "trails": 26,
+        "waterways": 32,
+        "lakes": 4,
+        "waterfalls": 0,
+        "buildings": 7,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1650,
+      "ty": 3162,
+      "file": "chunks/1650_3162.json",
+      "bounds": [
+        28276.0,
+        1183.5,
+        32134.2,
+        5041.7
+      ],
+      "counts": {
+        "trails": 4,
+        "waterways": 25,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1650,
+      "ty": 3163,
+      "file": "chunks/1650_3163.json",
+      "bounds": [
+        28276.0,
+        5041.7,
+        32134.2,
+        8899.9
+      ],
+      "counts": {
+        "trails": 3,
+        "waterways": 24,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1650,
+      "ty": 3164,
+      "file": "chunks/1650_3164.json",
+      "bounds": [
+        28276.0,
+        8899.9,
+        32134.2,
+        12758.1
+      ],
+      "counts": {
+        "trails": 7,
+        "waterways": 54,
+        "lakes": 5,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1650,
+      "ty": 3165,
+      "file": "chunks/1650_3165.json",
+      "bounds": [
+        28276.0,
+        12758.1,
+        32134.2,
+        16616.3
+      ],
+      "counts": {
+        "trails": 9,
+        "waterways": 70,
+        "lakes": 4,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1650,
+      "ty": 3166,
+      "file": "chunks/1650_3166.json",
+      "bounds": [
+        28276.0,
+        16616.3,
+        32134.2,
+        20474.5
+      ],
+      "counts": {
+        "trails": 14,
+        "waterways": 102,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1650,
+      "ty": 3167,
+      "file": "chunks/1650_3167.json",
+      "bounds": [
+        28276.0,
+        20474.5,
+        32134.2,
+        24332.8
+      ],
+      "counts": {
+        "trails": 2,
+        "waterways": 118,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1650,
+      "ty": 3168,
+      "file": "chunks/1650_3168.json",
+      "bounds": [
+        28276.0,
+        24332.8,
+        32134.2,
+        28191.0
+      ],
+      "counts": {
+        "trails": 3,
+        "waterways": 166,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1650,
+      "ty": 3169,
+      "file": "chunks/1650_3169.json",
+      "bounds": [
+        28276.0,
+        28191.0,
+        32134.2,
+        32049.2
+      ],
+      "counts": {
+        "trails": 6,
+        "waterways": 114,
+        "lakes": 3,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1651,
+      "ty": 3156,
+      "file": "chunks/1651_3156.json",
+      "bounds": [
+        32134.2,
+        -21965.7,
+        35992.4,
+        -18107.5
+      ],
+      "counts": {
+        "trails": 5,
+        "waterways": 46,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1651,
+      "ty": 3157,
+      "file": "chunks/1651_3157.json",
+      "bounds": [
+        32134.2,
+        -18107.5,
+        35992.4,
+        -14249.3
+      ],
+      "counts": {
+        "trails": 7,
+        "waterways": 61,
+        "lakes": 8,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1651,
+      "ty": 3158,
+      "file": "chunks/1651_3158.json",
+      "bounds": [
+        32134.2,
+        -14249.3,
+        35992.4,
+        -10391.1
+      ],
+      "counts": {
+        "trails": 5,
+        "waterways": 57,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1651,
+      "ty": 3159,
+      "file": "chunks/1651_3159.json",
+      "bounds": [
+        32134.2,
+        -10391.1,
+        35992.4,
+        -6532.9
+      ],
+      "counts": {
+        "trails": 16,
+        "waterways": 50,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 3,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1651,
+      "ty": 3160,
+      "file": "chunks/1651_3160.json",
+      "bounds": [
+        32134.2,
+        -6532.9,
+        35992.4,
+        -2674.7
+      ],
+      "counts": {
+        "trails": 5,
+        "waterways": 18,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1651,
+      "ty": 3161,
+      "file": "chunks/1651_3161.json",
+      "bounds": [
+        32134.2,
+        -2674.7,
+        35992.4,
+        1183.5
+      ],
+      "counts": {
+        "trails": 9,
+        "waterways": 22,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1651,
+      "ty": 3162,
+      "file": "chunks/1651_3162.json",
+      "bounds": [
+        32134.2,
+        1183.5,
+        35992.4,
+        5041.7
+      ],
+      "counts": {
+        "trails": 31,
+        "waterways": 45,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 9,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1651,
+      "ty": 3163,
+      "file": "chunks/1651_3163.json",
+      "bounds": [
+        32134.2,
+        5041.7,
+        35992.4,
+        8899.9
+      ],
+      "counts": {
+        "trails": 3,
+        "waterways": 21,
+        "lakes": 15,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1651,
+      "ty": 3164,
+      "file": "chunks/1651_3164.json",
+      "bounds": [
+        32134.2,
+        8899.9,
+        35992.4,
+        12758.1
+      ],
+      "counts": {
+        "trails": 7,
+        "waterways": 42,
+        "lakes": 5,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1651,
+      "ty": 3165,
+      "file": "chunks/1651_3165.json",
+      "bounds": [
+        32134.2,
+        12758.1,
+        35992.4,
+        16616.3
+      ],
+      "counts": {
+        "trails": 1,
+        "waterways": 74,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1651,
+      "ty": 3166,
+      "file": "chunks/1651_3166.json",
+      "bounds": [
+        32134.2,
+        16616.3,
+        35992.4,
+        20474.5
+      ],
+      "counts": {
+        "trails": 6,
+        "waterways": 109,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1651,
+      "ty": 3167,
+      "file": "chunks/1651_3167.json",
+      "bounds": [
+        32134.2,
+        20474.5,
+        35992.4,
+        24332.8
+      ],
+      "counts": {
+        "trails": 3,
+        "waterways": 131,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1651,
+      "ty": 3168,
+      "file": "chunks/1651_3168.json",
+      "bounds": [
+        32134.2,
+        24332.8,
+        35992.4,
+        28191.0
+      ],
+      "counts": {
+        "trails": 3,
+        "waterways": 163,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1651,
+      "ty": 3169,
+      "file": "chunks/1651_3169.json",
+      "bounds": [
+        32134.2,
+        28191.0,
+        35992.4,
+        32049.2
+      ],
+      "counts": {
+        "trails": 9,
+        "waterways": 122,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1652,
+      "ty": 3156,
+      "file": "chunks/1652_3156.json",
+      "bounds": [
+        35992.4,
+        -21965.7,
+        39850.6,
+        -18107.5
+      ],
+      "counts": {
+        "trails": 2,
+        "waterways": 40,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1652,
+      "ty": 3157,
+      "file": "chunks/1652_3157.json",
+      "bounds": [
+        35992.4,
+        -18107.5,
+        39850.6,
+        -14249.3
+      ],
+      "counts": {
+        "trails": 5,
+        "waterways": 58,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1652,
+      "ty": 3158,
+      "file": "chunks/1652_3158.json",
+      "bounds": [
+        35992.4,
+        -14249.3,
+        39850.6,
+        -10391.1
+      ],
+      "counts": {
+        "trails": 4,
+        "waterways": 64,
+        "lakes": 4,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1652,
+      "ty": 3159,
+      "file": "chunks/1652_3159.json",
+      "bounds": [
+        35992.4,
+        -10391.1,
+        39850.6,
+        -6532.9
+      ],
+      "counts": {
+        "trails": 7,
+        "waterways": 28,
+        "lakes": 1,
+        "waterfalls": 1,
+        "buildings": 2,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1652,
+      "ty": 3160,
+      "file": "chunks/1652_3160.json",
+      "bounds": [
+        35992.4,
+        -6532.9,
+        39850.6,
+        -2674.7
+      ],
+      "counts": {
+        "trails": 2,
+        "waterways": 24,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1652,
+      "ty": 3161,
+      "file": "chunks/1652_3161.json",
+      "bounds": [
+        35992.4,
+        -2674.7,
+        39850.6,
+        1183.5
+      ],
+      "counts": {
+        "trails": 3,
+        "waterways": 15,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1652,
+      "ty": 3162,
+      "file": "chunks/1652_3162.json",
+      "bounds": [
+        35992.4,
+        1183.5,
+        39850.6,
+        5041.7
+      ],
+      "counts": {
+        "trails": 37,
+        "waterways": 27,
+        "lakes": 8,
+        "waterfalls": 0,
+        "buildings": 19,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1652,
+      "ty": 3163,
+      "file": "chunks/1652_3163.json",
+      "bounds": [
+        35992.4,
+        5041.7,
+        39850.6,
+        8899.9
+      ],
+      "counts": {
+        "trails": 23,
+        "waterways": 31,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 5,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1652,
+      "ty": 3164,
+      "file": "chunks/1652_3164.json",
+      "bounds": [
+        35992.4,
+        8899.9,
+        39850.6,
+        12758.1
+      ],
+      "counts": {
+        "trails": 23,
+        "waterways": 68,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 4,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1652,
+      "ty": 3165,
+      "file": "chunks/1652_3165.json",
+      "bounds": [
+        35992.4,
+        12758.1,
+        39850.6,
+        16616.3
+      ],
+      "counts": {
+        "trails": 2,
+        "waterways": 120,
+        "lakes": 4,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1652,
+      "ty": 3166,
+      "file": "chunks/1652_3166.json",
+      "bounds": [
+        35992.4,
+        16616.3,
+        39850.6,
+        20474.5
+      ],
+      "counts": {
+        "trails": 27,
+        "waterways": 113,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 16,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1652,
+      "ty": 3167,
+      "file": "chunks/1652_3167.json",
+      "bounds": [
+        35992.4,
+        20474.5,
+        39850.6,
+        24332.8
+      ],
+      "counts": {
+        "trails": 1,
+        "waterways": 124,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1652,
+      "ty": 3168,
+      "file": "chunks/1652_3168.json",
+      "bounds": [
+        35992.4,
+        24332.8,
+        39850.6,
+        28191.0
+      ],
+      "counts": {
+        "trails": 2,
+        "waterways": 148,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1652,
+      "ty": 3169,
+      "file": "chunks/1652_3169.json",
+      "bounds": [
+        35992.4,
+        28191.0,
+        39850.6,
+        32049.2
+      ],
+      "counts": {
+        "trails": 4,
+        "waterways": 101,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1653,
+      "ty": 3156,
+      "file": "chunks/1653_3156.json",
+      "bounds": [
+        39850.6,
+        -21965.7,
+        43708.8,
+        -18107.5
+      ],
+      "counts": {
+        "trails": 0,
+        "waterways": 57,
+        "lakes": 3,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1653,
+      "ty": 3157,
+      "file": "chunks/1653_3157.json",
+      "bounds": [
+        39850.6,
+        -18107.5,
+        43708.8,
+        -14249.3
+      ],
+      "counts": {
+        "trails": 5,
+        "waterways": 70,
+        "lakes": 15,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1653,
+      "ty": 3158,
+      "file": "chunks/1653_3158.json",
+      "bounds": [
+        39850.6,
+        -14249.3,
+        43708.8,
+        -10391.1
+      ],
+      "counts": {
+        "trails": 51,
+        "waterways": 51,
+        "lakes": 11,
+        "waterfalls": 0,
+        "buildings": 81,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1653,
+      "ty": 3159,
+      "file": "chunks/1653_3159.json",
+      "bounds": [
+        39850.6,
+        -10391.1,
+        43708.8,
+        -6532.9
+      ],
+      "counts": {
+        "trails": 172,
+        "waterways": 23,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 288,
+        "aerialways": 1,
+        "skiRuns": 8
+      }
+    },
+    {
+      "tx": 1653,
+      "ty": 3160,
+      "file": "chunks/1653_3160.json",
+      "bounds": [
+        39850.6,
+        -6532.9,
+        43708.8,
+        -2674.7
+      ],
+      "counts": {
+        "trails": 12,
+        "waterways": 15,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 2,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1653,
+      "ty": 3161,
+      "file": "chunks/1653_3161.json",
+      "bounds": [
+        39850.6,
+        -2674.7,
+        43708.8,
+        1183.5
+      ],
+      "counts": {
+        "trails": 28,
+        "waterways": 44,
+        "lakes": 4,
+        "waterfalls": 0,
+        "buildings": 19,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1653,
+      "ty": 3162,
+      "file": "chunks/1653_3162.json",
+      "bounds": [
+        39850.6,
+        1183.5,
+        43708.8,
+        5041.7
+      ],
+      "counts": {
+        "trails": 80,
+        "waterways": 81,
+        "lakes": 12,
+        "waterfalls": 0,
+        "buildings": 74,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1653,
+      "ty": 3163,
+      "file": "chunks/1653_3163.json",
+      "bounds": [
+        39850.6,
+        5041.7,
+        43708.8,
+        8899.9
+      ],
+      "counts": {
+        "trails": 5,
+        "waterways": 51,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1653,
+      "ty": 3164,
+      "file": "chunks/1653_3164.json",
+      "bounds": [
+        39850.6,
+        8899.9,
+        43708.8,
+        12758.1
+      ],
+      "counts": {
+        "trails": 26,
+        "waterways": 91,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1653,
+      "ty": 3165,
+      "file": "chunks/1653_3165.json",
+      "bounds": [
+        39850.6,
+        12758.1,
+        43708.8,
+        16616.3
+      ],
+      "counts": {
+        "trails": 6,
+        "waterways": 112,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1653,
+      "ty": 3166,
+      "file": "chunks/1653_3166.json",
+      "bounds": [
+        39850.6,
+        16616.3,
+        43708.8,
+        20474.5
+      ],
+      "counts": {
+        "trails": 40,
+        "waterways": 96,
+        "lakes": 9,
+        "waterfalls": 0,
+        "buildings": 32,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1653,
+      "ty": 3167,
+      "file": "chunks/1653_3167.json",
+      "bounds": [
+        39850.6,
+        20474.5,
+        43708.8,
+        24332.8
+      ],
+      "counts": {
+        "trails": 4,
+        "waterways": 58,
+        "lakes": 4,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1653,
+      "ty": 3168,
+      "file": "chunks/1653_3168.json",
+      "bounds": [
+        39850.6,
+        24332.8,
+        43708.8,
+        28191.0
+      ],
+      "counts": {
+        "trails": 4,
+        "waterways": 48,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1653,
+      "ty": 3169,
+      "file": "chunks/1653_3169.json",
+      "bounds": [
+        39850.6,
+        28191.0,
+        43708.8,
+        32049.2
+      ],
+      "counts": {
+        "trails": 16,
+        "waterways": 39,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1654,
+      "ty": 3156,
+      "file": "chunks/1654_3156.json",
+      "bounds": [
+        43708.8,
+        -21965.7,
+        47567.0,
+        -18107.5
+      ],
+      "counts": {
+        "trails": 55,
+        "waterways": 54,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 25,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1654,
+      "ty": 3157,
+      "file": "chunks/1654_3157.json",
+      "bounds": [
+        43708.8,
+        -18107.5,
+        47567.0,
+        -14249.3
+      ],
+      "counts": {
+        "trails": 46,
+        "waterways": 77,
+        "lakes": 7,
+        "waterfalls": 4,
+        "buildings": 36,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1654,
+      "ty": 3158,
+      "file": "chunks/1654_3158.json",
+      "bounds": [
+        43708.8,
+        -14249.3,
+        47567.0,
+        -10391.1
+      ],
+      "counts": {
+        "trails": 234,
+        "waterways": 82,
+        "lakes": 23,
+        "waterfalls": 2,
+        "buildings": 462,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1654,
+      "ty": 3159,
+      "file": "chunks/1654_3159.json",
+      "bounds": [
+        43708.8,
+        -10391.1,
+        47567.0,
+        -6532.9
+      ],
+      "counts": {
+        "trails": 175,
+        "waterways": 47,
+        "lakes": 9,
+        "waterfalls": 1,
+        "buildings": 230,
+        "aerialways": 1,
+        "skiRuns": 7
+      }
+    },
+    {
+      "tx": 1654,
+      "ty": 3160,
+      "file": "chunks/1654_3160.json",
+      "bounds": [
+        43708.8,
+        -6532.9,
+        47567.0,
+        -2674.7
+      ],
+      "counts": {
+        "trails": 87,
+        "waterways": 32,
+        "lakes": 0,
+        "waterfalls": 1,
+        "buildings": 70,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1654,
+      "ty": 3161,
+      "file": "chunks/1654_3161.json",
+      "bounds": [
+        43708.8,
+        -2674.7,
+        47567.0,
+        1183.5
+      ],
+      "counts": {
+        "trails": 28,
+        "waterways": 42,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 3,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1654,
+      "ty": 3162,
+      "file": "chunks/1654_3162.json",
+      "bounds": [
+        43708.8,
+        1183.5,
+        47567.0,
+        5041.7
+      ],
+      "counts": {
+        "trails": 7,
+        "waterways": 78,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1654,
+      "ty": 3163,
+      "file": "chunks/1654_3163.json",
+      "bounds": [
+        43708.8,
+        5041.7,
+        47567.0,
+        8899.9
+      ],
+      "counts": {
+        "trails": 1,
+        "waterways": 81,
+        "lakes": 9,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1654,
+      "ty": 3164,
+      "file": "chunks/1654_3164.json",
+      "bounds": [
+        43708.8,
+        8899.9,
+        47567.0,
+        12758.1
+      ],
+      "counts": {
+        "trails": 10,
+        "waterways": 94,
+        "lakes": 5,
+        "waterfalls": 0,
+        "buildings": 7,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1654,
+      "ty": 3165,
+      "file": "chunks/1654_3165.json",
+      "bounds": [
+        43708.8,
+        12758.1,
+        47567.0,
+        16616.3
+      ],
+      "counts": {
+        "trails": 20,
+        "waterways": 82,
+        "lakes": 6,
+        "waterfalls": 0,
+        "buildings": 47,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1654,
+      "ty": 3166,
+      "file": "chunks/1654_3166.json",
+      "bounds": [
+        43708.8,
+        16616.3,
+        47567.0,
+        20474.5
+      ],
+      "counts": {
+        "trails": 2,
+        "waterways": 78,
+        "lakes": 7,
+        "waterfalls": 0,
+        "buildings": 1,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1654,
+      "ty": 3167,
+      "file": "chunks/1654_3167.json",
+      "bounds": [
+        43708.8,
+        20474.5,
+        47567.0,
+        24332.8
+      ],
+      "counts": {
+        "trails": 11,
+        "waterways": 41,
+        "lakes": 10,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1654,
+      "ty": 3168,
+      "file": "chunks/1654_3168.json",
+      "bounds": [
+        43708.8,
+        24332.8,
+        47567.0,
+        28191.0
+      ],
+      "counts": {
+        "trails": 1,
+        "waterways": 16,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1654,
+      "ty": 3169,
+      "file": "chunks/1654_3169.json",
+      "bounds": [
+        43708.8,
+        28191.0,
+        47567.0,
+        32049.2
+      ],
+      "counts": {
+        "trails": 3,
+        "waterways": 31,
+        "lakes": 14,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1655,
+      "ty": 3156,
+      "file": "chunks/1655_3156.json",
+      "bounds": [
+        47567.0,
+        -21965.7,
+        51425.2,
+        -18107.5
+      ],
+      "counts": {
+        "trails": 1,
+        "waterways": 16,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1655,
+      "ty": 3157,
+      "file": "chunks/1655_3157.json",
+      "bounds": [
+        47567.0,
+        -18107.5,
+        51425.2,
+        -14249.3
+      ],
+      "counts": {
+        "trails": 0,
+        "waterways": 39,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1655,
+      "ty": 3158,
+      "file": "chunks/1655_3158.json",
+      "bounds": [
+        47567.0,
+        -14249.3,
+        51425.2,
+        -10391.1
+      ],
+      "counts": {
+        "trails": 6,
+        "waterways": 25,
+        "lakes": 2,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1655,
+      "ty": 3159,
+      "file": "chunks/1655_3159.json",
+      "bounds": [
+        47567.0,
+        -10391.1,
+        51425.2,
+        -6532.9
+      ],
+      "counts": {
+        "trails": 6,
+        "waterways": 16,
+        "lakes": 4,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1655,
+      "ty": 3160,
+      "file": "chunks/1655_3160.json",
+      "bounds": [
+        47567.0,
+        -6532.9,
+        51425.2,
+        -2674.7
+      ],
+      "counts": {
+        "trails": 12,
+        "waterways": 30,
+        "lakes": 7,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1655,
+      "ty": 3161,
+      "file": "chunks/1655_3161.json",
+      "bounds": [
+        47567.0,
+        -2674.7,
+        51425.2,
+        1183.5
+      ],
+      "counts": {
+        "trails": 22,
+        "waterways": 22,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 2,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1655,
+      "ty": 3162,
+      "file": "chunks/1655_3162.json",
+      "bounds": [
+        47567.0,
+        1183.5,
+        51425.2,
+        5041.7
+      ],
+      "counts": {
+        "trails": 6,
+        "waterways": 76,
+        "lakes": 0,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1655,
+      "ty": 3163,
+      "file": "chunks/1655_3163.json",
+      "bounds": [
+        47567.0,
+        5041.7,
+        51425.2,
+        8899.9
+      ],
+      "counts": {
+        "trails": 3,
+        "waterways": 72,
+        "lakes": 5,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1655,
+      "ty": 3164,
+      "file": "chunks/1655_3164.json",
+      "bounds": [
+        47567.0,
+        8899.9,
+        51425.2,
+        12758.1
+      ],
+      "counts": {
+        "trails": 10,
+        "waterways": 74,
+        "lakes": 8,
+        "waterfalls": 0,
+        "buildings": 24,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1655,
+      "ty": 3165,
+      "file": "chunks/1655_3165.json",
+      "bounds": [
+        47567.0,
+        12758.1,
+        51425.2,
+        16616.3
+      ],
+      "counts": {
+        "trails": 11,
+        "waterways": 104,
+        "lakes": 9,
+        "waterfalls": 0,
+        "buildings": 111,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1655,
+      "ty": 3166,
+      "file": "chunks/1655_3166.json",
+      "bounds": [
+        47567.0,
+        16616.3,
+        51425.2,
+        20474.5
+      ],
+      "counts": {
+        "trails": 3,
+        "waterways": 67,
+        "lakes": 7,
+        "waterfalls": 0,
+        "buildings": 4,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1655,
+      "ty": 3167,
+      "file": "chunks/1655_3167.json",
+      "bounds": [
+        47567.0,
+        20474.5,
+        51425.2,
+        24332.8
+      ],
+      "counts": {
+        "trails": 37,
+        "waterways": 49,
+        "lakes": 4,
+        "waterfalls": 0,
+        "buildings": 18,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1655,
+      "ty": 3168,
+      "file": "chunks/1655_3168.json",
+      "bounds": [
+        47567.0,
+        24332.8,
+        51425.2,
+        28191.0
+      ],
+      "counts": {
+        "trails": 4,
+        "waterways": 92,
+        "lakes": 1,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    },
+    {
+      "tx": 1655,
+      "ty": 3169,
+      "file": "chunks/1655_3169.json",
+      "bounds": [
+        47567.0,
+        28191.0,
+        51425.2,
+        32049.2
+      ],
+      "counts": {
+        "trails": 2,
+        "waterways": 67,
+        "lakes": 5,
+        "waterfalls": 0,
+        "buildings": 0,
+        "aerialways": 0,
+        "skiRuns": 0
+      }
+    }
+  ]
+}
