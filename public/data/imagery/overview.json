@@ -1,0 +1,18 @@
+{
+  "image": "data/imagery/overview.webp",
+  "width": 2048,
+  "height": 1415,
+  "bounds": {
+    "west": -108.02,
+    "south": 37.68,
+    "east": -107.25,
+    "north": 38.1
+  },
+  "worldBounds": {
+    "minX": -18235.16,
+    "maxX": 49367.5,
+    "minZ": -18109.47,
+    "maxZ": 28614.77
+  },
+  "attribution": "USGS National Map Orthoimagery + USGS 3DEP shaded relief"
+}
