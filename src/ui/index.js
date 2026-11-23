@@ -20,18 +20,7 @@ export function createUI(engine, { trailData, game, terrain } = {}) {
   let settings = loadSettings();
   let lastRaceId = null;
 
-  // Apply persisted settings (respecting URL ?tier= overrides for perfqa/dev)
-  const params = new URLSearchParams(window.location.search);
-  if (!params.has('tier')) {
-    if (settings.qualityTier === 'auto') {
-      engine.quality?.setAuto?.(true);
-    } else if (settings.qualityTier) {
-      engine.quality?.setTier?.(settings.qualityTier, { auto: false });
-      if (Number.isFinite(settings.renderScale) && settings.renderScale !== 1.0) {
-        engine.quality?.setRenderScale?.(settings.renderScale);
-      }
-    }
-  }
+  // Note: core/quality.js hydrates persisted qualityTier & renderScale at startup as single source of truth.
   engine.events.emit('ui:settings', { ...settings });
   engine.events.emit('ui:audio', {
     master: settings.volume ?? 0.75,

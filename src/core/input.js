@@ -71,7 +71,9 @@ export function createInput({ domElement, events }) {
 
     if (e.code === 'Escape') {
       // Native <dialog> handles Escape via its 'cancel' event; only toggle pause if no modal dialog is open.
+      // Call e.preventDefault() so Chrome's CloseWatcher does not immediately cancel the dialog opened synchronously.
       if (!hasOpenModalDialog()) {
+        e.preventDefault();
         latchedPause = true;
         events.emit('input:pause');
       }

@@ -34,26 +34,37 @@ export function setupPWA(assetsBase = '/telluride-trails/') {
     const isLocalDev =
       window.location.hostname === 'localhost' && window.location.port === '5173';
     if (!isLocalDev) {
-      window.addEventListener('load', () => {
+      const registerSw = () => {
         navigator.serviceWorker
           .register(`${base}sw.js`, { scope: base })
           .then(async () => {
             const reg = await navigator.serviceWorker.ready;
             const sw = reg?.active || navigator.serviceWorker.controller;
             if (!sw) return;
-            const urls = [];
+            const urlSet = new Set();
             document.querySelectorAll('script[src], link[rel="stylesheet"][href]').forEach((el) => {
               const u = el.src || el.href;
-              if (u && u.startsWith(window.location.origin)) urls.push(u);
+              if (u && u.startsWith(window.location.origin)) urlSet.add(u);
             });
-            if (urls.length) {
-              sw.postMessage({ type: 'CACHE_URLS', urls });
+            for (const entry of performance.getEntriesByType?.('resource') || []) {
+              const u = entry.name;
+              if (u && u.startsWith(window.location.origin) && u.includes('/assets/') && /\.(js|css|svg|png|webp)$/i.test(u)) {
+                urlSet.add(u);
+              }
+            }
+            if (urlSet.size) {
+              sw.postMessage({ type: 'CACHE_URLS', urls: [...urlSet] });
             }
           })
           .catch((err) => {
             console.warn('[pwa] service worker registration failed:', err);
           });
-      });
+      };
+      if (document.readyState === 'complete') {
+        registerSw();
+      } else {
+        window.addEventListener('load', registerSw, { once: true });
+      }
     }
   }
 

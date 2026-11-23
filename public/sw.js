@@ -157,7 +157,10 @@ async function staleWhileRevalidateShell(request, event) {
   const networkPromise = fetch(request)
     .then((response) => {
       if (response && response.ok) {
-        return cache.put(request, response.clone()).then(() => response);
+        return cache
+          .put(request, response.clone())
+          .catch(() => {})
+          .then(() => response);
       }
       return response;
     })

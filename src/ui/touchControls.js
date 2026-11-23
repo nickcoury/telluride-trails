@@ -176,10 +176,6 @@ export function createTouchControls({ container, engine, getSettings }) {
 
   // Camera drag look + 2-pointer pinch-to-zoom pad
   function emitZoomDelta(deltaY) {
-    const gameCanvas = document.getElementById('game-canvas');
-    if (gameCanvas) {
-      gameCanvas.dispatchEvent(new WheelEvent('wheel', { deltaY, bubbles: false }));
-    }
     engine.events.emit('ui:zoom', { delta: Math.sign(deltaY) * Math.min(3, Math.abs(deltaY) * 0.01) });
   }
 
