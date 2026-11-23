@@ -236,7 +236,9 @@ export function createDialogs({ container, engine, getSettings, onUpdateSettings
         <li><strong>Trails, Peaks, Waterways &amp; Buildings:</strong> Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>, licensed under the Open Database License (ODbL).</li>
         <li><strong>Land Cover:</strong> Multi-Resolution Land Characteristics (MRLC) NLCD 2021 (Public Domain).</li>
         <li><strong>3D Engine:</strong> <a href="https://threejs.org/" target="_blank" rel="noopener">Three.js</a> (MIT License), bundled via Vite.</li>
-        <li><strong>CC0 Assets &amp; Textures:</strong> Public-domain / CC0 procedural &amp; PBR materials (ambientCG / Poly Haven / Quaternius).</li>
+        <li><strong>Runner Character &amp; Animations:</strong> <a href="https://quaternius.com/" target="_blank" rel="noopener">Quaternius</a> — Universal Base Characters &amp; Universal Animation Library (CC0 1.0), with a custom trail-running outfit.</li>
+        <li><strong>Terrain Detail Textures:</strong> <a href="https://polyhaven.com/textures" target="_blank" rel="noopener">Poly Haven</a> — cliff_side, gray_rocks, stony_dirt_path, sparse_grass, forest_ground_04, snow_02 (CC0 1.0).</li>
+        <li><strong>Other Assets:</strong> Procedurally generated in-browser or CC0 / public domain.</li>
         <li><strong>Inspiration:</strong> Sibling project <a href="https://github.com/nickcoury/track24" target="_blank" rel="noopener">track24</a> — another absurdly real-time ultramarathon.</li>
       </ul>
       <button type="button" class="btn btn--primary" data-dlg-close autofocus>Close</button>

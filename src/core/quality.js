@@ -345,16 +345,20 @@ export function createQualityManager({ renderer, events }) {
       lastScaleAdjustTime = nowSec;
       overBudgetStreak = 0;
       const prev = { ...state };
-      if (state.renderScale > state.minRenderScale + 0.04) {
+      const idx = QUALITY_TIERS.indexOf(currentTier);
+      const severelyOver = effectiveMs > budgetMs * 1.9;
+      // Fast step-down when severely overloaded (>1.9x budget) so slow phones settle in ~3-4s
+      if (severelyOver && idx > 0 && nowSec - lastTierChangeTime > 2.5) {
+        lastTierChangeTime = nowSec;
+        applyTierPreset(QUALITY_TIERS[idx - 1], true);
+        emitChange('adaptive-tier-down', snapshotFlags(prev));
+      } else if (state.renderScale > state.minRenderScale + 0.04) {
         state.renderScale = Math.max(state.minRenderScale, +(state.renderScale - 0.1).toFixed(2));
         emitChange('adaptive-downscale', snapshotFlags(prev));
-      } else {
-        const idx = QUALITY_TIERS.indexOf(currentTier);
-        if (idx > 0 && nowSec - lastTierChangeTime > 5) {
-          lastTierChangeTime = nowSec;
-          applyTierPreset(QUALITY_TIERS[idx - 1], true);
-          emitChange('adaptive-tier-down', snapshotFlags(prev));
-        }
+      } else if (idx > 0 && nowSec - lastTierChangeTime > 5) {
+        lastTierChangeTime = nowSec;
+        applyTierPreset(QUALITY_TIERS[idx - 1], true);
+        emitChange('adaptive-tier-down', snapshotFlags(prev));
       }
     } else if (underBudgetStreak >= 6) {
       lastScaleAdjustTime = nowSec;

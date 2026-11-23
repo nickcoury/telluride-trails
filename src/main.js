@@ -147,20 +147,29 @@ async function bootstrap() {
     engine.cameraRig.snapToTitleHero();
     heroEl.classList.remove('is-instant-hidden', 'is-hidden');
 
-    // Wait past initial title paint, then wait until Telluride Box Canyon tiles are resident
-    // before crossfading smoothly from the pre-rendered hero shot to the live 3D scene.
+    // Wait past initial title paint, then wait until live Telluride Box Canyon tiles have
+    // streamed via terrain.update() (avoiding terrain.preload() on Title so detail/normal PBR
+    // textures wait until first playable and Title network stays well under 1.5 MB).
     setTimeout(async () => {
       if (token !== titleRevealToken || engine.getAppState() !== 'title') return;
       try {
         await terrain.ready;
         if (token !== titleRevealToken || engine.getAppState() !== 'title') return;
-        await Promise.all([
-          terrain.preload(0, 0, 900),
-          trailData.loadArea(0, 0, 900),
-        ]);
+        await trailData.loadArea(0, 0, 900);
         if (token !== titleRevealToken || engine.getAppState() !== 'title') return;
-        // Let a few frames upload/render decoded tiles so the live scene is crisp before reveal
-        for (let i = 0; i < 10; i++) {
+
+        // Wait until real Telluride DEM tiles are resident (fallback is 2667m; real town ~2674-2680m)
+        const waitStart = performance.now();
+        while (performance.now() - waitStart < 4500) {
+          if (token !== titleRevealToken || engine.getAppState() !== 'title') return;
+          const hTown = terrain.getHeight(0, 0);
+          const hValley = terrain.getHeight(1200, 300);
+          if (Math.abs(hTown - 2667) > 0.5 && Math.abs(hValley - 2667) > 0.5) break;
+          await new Promise((r) => setTimeout(r, 120));
+        }
+
+        // Let imagery & building uploads settle cleanly over ~18 frames before crossfading
+        for (let i = 0; i < 18; i++) {
           await new Promise((r) => requestAnimationFrame(r));
           if (token !== titleRevealToken || engine.getAppState() !== 'title') return;
         }
