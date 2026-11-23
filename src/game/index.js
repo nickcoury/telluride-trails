@@ -23,6 +23,7 @@ import {
   applyTrailCenterPull,
   computeTargetSpeed,
   evaluateSurface,
+  isDeepLakeWater,
   resolveCliffSlide,
 } from './physics.js';
 import {
@@ -51,7 +52,7 @@ import { createWeatherSystem } from './weather.js';
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 
 export function createGame(engine, terrain, trailData, world) {
-  const runner = createRunnerCharacter();
+  const runner = createRunnerCharacter(engine.assetsBase || './');
   engine.scene.add(runner.root);
 
   const hardrockRock = createHardrockMonument();
@@ -74,6 +75,7 @@ export function createGame(engine, terrain, trailData, world) {
   let offTrailSeconds = 0;
   let lastLntToastS = -999;
   let lastCliffToastS = -999;
+  let lastLakeToastS = -999;
   let lastAltToastS = -999;
   let lastNightToastS = -999;
   let nextWildlifeS = 65 + Math.random() * 65;
@@ -177,6 +179,7 @@ export function createGame(engine, terrain, trailData, world) {
       gait: state.gait,
       isStumbling: stumbleTimer > 0,
       isFallen: fallTimer > 0,
+      isAirborne: jumpOffset > 0.06,
       isKissingRock: raceMgr.isCeremony(),
       nightMode: isNight,
       visible: state.mode !== 'idle' && !isFp,
@@ -230,6 +233,7 @@ export function createGame(engine, terrain, trailData, world) {
     jumpVel = 0;
     lastLntToastS = -999;
     lastCliffToastS = -999;
+    lastLakeToastS = -999;
     lastAltToastS = -999;
     lastNightToastS = -999;
     nextWildlifeS = 50 + Math.random() * 60;
@@ -284,8 +288,18 @@ export function createGame(engine, terrain, trailData, world) {
     state.raceId = null;
     state.paused = false;
     state.timeDilated = timeScale > 1;
-    resetRunMetrics(x, z, heading);
-    ensureVectorArea(x, z);
+    let spawnX = x;
+    let spawnZ = z;
+    if (isDeepLakeWater(spawnX, spawnZ, engine, terrain, trailData, false)) {
+      const nr = trailData?.nearest?.(spawnX, spawnZ, 300);
+      if (nr) {
+        spawnX = nr.x;
+        spawnZ = nr.z;
+      }
+    }
+    resetRunMetrics(spawnX, spawnZ, heading);
+    ensureVectorArea(spawnX, spawnZ);
+    runner.ensureLoaded();
     resolveFreeRunStartTime(startTime, startHour);
 
     syncRunnerVisuals(0.016, lastLocalClock.isNight);
@@ -321,6 +335,7 @@ export function createGame(engine, terrain, trailData, world) {
 
     resetRunMetrics(sx, sz, heading);
     ensureVectorArea(sx, sz);
+    runner.ensureLoaded();
     weather.setStartTime(race.startTimeLocal || '06:00');
     lastLocalClock = weather.getDenverClock();
     raceMgr.initRace(race);
@@ -353,6 +368,7 @@ export function createGame(engine, terrain, trailData, world) {
     state.x = saved.pos?.x ?? 0;
     state.z = saved.pos?.z ?? 0;
     ensureVectorArea(state.x, state.z);
+    runner.ensureLoaded();
     smoothY = terrain.getHeight(state.x, state.z);
     vertRefY = smoothY;
     state.y = smoothY;
@@ -675,12 +691,34 @@ export function createGame(engine, terrain, trailData, world) {
       toast(pickCliffWarning(), 'warn', 3.5);
     }
 
-    // Integrate horizontal motion
+    // Integrate horizontal motion with deep-lake shoreline clamp
     const prevX = state.x;
     const prevZ = state.z;
     const prevGroundY = hHere;
-    state.x += vx * dtSim;
-    state.z += vz * dtSim;
+    let nextX = state.x + vx * dtSim;
+    let nextZ = state.z + vz * dtSim;
+
+    if ((vx !== 0 || vz !== 0) && isDeepLakeWater(nextX, nextZ, engine, terrain, trailData, surfEval.onTrail)) {
+      // Allow sliding along whichever axis stays dry on the shoreline
+      const xDry = !isDeepLakeWater(nextX, state.z, engine, terrain, trailData, surfEval.onTrail);
+      const zDry = !isDeepLakeWater(state.x, nextZ, engine, terrain, trailData, surfEval.onTrail);
+      if (xDry) {
+        nextZ = state.z;
+      } else if (zDry) {
+        nextX = state.x;
+      } else {
+        nextX = state.x;
+        nextZ = state.z;
+        state.speedMs = 0;
+      }
+      if (elapsedRunS - lastLakeToastS > 14) {
+        lastLakeToastS = elapsedRunS;
+        toast('Glacial alpine water is 38°F! Admire the turquoise from the shore.', 'info', 3.5);
+      }
+    }
+
+    state.x = nextX;
+    state.z = nextZ;
 
     const stepDist = Math.hypot(state.x - prevX, state.z - prevZ);
     state.distanceM += stepDist;

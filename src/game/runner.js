@@ -1,219 +1,384 @@
-// Articulated 3D trail runner character + procedural locomotion blender
-// (idle, walk, hike, power-hike with hands-on-knees, run, sprint, stumble, fall, kiss-the-rock).
-// Character faces local -Z so rotation.y = heading aligns with core/camera.js.
+// Rigged, skinned CC0 human trail runner (Quaternius Universal Base Characters +
+// Universal Animation Library) with smooth AnimationMixer locomotion blending,
+// ground-speed stride matching (no foot sliding), uphill slope lean, power-hike
+// posture, bone-attached trail gear (hydration vest, soft flasks, trucker cap,
+// sunglasses, headlamp, GPS watch), and lazy loading behind a slim placeholder.
 
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const lerp = (a, b, t) => a + (b - a) * t;
 
-function makeCapsuleLimb(radiusTop, radiusBottom, length, mat) {
-  const geo = new THREE.CylinderGeometry(radiusTop, radiusBottom, length, 8);
-  geo.translate(0, -length * 0.5, 0);
-  const m = new THREE.Mesh(geo, mat);
-  m.castShadow = true;
-  return m;
+// Calibrated natural ground speeds (m/s) for each UAL1 locomotion clip so
+// timeScale = speedMs / naturalSpeed keeps feet planted with zero sliding.
+const NATURAL_SPEEDS = {
+  walk: 1.42,
+  crouch: 1.25,
+  jog: 3.05,
+  sprint: 5.05,
+};
+
+function buildPlaceholder() {
+  const grp = new THREE.Group();
+  grp.name = 'runner-placeholder';
+
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xdd5226, roughness: 0.78 });
+  const shortsMat = new THREE.MeshStandardMaterial({ color: 0x222a35, roughness: 0.85 });
+  const headMat = new THREE.MeshStandardMaterial({ color: 0xd8a480, roughness: 0.72 });
+  const capMat = new THREE.MeshStandardMaterial({ color: 0x1d4e6b, roughness: 0.75 });
+
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.52, 6, 10), bodyMat);
+  torso.position.y = 1.18;
+  torso.castShadow = true;
+  grp.add(torso);
+
+  const legs = new THREE.Mesh(new THREE.CapsuleGeometry(0.14, 0.56, 6, 10), shortsMat);
+  legs.position.y = 0.56;
+  legs.castShadow = true;
+  grp.add(legs);
+
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.115, 10, 8), headMat);
+  head.position.y = 1.66;
+  head.castShadow = true;
+  grp.add(head);
+
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.122, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.52), capMat);
+  cap.position.y = 1.68;
+  grp.add(cap);
+
+  return grp;
+}
+
+function buildHydrationVest() {
+  const vest = new THREE.Group();
+  vest.name = 'gear-hydration-vest';
+
+  const packMat = new THREE.MeshStandardMaterial({ color: 0x183446, roughness: 0.72, metalness: 0.05 });
+  const trimMat = new THREE.MeshStandardMaterial({ color: 0xe85a2b, roughness: 0.65 });
+  const reflectMat = new THREE.MeshStandardMaterial({ color: 0xdbeafe, roughness: 0.35, metalness: 0.4 });
+  const flaskMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.3, metalness: 0.05 });
+  const nozzleMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.5 });
+
+  // Contoured main rear pack (local -Z is behind the chest in UAL/UBC bone space)
+  const mainPack = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.34, 0.095), packMat);
+  mainPack.position.set(0, 0.01, -0.155);
+  mainPack.castShadow = true;
+  vest.add(mainPack);
+
+  const upperPod = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.14, 0.055), trimMat);
+  upperPod.position.set(0, 0.06, -0.205);
+  upperPod.castShadow = true;
+  vest.add(upperPod);
+
+  // Reflective safety strip on back of hydration pack
+  const reflectStrip = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.022, 0.012), reflectMat);
+  reflectStrip.position.set(0, -0.07, -0.206);
+  vest.add(reflectStrip);
+
+  // Side compression wings wrapping ribs
+  for (const side of [-1, 1]) {
+    const wing = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.18, 0.20), packMat);
+    wing.position.set(side * 0.145, -0.03, -0.04);
+    vest.add(wing);
+
+    // Shoulder strap over clavicle to chest
+    const strapTop = new THREE.Mesh(new THREE.BoxGeometry(0.052, 0.035, 0.24), packMat);
+    strapTop.position.set(side * 0.10, 0.175, -0.02);
+    vest.add(strapTop);
+
+    const strapFront = new THREE.Mesh(new THREE.BoxGeometry(0.056, 0.28, 0.03), packMat);
+    strapFront.position.set(side * 0.095, 0.03, 0.125);
+    vest.add(strapFront);
+
+    // Front 500ml soft flask + bite valve
+    const flask = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.020, 0.145, 10), flaskMat);
+    flask.position.set(side * 0.095, 0.02, 0.148);
+    vest.add(flask);
+
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.018, 0.024, 8), nozzleMat);
+    cap.position.set(side * 0.095, 0.102, 0.148);
+    vest.add(cap);
+  }
+
+  // Dual chest bungee sternum straps
+  for (const yOff of [0.05, -0.03]) {
+    const bungee = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.014, 0.014), trimMat);
+    bungee.position.set(0, yOff, 0.135);
+    vest.add(bungee);
+  }
+
+  return vest;
+}
+
+function buildHeadGear() {
+  const gear = new THREE.Group();
+  gear.name = 'gear-head';
+
+  const capFrontMat = new THREE.MeshStandardMaterial({ color: 0x1d4e6b, roughness: 0.72 });
+  const capMeshMat = new THREE.MeshStandardMaterial({ color: 0x2a3441, roughness: 0.88 });
+  const brimMat = new THREE.MeshStandardMaterial({ color: 0xd95428, roughness: 0.75 });
+  const shadesMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.18, metalness: 0.7 });
+  const strapMat = new THREE.MeshStandardMaterial({ color: 0x1f2937, roughness: 0.8 });
+  const lampHousingMat = new THREE.MeshStandardMaterial({ color: 0x374151, roughness: 0.45, metalness: 0.25 });
+  const lampLensMat = new THREE.MeshStandardMaterial({
+    color: 0xfffbeb,
+    emissive: 0xfef08a,
+    emissiveIntensity: 0.0,
+    roughness: 0.2,
+  });
+
+  // Trucker trail cap crown snugged cleanly onto skull brow
+  const crown = new THREE.Mesh(
+    new THREE.SphereGeometry(0.113, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.56),
+    capFrontMat
+  );
+  crown.scale.set(0.95, 1.0, 1.04);
+  crown.position.set(0, 0.104, -0.008);
+  crown.rotation.x = -0.08;
+  crown.castShadow = true;
+  gear.add(crown);
+
+  // Rear dark mesh panel accent
+  const backPanel = new THREE.Mesh(
+    new THREE.SphereGeometry(0.114, 12, 8, Math.PI * 0.72, Math.PI * 1.56, 0.12, Math.PI * 0.44),
+    capMeshMat
+  );
+  backPanel.scale.set(0.95, 1.0, 1.04);
+  backPanel.position.set(0, 0.104, -0.008);
+  backPanel.rotation.x = -0.08;
+  gear.add(backPanel);
+
+  // Curved trail cap brim pointing +Z (forward in bone local space)
+  const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.098, 0.102, 0.011, 14, 1, false, -Math.PI * 0.42, Math.PI * 0.84), brimMat);
+  brim.scale.set(1.02, 1, 1.42);
+  brim.position.set(0, 0.118, 0.055);
+  brim.rotation.x = 0.07;
+  brim.castShadow = true;
+  gear.add(brim);
+
+  // Wraparound trail sunglasses
+  const shades = new THREE.Mesh(new THREE.BoxGeometry(0.142, 0.032, 0.036), shadesMat);
+  shades.position.set(0, 0.084, 0.095);
+  gear.add(shades);
+
+  // Headlamp strap + compact housing + glowing night lens on forehead above brim
+  const lampStrap = new THREE.Mesh(new THREE.TorusGeometry(0.108, 0.008, 6, 18), strapMat);
+  lampStrap.rotation.x = Math.PI / 2 - 0.08;
+  lampStrap.scale.set(0.96, 1.05, 1);
+  lampStrap.position.set(0, 0.132, -0.006);
+  gear.add(lampStrap);
+
+  const lampHousing = new THREE.Mesh(new THREE.BoxGeometry(0.044, 0.025, 0.022), lampHousingMat);
+  lampHousing.position.set(0, 0.138, 0.108);
+  gear.add(lampHousing);
+
+  const lampLens = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.012, 10), lampLensMat);
+  lampLens.rotation.x = Math.PI / 2;
+  lampLens.position.set(0, 0.138, 0.120);
+  gear.add(lampLens);
+
+  return { gear, lampLensMat };
+}
+
+function buildGpsWatch() {
+  const grp = new THREE.Group();
+  grp.name = 'gear-gps-watch';
+  const bandMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.7 });
+  const faceMat = new THREE.MeshStandardMaterial({
+    color: 0x0f172a,
+    emissive: 0x10b981,
+    emissiveIntensity: 0.45,
+    roughness: 0.25,
+  });
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.036, 0.028, 10), bandMat);
+  grp.add(band);
+  const face = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.012, 10), faceMat);
+  face.position.set(0, 0, -0.034);
+  face.rotation.x = Math.PI / 2;
+  grp.add(face);
+  grp.position.set(0, 0.205, 0);
+  return grp;
 }
 
 /**
- * Create the 3D trail runner rig.
+ * Create the rigged, skinned 3D trail runner character with lazy GLB loading.
+ * @param {string} [assetsBase='./']
  */
-export function createRunnerCharacter() {
+export function createRunnerCharacter(assetsBase = './') {
   const root = new THREE.Group();
   root.name = 'trail-runner';
 
-  // Soft contact blob shadow (for low quality tier without shadow maps)
-  const blobGeo = new THREE.CircleGeometry(0.45, 16);
+  // Soft contact blob shadow (shown on low tier when real shadow maps are off)
+  const blobGeo = new THREE.CircleGeometry(0.46, 16);
   blobGeo.rotateX(-Math.PI / 2);
   const blobMat = new THREE.MeshBasicMaterial({
     color: 0x0b1016,
     transparent: true,
-    opacity: 0.32,
+    opacity: 0.34,
     depthWrite: false,
   });
   const blobShadow = new THREE.Mesh(blobGeo, blobMat);
   blobShadow.position.y = 0.03;
   root.add(blobShadow);
 
-  // Materials (mountain runner palette: coral-orange tech tee, slate shorts, cobalt vest, bright shoes)
-  const skinMat = new THREE.MeshStandardMaterial({ color: 0xdba988, roughness: 0.72 });
-  const shirtMat = new THREE.MeshStandardMaterial({ color: 0xe85a2b, roughness: 0.75 });
-  const shortsMat = new THREE.MeshStandardMaterial({ color: 0x222933, roughness: 0.85 });
-  const vestMat = new THREE.MeshStandardMaterial({ color: 0x1d4e6b, roughness: 0.7 });
-  const flaskMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.35 });
-  const shoeMat = new THREE.MeshStandardMaterial({ color: 0xf43f5e, roughness: 0.55 });
-  const soleMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.65 });
-  const capMat = new THREE.MeshStandardMaterial({ color: 0x2b6cb0, roughness: 0.75 });
-  const glassMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.2, metalness: 0.6 });
-  const watchMat = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0x10b981, emissiveIntensity: 0.4 });
-  const lampBodyMat = new THREE.MeshStandardMaterial({ color: 0x374151, roughness: 0.4 });
-  const lampLensMat = new THREE.MeshStandardMaterial({ color: 0xfffbeb, emissive: 0xfef08a, emissiveIntensity: 0.0 });
+  // Lightweight placeholder shown only while runner.glb streams in lazily
+  const placeholder = buildPlaceholder();
+  root.add(placeholder);
 
-  // Pelvis / Hips (origin ~0.92m above ground)
-  const hips = new THREE.Group();
-  hips.position.y = 0.92;
-  root.add(hips);
+  // Model pivot rotated PI around Y so +Z GLB faces local -Z matching cameraRig
+  const modelPivot = new THREE.Group();
+  modelPivot.name = 'runner-rig-pivot';
+  modelPivot.rotation.y = Math.PI;
+  modelPivot.visible = false;
+  root.add(modelPivot);
 
-  const pelvisMesh = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.16, 0.20), shortsMat);
-  pelvisMesh.castShadow = true;
-  hips.add(pelvisMesh);
+  let loadStarted = false;
+  let loaded = false;
+  let disposed = false;
+  let shadowsEnabledState = true;
+  let mixer = null;
+  let actions = {};
+  let bones = {};
+  let lampLensMat = null;
+  let gltfScene = null;
 
-  // Torso
-  const torso = new THREE.Group();
-  torso.position.y = 0.08;
-  hips.add(torso);
+  // Smooth locomotion blend weights
+  const weights = {
+    idle: 1,
+    walk: 0,
+    jog: 0,
+    sprint: 0,
+    powerHike: 0,
+    jump: 0,
+    fall: 0,
+    getup: 0,
+    ceremony: 0,
+  };
 
-  const chestMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.165, 0.14, 0.44, 10), shirtMat);
-  chestMesh.scale.set(1.12, 1, 0.78);
-  chestMesh.position.y = 0.22;
-  chestMesh.castShadow = true;
-  torso.add(chestMesh);
-
-  // Hydration vest + back pack + 2 front soft flasks
-  const vestBack = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.34, 0.10), vestMat);
-  vestBack.position.set(0, 0.23, 0.12);
-  vestBack.castShadow = true;
-  torso.add(vestBack);
-
-  for (const side of [-1, 1]) {
-    const strap = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.32, 0.05), vestMat);
-    strap.position.set(side * 0.095, 0.24, -0.105);
-    torso.add(strap);
-
-    const flask = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.022, 0.14, 8), flaskMat);
-    flask.position.set(side * 0.095, 0.20, -0.13);
-    torso.add(flask);
-  }
-
-  // Head + Trucker Cap + Sunglasses + Headlamp
-  const headGroup = new THREE.Group();
-  headGroup.position.set(0, 0.48, 0);
-  torso.add(headGroup);
-
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.055, 0.08, 8), skinMat);
-  neck.position.y = 0.02;
-  headGroup.add(neck);
-
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.115, 12, 10), skinMat);
-  head.position.y = 0.14;
-  head.scale.set(0.92, 1.06, 0.98);
-  head.castShadow = true;
-  headGroup.add(head);
-
-  const capCrown = new THREE.Mesh(new THREE.SphereGeometry(0.121, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.54), capMat);
-  capCrown.position.y = 0.155;
-  capCrown.rotation.x = 0.12;
-  headGroup.add(capCrown);
-
-  const capBrim = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.015, 0.12), capMat);
-  capBrim.position.set(0, 0.195, -0.115);
-  capBrim.rotation.x = 0.12;
-  headGroup.add(capBrim);
-
-  const shades = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.036, 0.04), glassMat);
-  shades.position.set(0, 0.155, -0.098);
-  headGroup.add(shades);
-
-  // Headlamp
-  const headlamp = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.03, 0.03), lampBodyMat);
-  headlamp.position.set(0, 0.225, -0.115);
-  headGroup.add(headlamp);
-
-  const lampLens = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.015, 8), lampLensMat);
-  lampLens.rotation.x = Math.PI / 2;
-  lampLens.position.set(0, 0.225, -0.13);
-  headGroup.add(lampLens);
-
-  // Arms
-  function makeArm(side) {
-    const shoulder = new THREE.Group();
-    shoulder.position.set(side * 0.21, 0.40, 0);
-    torso.add(shoulder);
-
-    const upper = makeCapsuleLimb(0.046, 0.038, 0.27, skinMat);
-    const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.054, 0.049, 0.12, 8), shirtMat);
-    sleeve.position.y = -0.055;
-    upper.add(sleeve);
-    shoulder.add(upper);
-
-    const elbow = new THREE.Group();
-    elbow.position.y = -0.27;
-    shoulder.add(elbow);
-
-    const fore = makeCapsuleLimb(0.036, 0.028, 0.24, skinMat);
-    elbow.add(fore);
-
-    if (side < 0) {
-      const watch = new THREE.Mesh(new THREE.BoxGeometry(0.068, 0.032, 0.068), watchMat);
-      watch.position.y = -0.19;
-      elbow.add(watch);
-    }
-
-    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.034, 8, 6), skinMat);
-    hand.position.y = -0.255;
-    elbow.add(hand);
-
-    return { shoulder, elbow };
-  }
-
-  const armL = makeArm(-1);
-  const armR = makeArm(1);
-
-  // Legs
-  function makeLeg(side) {
-    const hip = new THREE.Group();
-    hip.position.set(side * 0.10, -0.04, 0);
-    hips.add(hip);
-
-    const thigh = makeCapsuleLimb(0.072, 0.054, 0.42, skinMat);
-    const shortLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.079, 0.072, 0.21, 8), shortsMat);
-    shortLeg.position.y = -0.10;
-    thigh.add(shortLeg);
-    hip.add(thigh);
-
-    const knee = new THREE.Group();
-    knee.position.y = -0.42;
-    hip.add(knee);
-
-    const calf = makeCapsuleLimb(0.050, 0.034, 0.40, skinMat);
-    knee.add(calf);
-
-    const ankle = new THREE.Group();
-    ankle.position.y = -0.40;
-    knee.add(ankle);
-
-    // Trail shoe facing -Z
-    const shoeUpper = new THREE.Mesh(new THREE.BoxGeometry(0.092, 0.068, 0.23), shoeMat);
-    shoeUpper.position.set(0, -0.025, -0.045);
-    shoeUpper.castShadow = true;
-    ankle.add(shoeUpper);
-
-    const shoeSole = new THREE.Mesh(new THREE.BoxGeometry(0.098, 0.032, 0.245), soleMat);
-    shoeSole.position.set(0, -0.062, -0.045);
-    ankle.add(shoeSole);
-
-    return { hip, knee, ankle };
-  }
-
-  const legL = makeLeg(-1);
-  const legR = makeLeg(1);
-
-  // Animation state
-  let stridePhase = 0;
-  let powerHikeWeight = 0;
-  let runWeight = 0;
-  let sprintWeight = 0;
-  let fallPose = 0;
-  let kissPose = 0;
+  let wasFallen = false;
+  let getupTimer = 0;
+  let wasAirborne = false;
+  let jumpLandTimer = 0;
+  let smoothGrade = 0;
   let idleTime = 0;
+  let strideClock = 0;
 
-  function setShadowsEnabled(enabled) {
-    blobShadow.visible = !enabled;
+  function applyShadowSetting() {
+    blobShadow.visible = !shadowsEnabledState;
     root.traverse((obj) => {
       if (obj.isMesh && obj !== blobShadow) {
-        obj.castShadow = Boolean(enabled);
+        obj.castShadow = Boolean(shadowsEnabledState);
+        obj.receiveShadow = false;
       }
     });
+  }
+
+  function ensureLoaded() {
+    if (loadStarted || disposed) return;
+    loadStarted = true;
+
+    const base = assetsBase.endsWith('/') ? assetsBase : `${assetsBase}/`;
+    const url = `${base}assets/game/runner.glb`;
+    const loader = new GLTFLoader();
+
+    loader.load(
+      url,
+      (gltf) => {
+        if (disposed) {
+          disposeScene(gltf.scene);
+          return;
+        }
+        gltfScene = gltf.scene;
+
+        // Ensure SkinnedMesh never flickers/culls near camera & map key bones
+        gltfScene.traverse((obj) => {
+          if (obj.isSkinnedMesh || obj.isMesh) {
+            obj.frustumCulled = false;
+            obj.castShadow = Boolean(shadowsEnabledState);
+            if (obj.material) {
+              obj.material.envMapIntensity = 0.65;
+            }
+          }
+          if (obj.isBone) {
+            bones[obj.name] = obj;
+          }
+        });
+
+        // Attach trail-running gear directly to skeleton bones
+        if (bones.spine_03) {
+          bones.spine_03.add(buildHydrationVest());
+        } else if (bones.spine_02) {
+          bones.spine_02.add(buildHydrationVest());
+        }
+
+        if (bones.Head) {
+          const hg = buildHeadGear();
+          lampLensMat = hg.lampLensMat;
+          bones.Head.add(hg.gear);
+        }
+
+        if (bones.lowerarm_l) {
+          bones.lowerarm_l.add(buildGpsWatch());
+        }
+
+        modelPivot.add(gltfScene);
+
+        // Configure AnimationMixer and all 11 UAL1 clips
+        mixer = new THREE.AnimationMixer(gltfScene);
+        const byName = new Map(gltf.animations.map((c) => [c.name, c]));
+
+        const setupLoop = (key, clipName) => {
+          const clip = byName.get(clipName);
+          if (!clip) return;
+          const act = mixer.clipAction(clip);
+          act.setLoop(THREE.LoopRepeat, Infinity);
+          act.enabled = true;
+          act.setEffectiveWeight(key === 'idle' ? 1 : 0);
+          act.play();
+          actions[key] = act;
+        };
+
+        const setupOnce = (key, clipName) => {
+          const clip = byName.get(clipName);
+          if (!clip) return;
+          const act = mixer.clipAction(clip);
+          act.setLoop(THREE.LoopOnce, 1);
+          act.clampWhenFinished = true;
+          act.enabled = true;
+          act.setEffectiveWeight(0);
+          act.play();
+          actions[key] = act;
+        };
+
+        setupLoop('idle', 'Idle_Loop');
+        setupLoop('walk', 'Walk_Loop');
+        setupLoop('jog', 'Jog_Fwd_Loop');
+        setupLoop('sprint', 'Sprint_Loop');
+        setupLoop('powerHike', 'Crouch_Fwd_Loop');
+        setupLoop('jumpLoop', 'Jump_Loop');
+        setupLoop('ceremony', 'Fixing_Kneeling');
+
+        setupOnce('jumpStart', 'Jump_Start');
+        setupOnce('jumpLand', 'Jump_Land');
+        setupOnce('fall', 'Death01');
+        setupOnce('getup', 'Roll');
+
+        loaded = true;
+        placeholder.visible = false;
+        modelPivot.visible = true;
+        applyShadowSetting();
+      },
+      undefined,
+      (err) => {
+        console.warn('[runner] Failed to load runner.glb, keeping placeholder:', err);
+      }
+    );
+  }
+
+  function setShadowsEnabled(enabled) {
+    shadowsEnabledState = Boolean(enabled);
+    applyShadowSetting();
   }
 
   function updatePose(dt, params) {
@@ -223,6 +388,7 @@ export function createRunnerCharacter() {
       gait = 'idle',
       isStumbling = false,
       isFallen = false,
+      isAirborne = false,
       isKissingRock = false,
       nightMode = false,
       visible = true,
@@ -232,119 +398,238 @@ export function createRunnerCharacter() {
     root.visible = visible;
     idleTime += dt;
 
-    // Headlamp lens glow at night (world module handles the scene headlamp light)
-    const lampOn = Boolean(nightMode && allowHeadlamp);
-    lampLensMat.emissiveIntensity = lampOn ? 3.0 : 0;
+    // Kick off lazy load once runner is actually needed in a run
+    if (visible && !loadStarted) {
+      ensureLoaded();
+    }
 
-    if (!visible) return 0;
+    // Headlamp emissive lens glow at dusk/night
+    if (lampLensMat) {
+      lampLensMat.emissiveIntensity = nightMode && allowHeadlamp ? 3.2 : 0.0;
+    }
 
-    // Target blend weights
-    const targetPH = gait === 'power-hike' ? 1 : 0;
-    const targetSprint = gait === 'sprint' ? 1 : 0;
-    const targetRun = gait === 'run' || gait === 'sprint' ? 1 : 0;
-    const targetFall = isFallen ? 1 : 0;
-    const targetKiss = isKissingRock ? 1 : 0;
-
-    const blendRate = Math.min(1, dt * 8.5);
-    powerHikeWeight = lerp(powerHikeWeight, targetPH, blendRate);
-    runWeight = lerp(runWeight, targetRun, blendRate);
-    sprintWeight = lerp(sprintWeight, targetSprint, blendRate);
-    fallPose = lerp(fallPose, targetFall, Math.min(1, dt * 10));
-    kissPose = lerp(kissPose, targetKiss, Math.min(1, dt * 4.5));
-
-    // Stride frequency scales with speed
-    const moving = speedMs > 0.15 && !isFallen && !isKissingRock;
-    const cadence = moving ? clamp(1.3 + speedMs * 0.55, 1.4, 3.6) : 0;
+    // Estimate first-person stride bob even when model hidden in 1st person
+    const moving = speedMs > 0.15 && !isFallen && !isKissingRock && !isAirborne;
     if (moving) {
-      stridePhase = (stridePhase + dt * cadence * Math.PI * 2) % (Math.PI * 2);
+      const cadence = clamp(1.4 + speedMs * 0.52, 1.5, 3.5);
+      strideClock = (strideClock + dt * cadence * Math.PI * 2) % (Math.PI * 2);
+    }
+    const fpBounce = moving ? Math.abs(Math.sin(strideClock)) * clamp(speedMs / 4.5, 0.25, 1) * 0.065 : 0;
+
+    if (!visible) return fpBounce;
+
+    // Simple subtle bob on placeholder while GLB is streaming
+    if (!loaded || !mixer) {
+      placeholder.position.y = fpBounce * 0.8;
+      placeholder.rotation.x = clamp(-grade * 0.4, -0.25, 0.25);
+      return fpBounce;
     }
 
-    const moveBlend = clamp(speedMs / 1.2, 0, 1) * (1 - fallPose) * (1 - kissPose);
-    const s = Math.sin(stridePhase);
-    const c = Math.cos(stridePhase);
+    const safeDt = Math.min(0.06, Math.max(0, dt));
+    smoothGrade = lerp(smoothGrade, clamp(grade, -0.45, 0.55), Math.min(1, safeDt * 7));
 
-    // Base stride amplitudes blended across walk -> hike -> power-hike -> run -> sprint
-    const legAmp = lerp(0.42, 0.85, runWeight) + 0.25 * sprintWeight;
-    const kneeAmp = lerp(0.55, 1.25, runWeight) + 0.30 * sprintWeight;
-    const armAmp = lerp(0.35, 0.92, runWeight) + 0.25 * sprintWeight;
+    // Fall / Get-up state transitions
+    if (isFallen && !wasFallen) {
+      if (actions.fall) {
+        actions.fall.reset();
+        actions.fall.setEffectiveTimeScale(1.35);
+        actions.fall.play();
+      }
+      getupTimer = 0;
+    } else if (!isFallen && wasFallen) {
+      getupTimer = 0.72;
+      if (actions.getup) {
+        actions.getup.reset();
+        actions.getup.setEffectiveTimeScale(1.65);
+        actions.getup.play();
+      }
+    }
+    wasFallen = isFallen;
+    if (getupTimer > 0) getupTimer = Math.max(0, getupTimer - safeDt);
 
-    // Power-hike overrides: hands push down toward thighs/knees in rhythm with uphill drive
-    const hipPitchL = (s * legAmp + 0.24 * powerHikeWeight) * moveBlend;
-    const hipPitchR = (-s * legAmp + 0.24 * powerHikeWeight) * moveBlend;
+    // Jump transitions
+    if (isAirborne && !wasAirborne) {
+      if (actions.jumpStart) {
+        actions.jumpStart.reset();
+        actions.jumpStart.setEffectiveTimeScale(1.4);
+        actions.jumpStart.play();
+      }
+      jumpLandTimer = 0;
+    } else if (!isAirborne && wasAirborne) {
+      jumpLandTimer = 0.22;
+      if (actions.jumpLand) {
+        actions.jumpLand.reset();
+        actions.jumpLand.setEffectiveTimeScale(1.6);
+        actions.jumpLand.play();
+      }
+    }
+    wasAirborne = isAirborne;
+    if (jumpLandTimer > 0) jumpLandTimer = Math.max(0, jumpLandTimer - safeDt);
 
-    const kneeFlexL = Math.max(0.08, (-c * 0.5 + 0.48) * kneeAmp) * moveBlend;
-    const kneeFlexR = Math.max(0.08, (c * 0.5 + 0.48) * kneeAmp) * moveBlend;
+    // Compute normalized locomotion & action target weights
+    let tIdle = 0;
+    let tWalk = 0;
+    let tJog = 0;
+    let tSprint = 0;
+    let tPowerHike = 0;
+    let tJump = 0;
+    let tFall = 0;
+    let tGetup = 0;
+    let tCeremony = 0;
 
-    // Slight crouch when power hiking or running fast
-    const bounce = Math.abs(s) * lerp(0.025, 0.075, runWeight) * moveBlend;
-    const breath = Math.sin(idleTime * 2.2) * 0.008;
-    const crouch = 0.08 * powerHikeWeight + 0.03 * runWeight;
-
-    hips.position.y = lerp(0.92 - crouch + bounce + breath, 0.22, fallPose);
-    hips.position.y = lerp(hips.position.y, 0.58, kissPose);
-    hips.rotation.x = lerp(0, -1.25, fallPose); // fallen face-down/sideways
-    hips.rotation.z = lerp(0, 0.35, fallPose);
-    hips.rotation.y = Math.sin(stridePhase) * 0.06 * moveBlend;
-
-    // Torso lean: uphill slope lean + power-hike lean + sprint lean + kiss-the-rock bow
-    const slopeLean = clamp(grade * 0.55, -0.15, 0.35);
-    const normalTorsoPitch = -(slopeLean + 0.14 * runWeight + 0.38 * powerHikeWeight + 0.10 * sprintWeight) * moveBlend;
-    const stumbleWobble = isStumbling ? Math.sin(idleTime * 24) * 0.25 : 0;
-    torso.rotation.x = lerp(normalTorsoPitch + stumbleWobble, -0.95, kissPose);
-    torso.rotation.y = -Math.sin(stridePhase) * 0.09 * moveBlend;
-
-    // Head stabilizes to look ahead
-    headGroup.rotation.x = -torso.rotation.x * 0.65 + (isKissingRock ? -0.35 : 0);
-    headGroup.rotation.y = Math.sin(idleTime * 0.7) * 0.05 * (1 - moveBlend);
-
-    // Legs (negative rotation.x swings leg forward toward -Z in Three.js? Wait:
-    // Around +X axis: right-hand rule rotates +Y toward +Z, and -Y (our limb down) toward -Z?
-    // Wait: let's verify! Limb hangs along -Y: point (0, -L, 0).
-    // Rotating around +X by +theta: y' = y*cos - z*sin = -L*cos, z' = y*sin + z*cos = -L*sin!
-    // So +theta moves the foot toward -Z (FORWARD)! And knee bending backward needs -theta!)
-    legL.hip.rotation.x = lerp(hipPitchL, 0.2, fallPose);
-    legR.hip.rotation.x = lerp(hipPitchR, -0.3, fallPose);
-    legL.knee.rotation.x = lerp(-kneeFlexL, -0.5, Math.max(fallPose, kissPose * 1.4));
-    legR.knee.rotation.x = lerp(-kneeFlexR, -0.4, Math.max(fallPose, kissPose * 1.4));
-    legL.ankle.rotation.x = clamp(-legL.hip.rotation.x * 0.35, -0.35, 0.35);
-    legR.ankle.rotation.x = clamp(-legR.hip.rotation.x * 0.35, -0.35, 0.35);
-
-    // Arms: normal swing vs power-hike hands-on-knees push!
-    const normArmL = -s * armAmp * moveBlend;
-    const normArmR = s * armAmp * moveBlend;
-    const normElbow = -lerp(0.35, 1.45, runWeight) * moveBlend - 0.15;
-
-    // Power-hike arm pose: arms reach forward/down toward quads/knees
-    const phArmL = 0.65 + s * 0.28;
-    const phArmR = 0.65 - s * 0.28;
-    const phElbow = -0.55;
-
-    armL.shoulder.rotation.x = lerp(normArmL, phArmL, powerHikeWeight);
-    armR.shoulder.rotation.x = lerp(normArmR, phArmR, powerHikeWeight);
-    armL.elbow.rotation.x = lerp(normElbow, phElbow, powerHikeWeight);
-    armR.elbow.rotation.x = lerp(normElbow, phElbow, powerHikeWeight);
-
-    // Slight inward arm angle on power-hike so hands land near thighs
-    armL.shoulder.rotation.z = lerp(0.08, -0.14, powerHikeWeight);
-    armR.shoulder.rotation.z = lerp(-0.08, 0.14, powerHikeWeight);
-
-    if (isStumbling) {
-      armL.shoulder.rotation.z = 0.65;
-      armR.shoulder.rotation.z = -0.65;
+    if (isKissingRock) {
+      tCeremony = 1;
+    } else if (isFallen) {
+      tFall = 1;
+    } else if (getupTimer > 0) {
+      tGetup = 1;
+    } else if (isAirborne) {
+      tJump = 1;
+    } else if (speedMs < 0.12) {
+      tIdle = 1;
+    } else if (gait === 'power-hike') {
+      // Blend crouched power-hike with steady walk so stride looks athletic & driven
+      tPowerHike = 0.62;
+      tWalk = 0.38;
+    } else if (gait === 'walk' || gait === 'hike' || speedMs < 1.95) {
+      const f = clamp((speedMs - 1.35) / 0.85, 0, 1);
+      tWalk = 1 - f * 0.35;
+      tJog = f * 0.35;
+      if (gait === 'walk' || gait === 'hike') {
+        tWalk = 1;
+        tJog = 0;
+      }
+    } else if (gait === 'sprint' || speedMs >= 4.0) {
+      const f = clamp((speedMs - 3.3) / 1.1, 0, 1);
+      tJog = 1 - f;
+      tSprint = f;
+    } else {
+      // Smooth continuous blend from walk -> jog -> sprint based on actual ground speed
+      if (speedMs < 2.2) {
+        const f = clamp((speedMs - 1.2) / 1.0, 0, 1);
+        tWalk = 1 - f;
+        tJog = f;
+      } else if (speedMs < 3.6) {
+        tJog = 1;
+      } else {
+        const f = clamp((speedMs - 3.6) / 1.2, 0, 1);
+        tJog = 1 - f;
+        tSprint = f;
+      }
     }
 
-    return bounce;
+    const blend = Math.min(1, safeDt * 10);
+    weights.idle = lerp(weights.idle, tIdle, blend);
+    weights.walk = lerp(weights.walk, tWalk, blend);
+    weights.jog = lerp(weights.jog, tJog, blend);
+    weights.sprint = lerp(weights.sprint, tSprint, blend);
+    weights.powerHike = lerp(weights.powerHike, tPowerHike, blend);
+    weights.jump = lerp(weights.jump, tJump, Math.min(1, safeDt * 14));
+    weights.fall = lerp(weights.fall, tFall, Math.min(1, safeDt * 12));
+    weights.getup = lerp(weights.getup, tGetup, Math.min(1, safeDt * 12));
+    weights.ceremony = lerp(weights.ceremony, tCeremony, Math.min(1, safeDt * 6));
+
+    // Match clip playback rates directly to ground speed to eliminate foot sliding
+    const effectiveSpeed = Math.max(0.4, speedMs);
+    if (actions.idle) {
+      actions.idle.setEffectiveWeight(weights.idle);
+      actions.idle.setEffectiveTimeScale(1.0);
+    }
+    if (actions.walk) {
+      actions.walk.setEffectiveWeight(weights.walk);
+      actions.walk.setEffectiveTimeScale(clamp(effectiveSpeed / NATURAL_SPEEDS.walk, 0.55, 1.55));
+    }
+    if (actions.powerHike) {
+      actions.powerHike.setEffectiveWeight(weights.powerHike);
+      actions.powerHike.setEffectiveTimeScale(clamp(effectiveSpeed / NATURAL_SPEEDS.crouch, 0.6, 1.6));
+    }
+    if (actions.jog) {
+      actions.jog.setEffectiveWeight(weights.jog);
+      actions.jog.setEffectiveTimeScale(clamp(effectiveSpeed / NATURAL_SPEEDS.jog, 0.65, 1.45));
+    }
+    if (actions.sprint) {
+      actions.sprint.setEffectiveWeight(weights.sprint);
+      actions.sprint.setEffectiveTimeScale(clamp(effectiveSpeed / NATURAL_SPEEDS.sprint, 0.72, 1.35));
+    }
+    if (actions.jumpLoop) {
+      actions.jumpLoop.setEffectiveWeight(weights.jump);
+    }
+    if (actions.jumpStart) {
+      actions.jumpStart.setEffectiveWeight(isAirborne ? weights.jump * 0.45 : 0);
+    }
+    if (actions.jumpLand) {
+      actions.jumpLand.setEffectiveWeight(jumpLandTimer > 0 ? clamp(jumpLandTimer / 0.22, 0, 0.85) : 0);
+    }
+    if (actions.fall) {
+      actions.fall.setEffectiveWeight(weights.fall);
+    }
+    if (actions.getup) {
+      actions.getup.setEffectiveWeight(weights.getup);
+    }
+    if (actions.ceremony) {
+      actions.ceremony.setEffectiveWeight(weights.ceremony);
+    }
+
+    mixer.update(safeDt);
+
+    // Post-mixer procedural bone overlays: slope lean, power-hike torso pitch, stumble wobble, head stabilization
+    const uprightMask = Math.max(0, 1 - weights.fall - weights.getup - weights.ceremony);
+    if (uprightMask > 0.05) {
+      const moveMask = clamp(speedMs / 0.9, 0, 1) * uprightMask;
+      // Positive X rotation pitches torso forward in UAL/UBC spine bone space
+      const slopePitch = clamp(smoothGrade * 0.62, -0.18, 0.34) * moveMask;
+      const phExtra = weights.powerHike * 0.22;
+      const stumbleZ = isStumbling ? Math.sin(idleTime * 22) * 0.22 : 0;
+
+      if (bones.spine_01) {
+        bones.spine_01.rotation.x += (slopePitch + phExtra) * 0.45;
+        bones.spine_01.rotation.z += stumbleZ * 0.5;
+      }
+      if (bones.spine_02) {
+        bones.spine_02.rotation.x += (slopePitch + phExtra) * 0.55;
+        bones.spine_02.rotation.z += stumbleZ * 0.5;
+      }
+      if (bones.Head) {
+        // Counter-pitch head so runner keeps eyes on the trail ahead
+        bones.Head.rotation.x -= (slopePitch + phExtra) * 0.65;
+      }
+    }
+
+    // Subtle ground-contact settle on steep slopes so shoes stay seated cleanly
+    modelPivot.position.y = 0.01;
+
+    return fpBounce;
+  }
+
+  function disposeScene(obj) {
+    if (!obj) return;
+    obj.traverse((child) => {
+      if (child.geometry) child.geometry.dispose();
+      if (child.material) {
+        const mats = Array.isArray(child.material) ? child.material : [child.material];
+        for (const m of mats) {
+          for (const k of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap']) {
+            if (m[k]) m[k].dispose();
+          }
+          m.dispose();
+        }
+      }
+    });
   }
 
   return {
     root,
+    ensureLoaded,
+    isLoaded: () => loaded,
     updatePose,
     setShadowsEnabled,
     dispose() {
-      root.traverse((obj) => {
-        if (obj.geometry) obj.geometry.dispose();
-        if (obj.material) obj.material.dispose();
-      });
+      disposed = true;
+      if (mixer) {
+        mixer.stopAllAction();
+        if (gltfScene) mixer.uncacheRoot(gltfScene);
+      }
+      disposeScene(root);
     },
   };
 }

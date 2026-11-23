@@ -205,3 +205,45 @@ export function resolveCliffSlide(vx, vz, normal, dt) {
 
   return { vx: outVx, vz: outVz, onCliff: true };
 }
+
+/**
+ * Ray-casting point-in-polygon for packed Float32Array [x, y, z, ...] lake rings.
+ */
+function pointInLakeRing(x, z, coords) {
+  const n = Math.floor(coords.length / 3);
+  if (n < 3) return false;
+  let inside = false;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = coords[i * 3];
+    const zi = coords[i * 3 + 2];
+    const xj = coords[j * 3];
+    const zj = coords[j * 3 + 2];
+    const intersect = (zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / ((zj - zi) || 1e-9) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Check whether world position (x, z) is inside deep standing lake water
+ * (Ice Lake, Blue Lakes, etc.) and not on a trail/bridge.
+ */
+export function isDeepLakeWater(x, z, engine, terrain, trailData, onTrail = false) {
+  if (onTrail) return false;
+  if (engine?.worldWaterMask?.isInLake) {
+    if (engine.worldWaterMask.isInLake(x, z, -1.0)) return true;
+  } else if (Array.isArray(trailData?.lakes) && trailData.lakes.length > 0) {
+    for (let i = 0; i < trailData.lakes.length; i++) {
+      const lake = trailData.lakes[i];
+      const b = lake.bbox;
+      if (b && (x < b[0] || x > b[2] || z < b[1] || z > b[3])) continue;
+      if (lake.coords && pointInLakeRing(x, z, lake.coords)) return true;
+    }
+  }
+  const cover = terrain?.getSurface ? terrain.getSurface(x, z) : null;
+  if (cover && cover.water > 0.72) {
+    const nearest = trailData?.nearest ? trailData.nearest(x, z, 8) : null;
+    if (!nearest || nearest.dist > 5.5) return true;
+  }
+  return false;
+}
