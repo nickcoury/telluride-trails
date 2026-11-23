@@ -1,0 +1,32 @@
+{
+  "name": "Telluride Trails",
+  "short_name": "Telluride",
+  "description": "Real-time 3D trail running in Telluride, Colorado and the San Juan Mountains.",
+  "start_url": "/telluride-trails/",
+  "scope": "/telluride-trails/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0d151c",
+  "theme_color": "#0d151c",
+  "categories": ["games", "sports"],
+  "icons": [
+    {
+      "src": "./assets/ui/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./assets/ui/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./assets/ui/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

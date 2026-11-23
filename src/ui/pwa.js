@@ -1,0 +1,72 @@
+/**
+ * PWA manifest link injection (fallback if index.html omits it),
+ * service worker registration, and install prompt hook.
+ */
+
+let deferredInstallPrompt = null;
+
+export function setupPWA(assetsBase = '/telluride-trails/') {
+  const base = assetsBase.endsWith('/') ? assetsBase : `${assetsBase}/`;
+
+  // Ensure manifest & icon links exist in <head> even before architect edits index.html
+  if (!document.querySelector('link[rel="manifest"]')) {
+    const manifestLink = document.createElement('link');
+    manifestLink.rel = 'manifest';
+    manifestLink.href = `${base}manifest.webmanifest`;
+    document.head.appendChild(manifestLink);
+  }
+  if (!document.querySelector('link[rel="icon"]')) {
+    const iconLink = document.createElement('link');
+    iconLink.rel = 'icon';
+    iconLink.type = 'image/svg+xml';
+    iconLink.href = `${base}assets/ui/icon.svg`;
+    document.head.appendChild(iconLink);
+  }
+  if (!document.querySelector('link[rel="apple-touch-icon"]')) {
+    const appleIcon = document.createElement('link');
+    appleIcon.rel = 'apple-touch-icon';
+    appleIcon.href = `${base}assets/ui/icon-192.png`;
+    document.head.appendChild(appleIcon);
+  }
+
+  // Register Service Worker (safe in production & dev)
+  if ('serviceWorker' in navigator && window.location.protocol !== 'file:') {
+    const isLocalDev =
+      window.location.hostname === 'localhost' && window.location.port === '5173';
+    // Register SW even on preview/production; skip during Vite HMR dev server to avoid stale modules
+    if (!isLocalDev) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register(`${base}sw.js`, { scope: base }).catch((err) => {
+          console.warn('[pwa] service worker registration failed:', err);
+        });
+      });
+    }
+  }
+
+  const installListeners = new Set();
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredInstallPrompt = e;
+    for (const fn of installListeners) fn(true);
+  });
+  window.addEventListener('appinstalled', () => {
+    deferredInstallPrompt = null;
+    for (const fn of installListeners) fn(false);
+  });
+
+  return {
+    canInstall: () => Boolean(deferredInstallPrompt),
+    onInstallChange(fn) {
+      installListeners.add(fn);
+      return () => installListeners.delete(fn);
+    },
+    async promptInstall() {
+      if (!deferredInstallPrompt) return false;
+      deferredInstallPrompt.prompt();
+      const res = await deferredInstallPrompt.userChoice;
+      deferredInstallPrompt = null;
+      for (const fn of installListeners) fn(false);
+      return res?.outcome === 'accepted';
+    },
+  };
+}

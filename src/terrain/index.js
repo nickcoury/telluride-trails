@@ -1,66 +1,117 @@
-import * as THREE from 'three';
+import { getTierConfig } from './config.js';
+import { createDetailAssets } from './detailAssets.js';
+import { loadManifests } from './manifest.js';
+import { createTerrainMaterialPool } from './material.js';
+import { createTerrainQuadtree } from './quadtree.js';
+import { createTileCache } from './tileCache.js';
+import { createTrailMaskManager } from './trailMask.js';
 
 /**
- * STUB terrain module (owned by @terrain).
- * Implements PLAN.md createTerrain(engine) contract with harmless placeholder geometry.
+ * Streaming CDLOD terrain renderer for Telluride & the San Juan Mountains.
+ * Implements the PLAN.md createTerrain(engine) contract.
  */
 export function createTerrain(engine) {
-  const BASE_ELEV_M = 2667; // Telluride ~8,750 ft
+  let disposed = false;
+  let manifestsReady = false;
+  let detailLoadStarted = false;
+  let tierConfig = getTierConfig(engine.quality.tier);
 
-  const group = new THREE.Group();
-  group.name = 'stub-terrain';
+  const manifests = {
+    terrain: null,
+    imagery: null,
+    cover: null,
+  };
 
-  const geo = new THREE.PlaneGeometry(4000, 4000, 32, 32);
-  geo.rotateX(-Math.PI / 2);
-  const pos = geo.attributes.position;
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const z = pos.getZ(i);
-    pos.setY(i, getHeight(x, z));
-  }
-  geo.computeVertexNormals();
+  const detailAssets = createDetailAssets(engine);
+  const tileCache = createTileCache({ engine, manifests, tierConfig });
+  const trailMask = createTrailMaskManager({ engine });
+  const materialPool = createTerrainMaterialPool({ engine, detailAssets });
+  materialPool.setShaderMode(engine.quality.tier);
 
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0x4f6846,
-    roughness: 0.92,
-    metalness: 0.0,
+  const quadtree = createTerrainQuadtree({
+    engine,
+    tileCache,
+    materialPool,
+    trailMask,
+    tierConfig,
   });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.receiveShadow = true;
-  group.add(mesh);
-  engine.scene.add(group);
+
+  const ready = loadManifests(engine.assetsBase)
+    .then((loaded) => {
+      if (disposed) return;
+      manifests.terrain = loaded.terrain;
+      manifests.imagery = loaded.imagery;
+      manifests.cover = loaded.cover;
+      manifestsReady = true;
+    })
+    .catch((err) => {
+      console.warn('[terrain] manifest load error, using remote fallback:', err);
+      manifestsReady = true;
+    });
+
+  function ensureDetailTexturesLoaded() {
+    if (detailLoadStarted || disposed) return;
+    detailLoadStarted = true;
+    detailAssets.loadTierTextures(engine.quality.tier);
+  }
+
+  const offQuality = engine.events.on('quality:changed', (q) => {
+    if (disposed) return;
+    tierConfig = getTierConfig(q.tier);
+    materialPool.setShaderMode(q.tier);
+    detailAssets.setAnisotropy(q.maxAnisotropy || 4);
+    quadtree.setTierConfig(tierConfig);
+    if (detailLoadStarted) {
+      detailAssets.loadTierTextures(q.tier);
+    }
+  });
+
+  const offAppState = engine.events.on('app:state', ({ state }) => {
+    if (state !== 'title') {
+      ensureDetailTexturesLoaded();
+    }
+  });
+
+  const offContextRestored = engine.events.on('engine:contextrestored', () => {
+    detailAssets.getAlbedoArray().needsUpdate = true;
+    detailAssets.getNormalRoughArray().needsUpdate = true;
+  });
+
+  function update(cameraPos) {
+    if (disposed || !manifestsReady) return;
+    quadtree.update(cameraPos);
+  }
 
   function getHeight(x, z) {
-    // Gentle valley walls north/south to give visual shape around Telluride stub
-    return BASE_ELEV_M + Math.sin(x * 0.002) * 18 + (z * z) * 0.00012;
+    return quadtree.getHeight(x, z);
   }
 
   function getNormal(x, z) {
-    const e = 1.0;
-    const hL = getHeight(x - e, z);
-    const hR = getHeight(x + e, z);
-    const hD = getHeight(x, z - e);
-    const hU = getHeight(x, z + e);
-    const v = new THREE.Vector3(hL - hR, 2 * e, hD - hU).normalize();
-    return { x: v.x, y: v.y, z: v.z };
+    return quadtree.getNormal(x, z);
   }
 
   function getSurface(x, z) {
-    const h = getHeight(x, z);
-    if (h > 3500) return { forest: 0.05, rock: 0.65, water: 0, snow: 0.1, grass: 0.2 };
-    return { forest: 0.4, rock: 0.1, water: 0, snow: 0, grass: 0.5 };
+    return quadtree.getSurface(x, z);
   }
 
-  function update() {}
-
-  async function preload() {
-    return Promise.resolve();
+  async function preload(x, z, radiusM = 1200) {
+    await ready;
+    if (disposed) return;
+    ensureDetailTexturesLoaded();
+    await quadtree.preload(x, z, radiusM);
   }
 
   function dispose() {
-    engine.scene.remove(group);
-    geo.dispose();
-    mat.dispose();
+    if (disposed) return;
+    disposed = true;
+    offQuality();
+    offAppState();
+    offContextRestored();
+    quadtree.dispose();
+    materialPool.dispose();
+    trailMask.dispose();
+    tileCache.dispose();
+    detailAssets.dispose();
   }
 
   return {
@@ -69,7 +120,8 @@ export function createTerrain(engine) {
     getNormal,
     getSurface,
     preload,
-    ready: Promise.resolve(),
+    ready,
+    getStats: () => quadtree.getStats(),
     dispose,
   };
 }
