@@ -50,7 +50,7 @@ async function bootstrap() {
       engine.cameraRig.update(dt, null, engine.input);
     } else if (appState === 'title') {
       engine.cameraRig.updateTitleScenic(dt, t);
-    } else if (game.state && game.state.mode !== 'idle') {
+    } else if (appState !== 'loading' && game.state && game.state.mode !== 'idle') {
       const pose = typeof game.getCameraPose === 'function' ? game.getCameraPose() : null;
       if (pose) {
         engine.cameraRig.update(dt, pose, engine.input);
@@ -65,7 +65,8 @@ async function bootstrap() {
 
     engine.camera.updateMatrixWorld();
 
-    const useCameraFocus = appState === 'title' || engine.cameraRig.isFlythrough();
+    const useCameraFocus =
+      appState === 'title' || appState === 'loading' || engine.cameraRig.isFlythrough();
     if (!useCameraFocus && game.state && game.state.mode !== 'idle') {
       _activePos.x = game.state.x;
       _activePos.y = game.state.y;
@@ -139,6 +140,10 @@ async function bootstrap() {
   function scheduleLiveTitleReveal() {
     if (isBench || isCaptureHero || !heroEl) return;
     const token = ++titleRevealToken;
+    // Reset to crisp 5:30 PM mid-July Telluride sun & clear skies so returning from a night/storm
+    // run crossfades seamlessly with title-hero.webp.
+    world.setTimeOfDay?.(17.5);
+    world.setWeather?.({ monsoon: 0, rain: 0, cloudCover: 0.25 });
     engine.cameraRig.snapToTitleHero();
     heroEl.classList.remove('is-instant-hidden', 'is-hidden');
 
