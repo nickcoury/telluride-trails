@@ -296,7 +296,30 @@ function mergeWaterParts(parts) {
   geo.setAttribute('aTurquoise', new THREE.BufferAttribute(turq, 1));
   geo.setAttribute('aDepth', new THREE.BufferAttribute(depths, 1));
   geo.setIndex(new THREE.BufferAttribute(indices, 1));
-  geo.computeBoundingSphere();
+  // Fast flat-array bounding box & sphere (avoids slow Vector3.fromBufferAttribute loop in V8)
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (let i = 0; i < positions.length; i += 3) {
+    const x = positions[i], y = positions[i + 1], z = positions[i + 2];
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+  }
+  if (minX <= maxX) {
+    geo.boundingBox = new THREE.Box3(
+      new THREE.Vector3(minX, minY, minZ),
+      new THREE.Vector3(maxX, maxY, maxZ)
+    );
+    const cx = (minX + maxX) * 0.5;
+    const cy = (minY + maxY) * 0.5;
+    const cz = (minZ + maxZ) * 0.5;
+    geo.boundingSphere = new THREE.Sphere(
+      new THREE.Vector3(cx, cy, cz),
+      Math.hypot(maxX - cx, maxY - cy, maxZ - cz)
+    );
+  } else {
+    geo.computeBoundingSphere();
+  }
   return geo;
 }
 
@@ -856,10 +879,20 @@ export function createWater(engine, terrain, trailData, atmosphere) {
     return { x: pts[0].x, z: pts[0].z, pos, uv, foam, turq, depth, idx: idx.subarray(0, idxPtr), cobbles };
   }
 
-  function flushWaterCells() {
-    if (disposed) return;
+  let pendingHead = 0;
+  let waterSinceFlush = 0;
+  let waterLastFlushMs = 0;
+
+  function flushWaterCells(maxCells = Infinity) {
+    if (disposed) return false;
+    let ops = 0;
+    let hasMore = false;
     for (const cell of waterCells.values()) {
       if (!cell.dirty || cell.parts.length === 0) continue;
+      if (ops >= maxCells) {
+        hasMore = true;
+        break;
+      }
       cell.dirty = false;
       const merged = mergeWaterParts(cell.parts);
       if (cell.mesh) {
@@ -874,15 +907,17 @@ export function createWater(engine, terrain, trailData, atmosphere) {
       }
       disposables.add(merged);
       cobblesDirty = true;
+      ops++;
     }
+    return hasMore;
   }
 
   function processWaterSlice() {
     if (disposed) return false;
     const start = performance.now();
     let count = 0;
-    while (pendingQueue.length > 0 && count < 18 && performance.now() - start < 2.0) {
-      const entry = pendingQueue.shift();
+    while (pendingHead < pendingQueue.length && count < 18 && performance.now() - start < 2.0) {
+      const entry = pendingQueue[pendingHead++];
       const part = entry.type === 'lake' ? buildLakePart(entry.item) : buildWaterwayPart(entry.item);
       count++;
       if (!part) continue;
@@ -911,14 +946,29 @@ export function createWater(engine, terrain, trailData, atmosphere) {
       cell.parts.push(part);
       cell.dirty = true;
     }
+    if (pendingHead >= 128 || pendingHead >= pendingQueue.length) {
+      if (pendingHead >= pendingQueue.length) {
+        pendingQueue.length = 0;
+      } else {
+        pendingQueue.splice(0, pendingHead);
+      }
+      pendingHead = 0;
+    }
 
-    if (pendingQueue.length === 0) {
-      flushWaterCells();
+    waterSinceFlush += count;
+    const now = performance.now();
+    if (pendingHead >= pendingQueue.length) {
+      const moreDirty = flushWaterCells(1);
+      waterSinceFlush = 0;
+      waterLastFlushMs = now;
+      if (moreDirty) return true;
       taskScheduled = false;
       return false;
     }
-    if (count > 0 && pendingQueue.length % 54 < 18) {
-      flushWaterCells();
+    if (waterSinceFlush >= 64 && now - waterLastFlushMs >= 400) {
+      waterSinceFlush = 0;
+      waterLastFlushMs = now;
+      flushWaterCells(1);
     }
     return true;
   }
@@ -1141,11 +1191,18 @@ export function createWater(engine, terrain, trailData, atmosphere) {
   });
 
   let lastWaterMode = engine.quality.water;
+  let lastTier = engine.quality.tier;
   const unsubQuality = events.on('quality:changed', () => {
     const mode = engine.quality.water;
-    if (mode === lastWaterMode) return;
-    lastWaterMode = mode;
-    waterUniforms.uReflective.value = mode === 'reflective' ? 1.0 : 0.0;
+    if (mode !== lastWaterMode) {
+      lastWaterMode = mode;
+      waterUniforms.uReflective.value = mode === 'reflective' ? 1.0 : 0.0;
+    }
+    const tier = engine.quality.tier;
+    if (tier !== lastTier) {
+      lastTier = tier;
+      cobblesDirty = true;
+    }
   });
 
   let refreshTimer = 0;
@@ -1230,7 +1287,7 @@ export function createWater(engine, terrain, trailData, atmosphere) {
               c.resnapping = false;
               c.dirty = true;
               if (handle) resnapCancels.delete(handle);
-              flushWaterCells();
+              flushWaterCells(1);
               return false;
             }, { priority: 15, label: 'world:resnapWater' });
             if (handle) resnapCancels.add(handle);

@@ -46,8 +46,20 @@ const STREET_V1 = 0.245;
 
 function mergePartBuffers(parts) {
   let totalVerts = 0;
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
   for (let i = 0; i < parts.length; i++) {
-    if (parts[i]) totalVerts += parts[i].pos.length / 3;
+    const p = parts[i];
+    if (!p) continue;
+    totalVerts += p.pos.length / 3;
+    if (p.bounds) {
+      if (p.bounds[0] < minX) minX = p.bounds[0];
+      if (p.bounds[1] < minY) minY = p.bounds[1];
+      if (p.bounds[2] < minZ) minZ = p.bounds[2];
+      if (p.bounds[3] > maxX) maxX = p.bounds[3];
+      if (p.bounds[4] > maxY) maxY = p.bounds[4];
+      if (p.bounds[5] > maxZ) maxZ = p.bounds[5];
+    }
   }
   const pos = new Float32Array(totalVerts * 3);
   const norm = new Float32Array(totalVerts * 3);
@@ -71,7 +83,19 @@ function mergePartBuffers(parts) {
   out.setAttribute('normal', new THREE.BufferAttribute(norm, 3));
   out.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   out.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  out.computeBoundingSphere();
+  if (minX <= maxX) {
+    out.boundingBox = new THREE.Box3(
+      new THREE.Vector3(minX, minY, minZ),
+      new THREE.Vector3(maxX, maxY, maxZ)
+    );
+    const cx = (minX + maxX) * 0.5;
+    const cy = (minY + maxY) * 0.5;
+    const cz = (minZ + maxZ) * 0.5;
+    const rad = Math.hypot(maxX - cx, maxY - cy, maxZ - cz);
+    out.boundingSphere = new THREE.Sphere(new THREE.Vector3(cx, cy, cz), rad);
+  } else {
+    out.computeBoundingSphere();
+  }
   return out;
 }
 
@@ -233,11 +257,22 @@ function createPartBuilder() {
     pushVerticalPrism,
     finish() {
       if (pos.length === 0) return null;
+      let minX = Infinity, minY = Infinity, minZ = Infinity;
+      let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+      const posArr = new Float32Array(pos.length);
+      for (let i = 0; i < pos.length; i += 3) {
+        const x = pos[i], y = pos[i + 1], z = pos[i + 2];
+        posArr[i] = x; posArr[i + 1] = y; posArr[i + 2] = z;
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+        if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+      }
       return {
-        pos: new Float32Array(pos),
+        pos: posArr,
         norm: new Float32Array(norm),
         uv: new Float32Array(uv),
         col: new Float32Array(col),
+        bounds: [minX, minY, minZ, maxX, maxY, maxZ],
       };
     },
   };
@@ -1205,7 +1240,7 @@ export function createStructures(engine, terrain, trailData, atmosphere) {
   engine.worldBuildingMask = worldBuildingMask;
 
   // --- PBR Materials sharing the 1024x1024 Victorian & San Juan Trimsheet ---
-  const useNormalsInit = engine.quality.useNormalMaps !== false;
+  const useNormalsInit = engine.quality.tier !== 'low';
   const buildingMat = patchSanJuanMaterial(
     new THREE.MeshStandardMaterial({
       map: textures.buildingAtlas,
@@ -1423,10 +1458,16 @@ export function createStructures(engine, terrain, trailData, atmosphere) {
     return cell;
   }
 
-  function flushDirtyCells() {
-    if (disposed) return;
+  function flushDirtyCells(maxOps = Infinity) {
+    if (disposed) return false;
+    let ops = 0;
+    let hasMore = false;
     for (const cell of bldgCells.values()) {
       if (cell.dirty) {
+        if (ops >= maxOps) {
+          hasMore = true;
+          break;
+        }
         cell.dirty = false;
         const activeParts = [];
         for (let i = 0; i < cell.entries.length; i++) {
@@ -1447,10 +1488,15 @@ export function createStructures(engine, terrain, trailData, atmosphere) {
             cell.mesh = mesh;
           }
           disposables.add(merged);
+          ops++;
         }
       }
 
       if (cell.streetDirty) {
+        if (ops >= maxOps) {
+          hasMore = true;
+          break;
+        }
         cell.streetDirty = false;
         const activeStreets = [];
         for (let i = 0; i < cell.streetParts.length; i++) {
@@ -1470,17 +1516,34 @@ export function createStructures(engine, terrain, trailData, atmosphere) {
             cell.streetMesh = smesh;
           }
           disposables.add(merged);
+          ops++;
         }
       }
     }
+    return hasMore;
   }
 
+  let buildQueueHead = 0;
   let buildQueueNeedsSort = false;
   let lastSortCamX = 1e9;
   let lastSortCamZ = 1e9;
   let immediateNearFlushed = false;
+  let sinceLastFlush = 0;
+  let lastFlushMs = 0;
+
+  function compactBuildQueue() {
+    if (buildQueueHead === 0) return;
+    if (buildQueueHead >= buildQueue.length) {
+      buildQueue.length = 0;
+      buildQueueHead = 0;
+    } else {
+      buildQueue.splice(0, buildQueueHead);
+      buildQueueHead = 0;
+    }
+  }
 
   function sortBuildQueueNearCamera() {
+    compactBuildQueue();
     const camX = engine.camera?.position?.x ?? 0;
     const camZ = engine.camera?.position?.z ?? 0;
     for (let i = 0; i < buildQueue.length; i++) {
@@ -1498,7 +1561,7 @@ export function createStructures(engine, terrain, trailData, atmosphere) {
 
   function scheduleBuildWorker() {
     buildQueueNeedsSort = true;
-    if (buildTaskScheduled || buildQueue.length === 0) return;
+    if (buildTaskScheduled || buildQueueHead >= buildQueue.length) return;
     buildTaskScheduled = true;
     if (scheduler?.enqueue) {
       cancelBuildTask = scheduler.enqueue(processBuildSlice, { priority: 6, label: 'world:towns' });
@@ -1511,13 +1574,13 @@ export function createStructures(engine, terrain, trailData, atmosphere) {
     if (disposed) return false;
     const camX = engine.camera?.position?.x ?? 0;
     const camZ = engine.camera?.position?.z ?? 0;
-    if (buildQueueNeedsSort || Math.hypot(camX - lastSortCamX, camZ - lastSortCamZ) > 350) {
+    if (buildQueueHead < buildQueue.length && (buildQueueNeedsSort || Math.hypot(camX - lastSortCamX, camZ - lastSortCamZ) > 350)) {
       sortBuildQueueNearCamera();
     }
     const start = performance.now();
     let count = 0;
-    while (buildQueue.length > 0 && count < 32 && performance.now() - start < 2.5) {
-      const job = buildQueue.shift();
+    while (buildQueueHead < buildQueue.length && count < 28 && performance.now() - start < 2.2) {
+      const job = buildQueue[buildQueueHead++];
       count++;
       if (job.type === 'bldg') {
         const b = job.data;
@@ -1555,17 +1618,29 @@ export function createStructures(engine, terrain, trailData, atmosphere) {
         cell.streetDirty = true;
       }
     }
+    if (buildQueueHead >= 256 || buildQueueHead >= buildQueue.length) {
+      compactBuildQueue();
+    }
+    sinceLastFlush += count;
+    const now = performance.now();
 
-    if (buildQueue.length === 0) {
-      flushDirtyCells();
+    if (buildQueueHead >= buildQueue.length) {
+      const moreDirty = flushDirtyCells(1);
+      sinceLastFlush = 0;
+      lastFlushMs = now;
+      if (moreDirty) return true;
       buildTaskScheduled = false;
       return false;
     }
-    if (!immediateNearFlushed) {
+    if (!immediateNearFlushed && sinceLastFlush >= 28) {
       immediateNearFlushed = true;
-      flushDirtyCells();
-    } else if (count > 0 && buildQueue.length % 96 < 32) {
-      flushDirtyCells();
+      sinceLastFlush = 0;
+      lastFlushMs = now;
+      flushDirtyCells(1);
+    } else if (sinceLastFlush >= 140 && now - lastFlushMs >= 450) {
+      sinceLastFlush = 0;
+      lastFlushMs = now;
+      flushDirtyCells(1);
     }
     return true;
   }
@@ -1886,7 +1961,7 @@ export function createStructures(engine, terrain, trailData, atmosphere) {
   });
 
   let lastShadows = Boolean(engine.quality.shadows);
-  let lastNormals = Boolean(engine.quality.useNormalMaps !== false);
+  let lastNormals = engine.quality.tier !== 'low';
   const unsubQuality = events.on('quality:changed', () => {
     const cast = Boolean(engine.quality.shadows);
     if (cast !== lastShadows) {
@@ -1895,7 +1970,7 @@ export function createStructures(engine, terrain, trailData, atmosphere) {
         if (cell.mesh) cell.mesh.castShadow = cast;
       }
     }
-    const useNrm = Boolean(engine.quality.useNormalMaps !== false);
+    const useNrm = engine.quality.tier !== 'low';
     if (useNrm !== lastNormals) {
       lastNormals = useNrm;
       buildingMat.normalMap = useNrm ? textures.buildingNormal : null;
@@ -1927,11 +2002,19 @@ export function createStructures(engine, terrain, trailData, atmosphere) {
         if (nextS) cell.streetParts[se.partIdx] = nextS;
       }
       if (bIdx < cell.entries.length || sIdx < cell.streetEntries.length) return true;
+      if (cell.entries.length > 0 && !cell.resnapFlushedBldg) {
+        cell.resnapFlushedBldg = true;
+        cell.dirty = true;
+        flushDirtyCells(1);
+        if (cell.streetEntries.length > 0) return true;
+      }
+      if (cell.streetEntries.length > 0) {
+        cell.streetDirty = true;
+        flushDirtyCells(1);
+      }
+      cell.resnapFlushedBldg = false;
       cell.resnapping = false;
-      if (cell.entries.length > 0) cell.dirty = true;
-      if (cell.streetEntries.length > 0) cell.streetDirty = true;
       if (cancelHandle) resnapCancels.delete(cancelHandle);
-      flushDirtyCells();
       return false;
     }, { priority: 15, label: 'world:resnapTownCell' });
     if (cancelHandle) resnapCancels.add(cancelHandle);
