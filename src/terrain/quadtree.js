@@ -25,6 +25,34 @@ function computeUvTransform(patchZ, patchX, patchY, tileZ, tileX, tileY) {
   return [offX, offY, scale, scale];
 }
 
+function distPointToRectXZ(px, pz, minX, maxX, minZ, maxZ) {
+  const dx = px < minX ? minX - px : px > maxX ? px - maxX : 0;
+  const dz = pz < minZ ? minZ - pz : pz > maxZ ? pz - maxZ : 0;
+  return Math.hypot(dx, dz);
+}
+
+// Force full-detail zero-geomorph z18 (~120 m) patches within ~150 m of the player on ALL tiers
+// (samples already-resident DEM/imagery/cover sub-UVs -> 0 extra VRAM, 2.5-6.0 m vertex spacing!)
+const NEAR_PLAYER_ZOOM = 18;
+const NEAR_PLAYER_RADIUS_M = 150;
+
+function playerForceSplitDist(z) {
+  // Strictly monotonic 2:1 quadtree halo around player so neighbors never jump >1 zoom level:
+  // z17->z18 (<150m), z16->z17 (<275m, band=125m>120.5m), z15->z16 (<520m, band=245m>241m)
+  // (z<=14 already split at >1250m by normalSplitDist on all tiers, avoiding extra distant tile fetches!)
+  if (z === 17) return NEAR_PLAYER_RADIUS_M;
+  if (z === 16) return 275;
+  if (z === 15) return 520;
+  return 0;
+}
+
+function splitDistanceForZoom(z, tileSize, config, bias) {
+  // Keep z16/z17 camera splits tight so only immediate patches subdivide beyond mid-detail
+  const zoomFactor =
+    z >= 16 ? 0.50 : z === 15 ? Math.min(config.lodDistanceFactor, 0.90) : config.lodDistanceFactor;
+  return (tileSize * zoomFactor) / bias;
+}
+
 /**
  * Bilinear sample on a vertex-aligned (N+1)x(N+1) height grid (0..N maps exactly to u,v in [0..1]).
  */
@@ -208,13 +236,9 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
     return null;
   }
 
-  function splitDistanceForZoom(z, bounds) {
-    const size = bounds.maxX - bounds.minX;
+  function getSplitDist(z, tileSize) {
     const bias = Math.max(0.5, engine.quality.terrainLodBias || 1.0);
-    // Keep z16/z17 splits tight around the runner so only immediate patches subdivide to ultra-fine cells
-    const zoomFactor =
-      z >= 16 ? 0.50 : z === 15 ? Math.min(config.lodDistanceFactor, 0.90) : config.lodDistanceFactor;
-    return (size * zoomFactor) / bias;
+    return splitDistanceForZoom(z, tileSize, config, bias);
   }
 
   /**
@@ -233,6 +257,9 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
   const leaves = [];
   const pinnedKeys = new Set();
   const activeTargetKeys = new Set();
+  const renderedPatches = [];
+  let renderedPatchCount = 0;
+  let lastRenderedPatch = null;
 
   function walkNode(z, x, y, bounds, camPos, focusPos, isTitle) {
     const maxTerrainZ = isTitle ? Math.min(14, config.maxTerrainZoom) : config.maxTerrainZoom;
@@ -246,14 +273,23 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
     const distCam = _box.distanceToPoint(camPos);
     if (distCam > config.horizonDrawDistance) return;
 
-    // Keep immediate runner surroundings un-culled so 180-deg whip-pans never expose a gap,
+    // Keep immediate runner surroundings un-culled so 180-deg whip-pans & steep slopes never expose a gap,
     // while culling unseen patches >190m behind the camera to save ~35% draws & VRAM!
     const distFocus = _box.distanceToPoint(focusPos);
-    if (distCam > 190 && distFocus > 150 && !_frustum.intersectsBox(_box)) {
+    const distFocusXZ = distPointToRectXZ(
+      focusPos.x,
+      focusPos.z,
+      bounds.minX,
+      bounds.maxX,
+      bounds.minZ,
+      bounds.maxZ,
+    );
+    if (distCam > 190 && distFocusXZ > NEAR_PLAYER_RADIUS_M && !_frustum.intersectsBox(_box)) {
       return;
     }
 
-    const splitDist = splitDistanceForZoom(z, bounds);
+    const tileSize = bounds.maxX - bounds.minX;
+    const splitDist = getSplitDist(z, tileSize);
     const minDist = Math.min(distCam, distFocus);
     const maxAllowedZoom = isTitle
       ? Math.min(14, config.maxQuadZoom)
@@ -261,7 +297,10 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
         ? Math.min(12, config.maxQuadZoom)
         : config.maxQuadZoom;
 
-    if (z < maxAllowedZoom && minDist < splitDist) {
+    const forcePlayerSplit = !isTitle && z < NEAR_PLAYER_ZOOM && distFocusXZ < playerForceSplitDist(z);
+    const canSplitNormal = z < maxAllowedZoom && minDist < splitDist;
+
+    if (forcePlayerSplit || canSplitNormal) {
       const nz = z + 1;
       const nx0 = x * 2;
       const ny0 = y * 2;
@@ -276,7 +315,7 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
     }
 
     // Leaf node ONLY — never request tiles for internal nodes!
-    leaves.push({ z, x, y, bounds, distCam, splitDist });
+    leaves.push({ z, x, y, bounds, distCam, distFocusXZ, splitDist });
   }
 
   function update(focusPos) {
@@ -312,8 +351,9 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
 
     for (let i = 0; i < leaves.length; i++) {
       const leaf = leaves[i];
-      const { z, x, y, bounds, distCam, splitDist } = leaf;
+      const { z, x, y, bounds, distCam, distFocusXZ } = leaf;
       const tileSize = bounds.maxX - bounds.minX;
+      const tileDepth = bounds.maxZ - bounds.minZ;
 
       // 1. Terrain elevation + normal/AO
       const terrainInfo = findLeafEntryAndTargets('terrain', z, x, y, config.minQuadZoom, maxTerrainZ);
@@ -436,11 +476,15 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
         uniforms.uFlags.value.w = 0;
       }
 
-      // CDLOD geomorph range toward parent level (z - 1)
+      // CDLOD geomorph range toward parent level (z - 1).
+      // Strictly disabled within ~165 m of the player (all z18 patches + inner edge of z17 ring)
+      // so vertices under & around the runner have ZERO geomorph sag!
       let morphStart = 1e9;
       let invMorphSpan = 0;
-      if (z > config.minQuadZoom) {
-        const parentSplit = splitDist * 2.0;
+      if (z > config.minQuadZoom && (isTitle || (z < NEAR_PLAYER_ZOOM && distFocusXZ >= NEAR_PLAYER_RADIUS_M + 10))) {
+        const parentNormalSplit = getSplitDist(z - 1, tileSize * 2.0);
+        const parentPlayerSplit = isTitle ? 0 : playerForceSplitDist(z - 1);
+        const parentSplit = Math.max(parentNormalSplit, parentPlayerSplit);
         morphStart = parentSplit * 0.72;
         const morphEnd = parentSplit * 0.98;
         invMorphSpan = 1.0 / Math.max(1.0, morphEnd - morphStart);
@@ -449,10 +493,64 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
       const skirtDepth = Math.max(4.0, Math.min(28.0, tileSize * 0.015));
       uniforms.uMorphParams.value.set(morphStart, invMorphSpan, gridSegs, skirtDepth);
 
+      // Snapshot exact active patch params (zero allocations) so getHeight/getRenderedHeight
+      // evaluate the EXACT same triangulation + resident tile + geomorph as the GPU!
+      let rec = renderedPatches[i];
+      if (!rec) {
+        rec = {
+          minX: 0,
+          maxX: 0,
+          minZ: 0,
+          maxZ: 0,
+          width: 0,
+          depth: 0,
+          invW: 0,
+          invH: 0,
+          gridSegs: 0,
+          hEntry: null,
+          hOffX: 0,
+          hOffY: 0,
+          hScale: 1,
+          morphStart: 1e9,
+          invMorphSpan: 0,
+          camX: 0,
+          camY: 0,
+          camZ: 0,
+          nearExact: false,
+        };
+        renderedPatches[i] = rec;
+      }
+      rec.minX = bounds.minX;
+      rec.maxX = bounds.maxX;
+      rec.minZ = bounds.minZ;
+      rec.maxZ = bounds.maxZ;
+      rec.width = tileSize;
+      rec.depth = tileDepth;
+      rec.invW = 1 / tileSize;
+      rec.invH = 1 / tileDepth;
+      rec.gridSegs = gridSegs;
+      rec.hEntry = hEntry || null;
+      rec.hOffX = uniforms.uHeightUvTransform.value.x;
+      rec.hOffY = uniforms.uHeightUvTransform.value.y;
+      rec.hScale = uniforms.uHeightUvTransform.value.z;
+      rec.morphStart = morphStart;
+      rec.invMorphSpan = invMorphSpan;
+      rec.camX = camPos.x;
+      rec.camY = camPos.y;
+      rec.camZ = camPos.z;
+      rec.nearExact = !isTitle && (z >= NEAR_PLAYER_ZOOM - 1 || distFocusXZ <= NEAR_PLAYER_RADIUS_M + 20);
+
       mesh.receiveShadow = shadowsEnabled && distCam < config.detailDrawDistance;
       mesh.castShadow =
         shadowsEnabled && config.castShadowRadiusM > 0 && distCam < config.castShadowRadiusM;
     }
+
+    // Clear stale hEntry refs on unused rendered patch slots so evicted tiles can be GC'd
+    for (let i = leaves.length; i < renderedPatchCount; i++) {
+      renderedPatches[i].hEntry = null;
+    }
+    renderedPatchCount = leaves.length;
+    lastRenderedPatch = null;
 
     // Hide unused pooled meshes and release references to evicted tile textures
     for (let i = activeMeshCount; i < meshPool.length; i++) {
@@ -475,6 +573,100 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
   }
 
   let lastTerrainEntry = null;
+
+  function findRenderedPatch(x, z) {
+    if (
+      lastRenderedPatch &&
+      x >= lastRenderedPatch.minX &&
+      x <= lastRenderedPatch.maxX &&
+      z >= lastRenderedPatch.minZ &&
+      z <= lastRenderedPatch.maxZ
+    ) {
+      return lastRenderedPatch;
+    }
+    for (let i = 0; i < renderedPatchCount; i++) {
+      const p = renderedPatches[i];
+      if (x >= p.minX && x <= p.maxX && z >= p.minZ && z <= p.maxZ) {
+        lastRenderedPatch = p;
+        return p;
+      }
+    }
+    return null;
+  }
+
+  function samplePatchVertHeight(p, vgx, vgz, invN) {
+    const hEntry = p.hEntry;
+    const vu = vgx * invN;
+    const vv = vgz * invN;
+    let h = sampleVertexHeightBilinear(
+      hEntry.heights,
+      hEntry.width,
+      hEntry.height,
+      p.hOffX + vu * p.hScale,
+      p.hOffY + vv * p.hScale,
+    );
+    if (p.invMorphSpan > 0 && ((vgx & 1) !== 0 || (vgz & 1) !== 0)) {
+      const wx = p.minX + vu * p.width;
+      const wz = p.minZ + vv * p.depth;
+      const dist = Math.hypot(wx - p.camX, h - p.camY, wz - p.camZ);
+      const morphK = Math.max(0, Math.min(1, (dist - p.morphStart) * p.invMorphSpan));
+      if (morphK > 0) {
+        const ox = vgx & 1;
+        const oz = vgz & 1;
+        const du = ox && oz ? invN : ox * invN;
+        const dv = ox && oz ? -invN : oz * invN;
+        const hA = sampleVertexHeightBilinear(
+          hEntry.heights,
+          hEntry.width,
+          hEntry.height,
+          p.hOffX + (vu - du) * p.hScale,
+          p.hOffY + (vv - dv) * p.hScale,
+        );
+        const hB = sampleVertexHeightBilinear(
+          hEntry.heights,
+          hEntry.width,
+          hEntry.height,
+          p.hOffX + (vu + du) * p.hScale,
+          p.hOffY + (vv + dv) * p.hScale,
+        );
+        h += (0.5 * (hA + hB) - h) * morphK;
+      }
+    }
+    return h;
+  }
+
+  /**
+   * Evaluate exact rendered mesh surface height on patch `p` using the identical
+   * TL-BL-TR / TR-BL-BR triangulation as geometry.js and exact vertex heights as material.js.
+   */
+  function sampleRenderedPatchHeight(p, x, z) {
+    const hEntry = p.hEntry;
+    if (!hEntry || hEntry.evicted || !hEntry.heights) return null;
+    const N = p.gridSegs;
+    const invN = 1 / N;
+    const pu = Math.max(0, Math.min(1, (x - p.minX) * p.invW));
+    const pv = Math.max(0, Math.min(1, (z - p.minZ) * p.invH));
+    const fx = pu * N;
+    const fz = pv * N;
+    const gx = Math.min(N - 1, Math.floor(fx));
+    const gz = Math.min(N - 1, Math.floor(fz));
+    const lu = fx - gx;
+    const lv = fz - gz;
+
+    // geometry.js quad triangulation:
+    //   Tri 1 (tl, bl, tr): lu + lv <= 1
+    //   Tri 2 (tr, bl, br): lu + lv >  1
+    if (lu + lv <= 1.0) {
+      const hTL = samplePatchVertHeight(p, gx, gz, invN);
+      const hTR = samplePatchVertHeight(p, gx + 1, gz, invN);
+      const hBL = samplePatchVertHeight(p, gx, gz + 1, invN);
+      return hTL + lu * (hTR - hTL) + lv * (hBL - hTL);
+    }
+    const hTR = samplePatchVertHeight(p, gx + 1, gz, invN);
+    const hBL = samplePatchVertHeight(p, gx, gz + 1, invN);
+    const hBR = samplePatchVertHeight(p, gx + 1, gz + 1, invN);
+    return hBR + (1 - lu) * (hBL - hBR) + (1 - lv) * (hTR - hBR);
+  }
 
   function findBestTerrainEntry(x, z) {
     const maxZ = config.maxTerrainZoom;
@@ -511,11 +703,7 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
     return null;
   }
 
-  /**
-   * Synchronous height query using best resident stitched 257x257 terrain tile. Never throws.
-   */
-  function getHeight(x, z) {
-    if (!Number.isFinite(x) || !Number.isFinite(z)) return 2667;
+  function sampleRawDemHeight(x, z) {
     const entry = findBestTerrainEntry(x, z);
     if (!entry) return 2667;
     const b = entry.bounds;
@@ -525,10 +713,39 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
   }
 
   /**
-   * Synchronous world normal query from best resident terrain tile. Never throws.
+   * Synchronous exact rendered-mesh height query (matches active GPU triangle at ANY zoom/distance).
+   * Falls back to best resident DEM bilinear sample if (x, z) is outside currently rendered patches.
+   */
+  function getRenderedHeight(x, z) {
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return 2667;
+    const patch = findRenderedPatch(x, z);
+    if (patch) {
+      const y = sampleRenderedPatchHeight(patch, x, z);
+      if (y !== null) return y;
+    }
+    return sampleRawDemHeight(x, z);
+  }
+
+  /**
+   * Synchronous height query. Within the near-player full-detail zone (all z17/z18 patches),
+   * evaluates the exact rendered GPU triangulation (< 0.004 m error on any slope/tier);
+   * beyond near-player range falls back to full-res resident DEM so distant props don't bake coarse LOD.
+   */
+  function getHeight(x, z) {
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return 2667;
+    const patch = findRenderedPatch(x, z);
+    if (patch && patch.nearExact) {
+      const y = sampleRenderedPatchHeight(patch, x, z);
+      if (y !== null) return y;
+    }
+    return sampleRawDemHeight(x, z);
+  }
+
+  /**
+   * Synchronous world normal query matching the rendered terrain surface. Never throws.
    */
   function getNormal(x, z) {
-    const e = 3.5;
+    const e = 2.0;
     const hL = getHeight(x - e, z);
     const hR = getHeight(x + e, z);
     const hN = getHeight(x, z - e);
@@ -754,6 +971,9 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
   function setTierConfig(nextConfig) {
     config = nextConfig;
     lastTerrainEntry = null;
+    for (let i = 0; i < renderedPatchCount; i++) renderedPatches[i].hEntry = null;
+    renderedPatchCount = 0;
+    lastRenderedPatch = null;
     currentGeo = getGeometry(config.patchGridSize);
     tileCache.setTierConfig(nextConfig);
     trailMask.setTierConfig(nextConfig);
@@ -772,11 +992,15 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
     for (const geo of geometries.values()) geo.dispose();
     geometries.clear();
     meshPool.length = 0;
+    renderedPatches.length = 0;
+    renderedPatchCount = 0;
+    lastRenderedPatch = null;
   }
 
   return {
     update,
     getHeight,
+    getRenderedHeight,
     getNormal,
     getSurface,
     preload,

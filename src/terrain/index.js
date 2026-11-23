@@ -113,6 +113,10 @@ export function createTerrain(engine) {
     return quadtree.getHeight(x, z);
   }
 
+  function getRenderedHeight(x, z) {
+    return quadtree.getRenderedHeight(x, z);
+  }
+
   function getNormal(x, z) {
     return quadtree.getNormal(x, z);
   }
@@ -149,6 +153,7 @@ export function createTerrain(engine) {
   return {
     update,
     getHeight,
+    getRenderedHeight,
     getNormal,
     getSurface,
     preload,

@@ -93,6 +93,15 @@ export function createGame(engine, terrain, trailData, world) {
   let cachedRouteIdx = 1;
   let cachedRoutePerfMs = -Infinity;
   const camPoseScratch = { x: 0, y: 0, z: 0, heading: 0 };
+  const runnerBoundsScratch = { x: 0, y: 0, z: 0, height: 1.74, radius: 0.42, visible: false };
+
+  // Prefer exact rendered-mesh height when exposed by terrain3; fall back to terrain.getHeight
+  function sampleGroundHeight(x, z) {
+    const h = typeof terrain.getRenderedHeight === 'function'
+      ? terrain.getRenderedHeight(x, z)
+      : terrain.getHeight(x, z);
+    return Number.isFinite(h) ? h : state.y;
+  }
 
   function ensureVectorArea(x, z) {
     if (!trailData?.loadArea) return;
@@ -103,9 +112,11 @@ export function createGame(engine, terrain, trailData, world) {
     }
   }
 
-  // Vertical ground-follow smoothing + small trail hop
-  let smoothY = terrain.getHeight(0, 0);
-  let vertRefY = smoothY;
+  // Exact terrain grounding + small trail hop (zero smoothY lag on steep climbs/descents)
+  const initGroundY = typeof terrain.getRenderedHeight === 'function'
+    ? terrain.getRenderedHeight(0, 0)
+    : terrain.getHeight(0, 0);
+  let vertRefY = Number.isFinite(initGroundY) ? initGroundY : 2667;
   let jumpOffset = 0;
   let jumpVel = 0;
   let stumbleTimer = 0;
@@ -127,7 +138,7 @@ export function createGame(engine, terrain, trailData, world) {
     dnfReason: null,
     x: 0,
     z: 0,
-    y: smoothY,
+    y: vertRefY,
     heading: 0,
     distanceM: 0,
     vertM: 0,
@@ -164,7 +175,16 @@ export function createGame(engine, terrain, trailData, world) {
     }
   }
 
-  function syncRunnerVisuals(dt, isNight) {
+  function updateRunnerBoundsScratch() {
+    runnerBoundsScratch.x = state.x;
+    runnerBoundsScratch.y = state.y;
+    runnerBoundsScratch.z = state.z;
+    runnerBoundsScratch.height = runner.getVisualHeight();
+    runnerBoundsScratch.radius = 0.42;
+    runnerBoundsScratch.visible = Boolean(runner.root.visible && state.mode !== 'idle');
+  }
+
+  function syncRunnerVisuals(dt, isNight, snapGround = false) {
     const camMode = engine.cameraRig?.getMode?.() || 'chase';
     const isFp = camMode === 'first-person';
     const shadowsEnabled = Boolean(engine.quality?.shadows);
@@ -173,9 +193,16 @@ export function createGame(engine, terrain, trailData, world) {
       runner.setShadowsEnabled(shadowsEnabled);
     }
 
+    // Re-sync exact rendered terrain height so streaming tiles or pauses never cause drift
+    if (state.mode !== 'idle') {
+      const exactGroundY = sampleGroundHeight(state.x, state.z);
+      state.y = exactGroundY + jumpOffset;
+    }
+
     runner.root.position.set(state.x, state.y, state.z);
     runner.root.rotation.y = state.heading;
 
+    const terrainNormal = terrain.getNormal ? terrain.getNormal(state.x, state.z) : null;
     const bounce = runner.updatePose(dt, {
       speedMs: state.speedMs,
       grade: state.grade,
@@ -187,12 +214,18 @@ export function createGame(engine, terrain, trailData, world) {
       nightMode: isNight,
       visible: state.mode !== 'idle' && !isFp,
       allowHeadlamp: true,
+      getGroundY: sampleGroundHeight,
+      terrainNormal,
+      heading: state.heading,
+      snapGround,
     });
+
+    updateRunnerBoundsScratch();
 
     if (hardrockRock.visible) {
       const fin = raceMgr.getRace()?.finish;
       if (fin) {
-        hardrockRock.position.set(fin.x, terrain.getHeight(fin.x, fin.z), fin.z);
+        hardrockRock.position.set(fin.x, sampleGroundHeight(fin.x, fin.z), fin.z);
       }
     }
 
@@ -203,12 +236,12 @@ export function createGame(engine, terrain, trailData, world) {
     phys = createPhysiology();
     state.x = x;
     state.z = z;
-    smoothY = terrain.getHeight(x, z);
-    vertRefY = smoothY;
-    state.y = smoothY;
+    const groundY = sampleGroundHeight(x, z);
+    vertRefY = groundY;
+    state.y = groundY;
     state.heading = heading;
     camPoseScratch.x = x;
-    camPoseScratch.y = smoothY;
+    camPoseScratch.y = groundY;
     camPoseScratch.z = z;
     camPoseScratch.heading = heading;
     cachedReturnRoute = null;
@@ -224,7 +257,7 @@ export function createGame(engine, terrain, trailData, world) {
     state.dnfReason = null;
     state.checkpointIdx = 0;
     elapsedRunS = 0;
-    maxElevFt = smoothY * M_TO_FT;
+    maxElevFt = groundY * M_TO_FT;
     offTrailSeconds = 0;
     raceOffCourseS = 0;
     lastNearAid = null;
@@ -302,7 +335,7 @@ export function createGame(engine, terrain, trailData, world) {
     runner.ensureLoaded();
     resolveFreeRunStartTime(startTime, startHour);
 
-    syncRunnerVisuals(0.016, lastLocalClock.isNight);
+    syncRunnerVisuals(0.016, lastLocalClock.isNight, true);
     engine.cameraRig?.snapTo?.({ x: state.x, y: state.y, z: state.z }, state.heading);
     engine.setAppState?.('playing');
     emitHud(null, false);
@@ -344,7 +377,7 @@ export function createGame(engine, terrain, trailData, world) {
     const isHardrock = (race.id || '').toLowerCase().includes('hardrock');
     hardrockRock.visible = isHardrock;
 
-    syncRunnerVisuals(0.016, lastLocalClock.isNight);
+    syncRunnerVisuals(0.016, lastLocalClock.isNight, true);
     engine.cameraRig?.snapTo?.({ x: state.x, y: state.y, z: state.z }, state.heading);
     engine.setAppState?.('playing');
     emitHud(null, false);
@@ -369,9 +402,9 @@ export function createGame(engine, terrain, trailData, world) {
     state.z = saved.pos?.z ?? 0;
     ensureVectorArea(state.x, state.z);
     runner.ensureLoaded();
-    smoothY = terrain.getHeight(state.x, state.z);
-    vertRefY = smoothY;
-    state.y = smoothY;
+    const groundY = sampleGroundHeight(state.x, state.z);
+    vertRefY = groundY;
+    state.y = groundY;
     state.heading = saved.heading ?? 0;
     camPoseScratch.x = state.x;
     camPoseScratch.y = state.y;
@@ -384,7 +417,7 @@ export function createGame(engine, terrain, trailData, world) {
     state.vertLossM = saved.vertLossM ?? 0;
     state.timeDilated = Boolean(saved.timeDilated || timeScale > 1);
     elapsedRunS = (saved.elapsedRunS ?? 0) + awayS;
-    maxElevFt = saved.maxElevFt ?? (smoothY * M_TO_FT);
+    maxElevFt = saved.maxElevFt ?? (groundY * M_TO_FT);
     if (saved.simEpochMs) {
       weather.setSimEpochMs(saved.simEpochMs + awayS * 1000);
     } else {
@@ -404,7 +437,7 @@ export function createGame(engine, terrain, trailData, world) {
         stepPhysiology(phys, ch, {
           speedMs: 0,
           grade: 0,
-          elevationM: smoothY,
+          elevationM: groundY,
           surface: 'trail',
           offTrail: false,
           tempC: 12,
@@ -434,7 +467,7 @@ export function createGame(engine, terrain, trailData, world) {
       hardrockRock.visible = false;
     }
 
-    syncRunnerVisuals(0.016, weather.getDenverClock().isNight);
+    syncRunnerVisuals(0.016, weather.getDenverClock().isNight, true);
     engine.cameraRig?.snapTo?.({ x: state.x, y: state.y, z: state.z }, state.heading);
     engine.setAppState?.('playing');
 
@@ -482,12 +515,12 @@ export function createGame(engine, terrain, trailData, world) {
     const dry = findDryShore(x, z, engine, terrain, trailData);
     state.x = dry.x;
     state.z = dry.z;
-    smoothY = terrain.getHeight(state.x, state.z);
-    vertRefY = smoothY;
-    state.y = smoothY;
+    const groundY = sampleGroundHeight(state.x, state.z);
+    vertRefY = groundY;
+    state.y = groundY;
     state.heading = heading;
     camPoseScratch.x = state.x;
-    camPoseScratch.y = smoothY;
+    camPoseScratch.y = groundY;
     camPoseScratch.z = state.z;
     camPoseScratch.heading = heading;
     cachedReturnRoute = null;
@@ -495,7 +528,7 @@ export function createGame(engine, terrain, trailData, world) {
     jumpOffset = 0;
     jumpVel = 0;
     if (dry.nudged) ensureVectorArea(state.x, state.z);
-    syncRunnerVisuals(0.016, weather.getDenverClock().isNight);
+    syncRunnerVisuals(0.016, weather.getDenverClock().isNight, true);
     engine.cameraRig?.snapTo?.({ x: state.x, y: state.y, z: state.z }, state.heading);
   }
 
@@ -653,9 +686,9 @@ export function createGame(engine, terrain, trailData, world) {
 
     // Sample terrain ahead to compute grade along travel direction
     const aheadDist = 2.0;
-    const hHere = terrain.getHeight(state.x, state.z);
+    const hHere = sampleGroundHeight(state.x, state.z);
     const hAhead = moveMag > 0.05
-      ? terrain.getHeight(state.x + dirX * aheadDist, state.z + dirZ * aheadDist)
+      ? sampleGroundHeight(state.x + dirX * aheadDist, state.z + dirZ * aheadDist)
       : hHere;
     const rawGrade = moveMag > 0.05 ? (hAhead - hHere) / aheadDist : 0;
     state.grade = clamp(rawGrade, -1.5, 1.5);
@@ -742,7 +775,7 @@ export function createGame(engine, terrain, trailData, world) {
     }
 
     // Ground elevation & vert tracking (with hysteresis so micro-jitter/LOD pops don't inflate vert)
-    const newGroundY = terrain.getHeight(state.x, state.z);
+    const newGroundY = sampleGroundHeight(state.x, state.z);
     if (stepDist > 0.01) {
       const refDelta = newGroundY - vertRefY;
       if (Math.abs(refDelta) >= 1.5 && Math.abs(refDelta) < 18) {
@@ -773,8 +806,8 @@ export function createGame(engine, terrain, trailData, world) {
         jumpVel = 0;
       }
     }
-    smoothY += (newGroundY - smoothY) * Math.min(1, dtSim * 22);
-    state.y = smoothY + jumpOffset;
+    // Exact terrain-locked grounding: zero smoothY lag on steep climbs/descents
+    state.y = newGroundY + jumpOffset;
 
     // Trail-keeping & Leave No Trace warnings (never warn when legitimately on active race course)
     const offTrail = !surfEval.onTrail && !onRaceCourse && surfEval.surfaceInfo.offTrail;
@@ -1025,6 +1058,8 @@ export function createGame(engine, terrain, trailData, world) {
       z: state.z,
       y: state.y,
       heading: state.heading,
+      runnerHeight: runnerBoundsScratch.height,
+      runnerRadius: runnerBoundsScratch.radius,
       race: raceHud,
       nearAid,
       nearStream,
@@ -1177,9 +1212,29 @@ export function createGame(engine, terrain, trailData, world) {
         state.paused = false;
         hardrockRock.visible = false;
         runner.root.visible = false;
+        updateRunnerBoundsScratch();
       }
     }),
   ];
+
+  // Late-update grounding pass: runs AFTER terrain.update() and BEFORE ui's onLateUpdate & render,
+  // eliminating even a single frame of LOD/tile-switch offset and keeping getRunnerBounds() exact.
+  const unsubLateUpdate = typeof engine.onLateUpdate === 'function'
+    ? engine.onLateUpdate(() => {
+      if (state.mode === 'idle') {
+        runnerBoundsScratch.visible = false;
+        return;
+      }
+      const freshGroundY = sampleGroundHeight(state.x, state.z);
+      const targetY = freshGroundY + jumpOffset;
+      if (Math.abs(targetY - state.y) > 0.002) {
+        state.y = targetY;
+        syncRunnerVisuals(0, lastLocalClock.isNight, true);
+      } else {
+        updateRunnerBoundsScratch();
+      }
+    })
+    : null;
 
   const onBeforeUnload = () => {
     persistRun();
@@ -1189,6 +1244,7 @@ export function createGame(engine, terrain, trailData, world) {
   function dispose() {
     window.removeEventListener('beforeunload', onBeforeUnload);
     for (const u of unsubs) u?.();
+    unsubLateUpdate?.();
     engine.scene.remove(runner.root);
     engine.scene.remove(hardrockRock);
     runner.dispose();
@@ -1258,6 +1314,7 @@ export function createGame(engine, terrain, trailData, world) {
     advanceCheckpoint,
     triggerStormNow: (dur) => weather.triggerStormNow(dur),
     getCameraPose: () => camPoseScratch,
+    getRunnerBounds: () => runnerBoundsScratch,
     dispose,
   };
 }

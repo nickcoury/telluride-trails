@@ -1119,7 +1119,8 @@
   .hud-top-actions {
     pointer-events: auto;
     display: flex;
-    flex: 1 1 auto;
+    flex: 0 0 auto;
+    margin-inline-start: auto;
     justify-content: flex-end;
     align-items: center;
     gap: 0.4rem;
@@ -1334,7 +1335,9 @@
     flex-direction: column;
     align-items: center;
     gap: 0.4rem;
-    inline-size: min(90dvi, 30rem);
+    inline-size: max-content;
+    max-inline-size: min(88dvi, 26rem);
+    pointer-events: none;
     z-index: 6;
   }
 
@@ -1552,13 +1555,35 @@
   }
 
   .context-actions.context-actions--expanded {
-    max-block-size: 34dvb;
-    overflow-y: auto;
-    padding: 0.45rem;
+    display: grid;
+    grid-template-rows: repeat(2, auto);
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    justify-content: flex-start;
+    align-items: center;
+    inline-size: max-content;
+    max-inline-size: min(94dvi, 26rem);
+    gap: 0.26rem;
+    padding: 0.34rem 0.45rem;
     border-radius: var(--radius-md);
-    background: rgba(11, 18, 24, 0.88);
+    background: rgba(11, 18, 24, 0.86);
     border: 1px solid var(--border-strong);
     inset-block-end: calc(max(0.65rem, var(--safe-bottom)) + 102px);
+  }
+
+  .context-actions.context-actions--expanded::-webkit-scrollbar {
+    display: none;
+  }
+
+  .context-actions.context-actions--expanded .ctx-btn {
+    white-space: nowrap;
+    padding: 0.26rem 0.52rem;
+    min-block-size: 30px;
+    min-inline-size: 0;
+    font-size: 0.72rem;
   }
 
   .ctx-aid-label {
@@ -1883,7 +1908,8 @@
 
     .hud-toasts {
       inset-block-start: calc(max(0.45rem, var(--safe-top)) + 4.4rem);
-      inline-size: min(88dvi, 24rem);
+      inline-size: max-content;
+      max-inline-size: min(88dvi, 22rem);
     }
 
     .hud-layer:has(.hud-race-bar:not([hidden])) .hud-toasts {
@@ -1891,10 +1917,15 @@
     }
 
     .hud-toast {
-      padding: 0.35rem 0.7rem;
-      font-size: 0.8rem;
-      background: rgba(11, 18, 24, 0.76);
+      padding: 0.28rem 0.62rem;
+      font-size: 0.76rem;
+      line-height: 1.25;
+      background: rgba(11, 18, 24, 0.78);
       backdrop-filter: blur(6px);
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
     }
 
     .touch-controls {
@@ -1923,6 +1954,7 @@
     }
 
     .action-btn {
+      position: relative;
       inline-size: 44px;
       block-size: 44px;
       min-inline-size: 44px;
@@ -1957,28 +1989,161 @@
     }
 
     .hud-sub-row {
-      max-inline-size: calc(100% - 64px);
+      inline-size: max-content;
+      max-inline-size: calc(50dvi - 44px);
+    }
+
+    .touch-controls {
+      inset-block-end: max(0.4rem, var(--safe-bottom));
+      inset-inline: max(0.45rem, var(--safe-left)) max(0.45rem, var(--safe-right));
     }
 
     .joystick {
-      inline-size: 80px;
-      block-size: 80px;
+      inline-size: 76px;
+      block-size: 76px;
     }
 
     .joystick__ring {
-      inline-size: 74px;
-      block-size: 74px;
+      inline-size: 70px;
+      block-size: 70px;
     }
 
     .joystick__knob {
-      inline-size: 32px;
-      block-size: 32px;
+      inline-size: 30px;
+      block-size: 30px;
+    }
+
+    .action-pad {
+      grid-template-columns: repeat(2, 42px);
+      gap: 0.3rem;
+    }
+
+    .action-btn {
+      inline-size: 42px;
+      block-size: 42px;
+      min-inline-size: 42px;
+      min-block-size: 42px;
+    }
+
+    .action-btn::after {
+      content: '';
+      position: absolute;
+      inset: -2px;
     }
 
     .context-actions.context-actions--strip {
-      max-inline-size: calc(100dvi - 208px);
-      inset-block-end: max(0.6rem, var(--safe-bottom));
+      max-inline-size: calc(100dvi - 196px);
+      inset-block-end: max(0.5rem, var(--safe-bottom));
     }
+  }
+
+  /* Dynamic Runner Screen-BBox Occlusion Guard (#166) */
+  .context-actions.context-actions--side,
+  .context-actions[data-ctx-zone='side-right'] {
+    inset-block-start: auto !important;
+    inset-block-end: calc(max(0.55rem, var(--safe-bottom)) + 98px) !important;
+    inset-inline-start: auto !important;
+    inset-inline-end: max(0.55rem, var(--safe-right)) !important;
+    transform: none !important;
+    inline-size: max-content;
+  }
+
+  @media (max-height: 520px) {
+    .context-actions.context-actions--side,
+    .context-actions[data-ctx-zone='side-right'] {
+      inset-block-end: calc(max(0.45rem, var(--safe-bottom)) + 92px) !important;
+      inset-inline-end: max(0.45rem, var(--safe-right)) !important;
+    }
+  }
+
+  .context-actions[data-ctx-zone='bottom-gap'] {
+    inset-block-start: auto !important;
+    inset-block-end: max(0.5rem, var(--safe-bottom)) !important;
+    inset-inline-start: 50% !important;
+    inset-inline-end: auto !important;
+    transform: translateX(-50%) !important;
+    max-inline-size: calc(100dvi - 196px);
+  }
+
+  .context-actions[data-ctx-zone='top'] {
+    inset-block-start: var(--ctx-top-px, calc(max(0.45rem, var(--safe-top)) + 6.2rem)) !important;
+    inset-block-end: auto !important;
+    inset-inline-start: 50% !important;
+    inset-inline-end: auto !important;
+    transform: translateX(-50%) !important;
+  }
+
+  .context-actions[data-ctx-zone='top-left'] {
+    inset-block-start: var(--ctx-top-px, calc(max(0.45rem, var(--safe-top)) + 6.2rem)) !important;
+    inset-block-end: auto !important;
+    inset-inline-start: max(0.5rem, var(--safe-left)) !important;
+    inset-inline-end: auto !important;
+    transform: none !important;
+    max-inline-size: min(41dvi, 17.5rem) !important;
+  }
+
+  .context-actions[data-ctx-zone='bottom-above'] {
+    inset-block-start: auto !important;
+    inset-block-end: calc(max(0.55rem, var(--safe-bottom)) + 100px) !important;
+    inset-inline-start: 50% !important;
+    inset-inline-end: auto !important;
+    transform: translateX(-50%) !important;
+  }
+
+  .hud-toasts[data-toast-zone='top'] {
+    inset-block-start: var(--toast-y-px, calc(max(0.45rem, var(--safe-top)) + 4.4rem)) !important;
+    inset-block-end: auto !important;
+    inset-inline-start: 50% !important;
+    inset-inline-end: auto !important;
+    transform: translateX(-50%) !important;
+    align-items: center;
+  }
+
+  .hud-toasts[data-toast-zone='top-left'] {
+    inset-block-start: var(--toast-y-px, calc(max(0.45rem, var(--safe-top)) + 4.4rem)) !important;
+    inset-block-end: auto !important;
+    inset-inline-start: max(0.5rem, var(--safe-left)) !important;
+    inset-inline-end: auto !important;
+    transform: none !important;
+    align-items: flex-start;
+    max-inline-size: min(41dvi, 17.5rem) !important;
+  }
+
+  .hud-toasts[data-toast-zone='bottom-gap'] {
+    inset-block-start: auto !important;
+    inset-block-end: max(0.5rem, var(--safe-bottom)) !important;
+    inset-inline-start: 50% !important;
+    inset-inline-end: auto !important;
+    transform: translateX(-50%) !important;
+    align-items: center;
+    max-inline-size: calc(100dvi - 196px) !important;
+  }
+
+  .hud-toasts[data-toast-zone='bottom-above'] {
+    inset-block-start: auto !important;
+    inset-block-end: calc(max(0.55rem, var(--safe-bottom)) + 100px) !important;
+    inset-inline-start: 50% !important;
+    inset-inline-end: auto !important;
+    transform: translateX(-50%) !important;
+    align-items: center;
+  }
+
+  .hud-trail-pill.is-runner-occluded,
+  .hud-stats.is-runner-occluded,
+  .hud-race-bar.is-runner-occluded,
+  .hud-minimap.is-runner-occluded,
+  .hud-toasts.is-runner-occluded,
+  .context-actions.is-runner-occluded,
+  .joystick.is-runner-occluded:not(.is-active),
+  .action-pad.is-runner-occluded:not(:has(:active)):not(:has(.is-active)) {
+    opacity: 0.24 !important;
+    transition: opacity 0.14s ease;
+  }
+
+  .hud-trail-pill.is-runner-occluded,
+  .hud-race-bar.is-runner-occluded,
+  .hud-toasts.is-runner-occluded {
+    pointer-events: none !important;
   }
 }
 

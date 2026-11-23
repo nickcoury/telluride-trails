@@ -19,6 +19,46 @@ async function bootstrap() {
   const world = createWorld(engine, terrain, trailData);
   const game = createGame(engine, terrain, trailData, world);
 
+  engine.cameraRig.setWorldContext({
+    trailData,
+    getBuildingMask: () => engine.worldBuildingMask,
+  });
+
+  // Zero-allocation runner world & screen-space bounding-box getters for UI overlay collision avoidance
+  const _runnerBounds = { x: 0, y: 0, z: 0, height: 1.85, radius: 0.42, visible: false, active: false };
+  engine.getRunnerWorldBounds = () => {
+    const active = Boolean(game.state && game.state.mode !== 'idle' && engine.getAppState() !== 'title');
+    if (!active) {
+      _runnerBounds.active = false;
+      _runnerBounds.visible = false;
+      return _runnerBounds;
+    }
+    const gb = typeof game.getRunnerBounds === 'function' ? game.getRunnerBounds() : null;
+    if (gb && Number.isFinite(gb.x) && Number.isFinite(gb.y) && Number.isFinite(gb.z)) {
+      _runnerBounds.x = gb.x;
+      _runnerBounds.y = gb.y;
+      _runnerBounds.z = gb.z;
+      _runnerBounds.height = Number.isFinite(gb.height) ? gb.height : 1.85;
+      _runnerBounds.radius = Number.isFinite(gb.radius) ? gb.radius : 0.42;
+      _runnerBounds.visible = gb.visible !== false;
+      _runnerBounds.active = _runnerBounds.visible;
+      return _runnerBounds;
+    }
+    _runnerBounds.x = game.state.x;
+    _runnerBounds.y = game.state.y;
+    _runnerBounds.z = game.state.z;
+    _runnerBounds.height = 1.85;
+    _runnerBounds.radius = 0.42;
+    _runnerBounds.visible = true;
+    _runnerBounds.active = true;
+    return _runnerBounds;
+  };
+  engine.getRunnerScreenRect = () => {
+    const b = engine.getRunnerWorldBounds();
+    if (!b.active || !b.visible) return engine.cameraRig.projectRunnerScreenRect(null);
+    return engine.cameraRig.projectRunnerScreenRect(b, b.height, b.radius);
+  };
+
   // Start Title screen in crisp late-afternoon mid-July Telluride sun (5:30 PM MDT — sun from WSW
   // illuminating Telluride town, Ajax Peak, and the Box Canyon headwall face-on). Starting a run overrides this.
   world.setTimeOfDay?.(17.5);

@@ -6,6 +6,7 @@ import { createHUD } from './hud.js';
 import { createTouchControls } from './touchControls.js';
 import { createDialogs } from './dialogs.js';
 import { createScreens } from './screens.js';
+import { createRunnerGuard } from './runnerGuard.js';
 
 /**
  * Telluride Trails UI Entry Point (PLAN.md contract).
@@ -338,6 +339,8 @@ export function createUI(engine, { trailData, game, terrain } = {}) {
     screens.showScreen('title');
   }
 
+  const runnerGuard = createRunnerGuard({ engine, game, root });
+
   return {
     showScreen: (name) => screens.showScreen(name),
     showToast: (text, tone, ms) => hud.showToast(text, tone, ms),
@@ -351,6 +354,7 @@ export function createUI(engine, { trailData, game, terrain } = {}) {
       unsubFinish();
       unsubDnf();
       unsubPreloadProg();
+      runnerGuard.dispose();
       hud.dispose();
       touchControls.dispose();
       dialogs.dispose();

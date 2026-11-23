@@ -12,6 +12,37 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const lerp = (a, b, t) => a + (b - a) * t;
 
+// Measured vertical clearances from runner.glb bone origins down to outsole bottom
+const SOLE_BELOW_BALL = 0.025;
+const SOLE_BELOW_FOOT = 0.106;
+
+// Reusable scratch objects for zero-allocation per-frame 2-bone leg IK & slope grounding
+const _vHip = new THREE.Vector3();
+const _vKnee = new THREE.Vector3();
+const _vAnkle = new THREE.Vector3();
+const _vBall = new THREE.Vector3();
+const _vLeaf = new THREE.Vector3();
+const _vTarget = new THREE.Vector3();
+const _vDir = new THREE.Vector3();
+const _vPole = new THREE.Vector3();
+const _vAnimPole = new THREE.Vector3();
+const _vCur = new THREE.Vector3();
+const _vNew = new THREE.Vector3();
+const _vKneeNew = new THREE.Vector3();
+const _vAnkleNew = new THREE.Vector3();
+const _vFwd = new THREE.Vector3();
+const _vRight = new THREE.Vector3();
+const _vUp = new THREE.Vector3(0, 1, 0);
+const _vNorm = new THREE.Vector3();
+const _vTmp = new THREE.Vector3();
+const _qDelta = new THREE.Quaternion();
+const _qParent = new THREE.Quaternion();
+const _qParentInv = new THREE.Quaternion();
+const _qOrigFoot = new THREE.Quaternion();
+const _qSlope = new THREE.Quaternion();
+const _qLocal = new THREE.Quaternion();
+const _qBasePivot = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+
 // Calibrated natural ground speeds (m/s) for each UAL1 locomotion clip so
 // timeScale = speedMs / naturalSpeed keeps feet planted with zero sliding.
 const NATURAL_SPEEDS = {
@@ -20,6 +51,115 @@ const NATURAL_SPEEDS = {
   jog: 3.05,
   sprint: 5.05,
 };
+
+function applyWorldDeltaToBone(bone, qWorldDelta) {
+  if (!bone.parent) {
+    bone.quaternion.premultiply(qWorldDelta).normalize();
+    return;
+  }
+  bone.parent.getWorldQuaternion(_qParent);
+  _qParentInv.copy(_qParent).invert();
+  _qLocal.copy(_qParentInv).multiply(qWorldDelta).multiply(_qParent).multiply(bone.quaternion);
+  bone.quaternion.copy(_qLocal).normalize();
+}
+
+function measureFootSole(footBone, ballBone, leafBone, out) {
+  footBone.getWorldPosition(_vAnkle);
+  let soleY = _vAnkle.y - SOLE_BELOW_FOOT;
+  out.heelX = _vAnkle.x;
+  out.heelZ = _vAnkle.z;
+  out.ballX = _vAnkle.x;
+  out.ballZ = _vAnkle.z;
+
+  if (ballBone) {
+    ballBone.getWorldPosition(_vBall);
+    out.ballX = _vBall.x;
+    out.ballZ = _vBall.z;
+    const ballSole = _vBall.y - SOLE_BELOW_BALL;
+    if (ballSole < soleY) soleY = ballSole;
+  }
+  if (leafBone) {
+    leafBone.getWorldPosition(_vLeaf);
+    const leafSole = _vLeaf.y - SOLE_BELOW_BALL;
+    if (leafSole < soleY) soleY = leafSole;
+  }
+  out.soleY = soleY;
+  return out;
+}
+
+/**
+ * Closed-form 2-bone analytical leg IK in world space (thigh -> calf -> foot)
+ * with forward knee-pole constraint and foot slope-pitch preservation.
+ */
+function solveTwoBoneLegIK(thigh, calf, foot, deltaY, fwdX, fwdZ, rightX, rightZ, footPitchRad) {
+  if (!thigh || !calf || !foot) return;
+
+  foot.getWorldQuaternion(_qOrigFoot);
+  thigh.getWorldPosition(_vHip);
+  calf.getWorldPosition(_vKnee);
+  foot.getWorldPosition(_vAnkle);
+
+  const a = _vHip.distanceTo(_vKnee);
+  const b = _vKnee.distanceTo(_vAnkle);
+  if (a < 0.05 || b < 0.05) return;
+
+  _vTarget.set(_vAnkle.x, _vAnkle.y + deltaY, _vAnkle.z);
+  _vDir.subVectors(_vTarget, _vHip);
+  const rawDist = _vDir.length();
+  if (rawDist < 1e-4) return;
+  _vDir.multiplyScalar(1 / rawDist);
+
+  const minD = Math.abs(a - b) + 0.06;
+  const maxD = (a + b) * 0.992;
+  const d = clamp(rawDist, minD, maxD);
+
+  // Knee bend pole perpendicular to hip->ankle axis, constrained to runner forward hemisphere
+  _vFwd.set(fwdX, 0, fwdZ);
+  _vPole.copy(_vFwd).addScaledVector(_vDir, -_vFwd.dot(_vDir));
+  if (_vPole.lengthSq() < 1e-5) {
+    _vPole.set(0, 1, 0).addScaledVector(_vDir, -_vDir.y);
+  }
+  _vPole.normalize();
+
+  _vAnimPole.subVectors(_vKnee, _vHip);
+  _vAnimPole.addScaledVector(_vDir, -_vAnimPole.dot(_vDir));
+  if (_vAnimPole.lengthSq() > 0.0009 && _vAnimPole.dot(_vPole) > 0) {
+    _vAnimPole.normalize();
+    _vPole.multiplyScalar(0.45).addScaledVector(_vAnimPole, 0.55);
+    _vPole.addScaledVector(_vDir, -_vPole.dot(_vDir));
+    if (_vPole.lengthSq() > 1e-5) _vPole.normalize();
+  }
+
+  // Law of cosines for exact knee position
+  const cosAlpha = clamp((a * a + d * d - b * b) / (2 * a * d), -1, 1);
+  const sinAlpha = Math.sqrt(Math.max(0, 1 - cosAlpha * cosAlpha));
+  _vKneeNew.copy(_vHip).addScaledVector(_vDir, a * cosAlpha).addScaledVector(_vPole, a * sinAlpha);
+  _vAnkleNew.copy(_vHip).addScaledVector(_vDir, d);
+
+  // Rotate thigh so calf aligns to _vKneeNew
+  _vCur.subVectors(_vKnee, _vHip).normalize();
+  _vNew.subVectors(_vKneeNew, _vHip).normalize();
+  _qDelta.setFromUnitVectors(_vCur, _vNew);
+  applyWorldDeltaToBone(thigh, _qDelta);
+  thigh.updateMatrixWorld(true);
+
+  // Rotate calf so ankle aligns to _vAnkleNew
+  calf.getWorldPosition(_vKnee);
+  foot.getWorldPosition(_vAnkle);
+  _vCur.subVectors(_vAnkle, _vKnee).normalize();
+  _vNew.subVectors(_vAnkleNew, _vKnee).normalize();
+  _qDelta.setFromUnitVectors(_vCur, _vNew);
+  applyWorldDeltaToBone(calf, _qDelta);
+  calf.updateMatrixWorld(true);
+
+  // Preserve pre-IK foot orientation plus gentle slope pitch so sole hugs the hillside
+  _vRight.set(rightX, 0, rightZ);
+  _qSlope.setFromAxisAngle(_vRight, footPitchRad);
+  calf.getWorldQuaternion(_qParent);
+  _qParentInv.copy(_qParent).invert();
+  foot.quaternion.copy(_qParentInv).multiply(_qSlope).multiply(_qOrigFoot).normalize();
+  foot.updateMatrixWorld(true);
+}
 
 /**
  * Bake transforms and sRGB hex colors into a single merged non-indexed BufferGeometry
@@ -261,8 +401,13 @@ export function createRunnerCharacter(assetsBase = './') {
   let wasAirborne = false;
   let jumpLandTimer = 0;
   let smoothGrade = 0;
+  let smoothPowerHike = 0;
+  let pelvisOffsetY = 0;
+  let currentVisualHeight = 1.74;
   let idleTime = 0;
   let strideClock = 0;
+  const footMeasureL = { soleY: 0, heelX: 0, heelZ: 0, ballX: 0, ballZ: 0 };
+  const footMeasureR = { soleY: 0, heelX: 0, heelZ: 0, ballX: 0, ballZ: 0 };
 
   function applyShadowSetting() {
     blobShadow.visible = !shadowsEnabledState;
@@ -408,6 +553,10 @@ export function createRunnerCharacter(assetsBase = './') {
       nightMode = false,
       visible = true,
       allowHeadlamp = true,
+      getGroundY = null,
+      terrainNormal = null,
+      heading = root.rotation.y,
+      snapGround = false,
     } = params;
 
     root.visible = visible;
@@ -423,6 +572,24 @@ export function createRunnerCharacter(assetsBase = './') {
       lampLensMat.emissiveIntensity = nightMode && allowHeadlamp ? 3.2 : 0.0;
     }
 
+    // Align low-tier contact blob shadow flush to sloped terrain
+    if (blobShadow.visible) {
+      if (terrainNormal && Number.isFinite(terrainNormal.y)) {
+        const cosH = Math.cos(heading);
+        const sinH = Math.sin(heading);
+        _vNorm.set(
+          terrainNormal.x * cosH - terrainNormal.z * sinH,
+          Math.max(0.15, terrainNormal.y),
+          terrainNormal.x * sinH + terrainNormal.z * cosH
+        ).normalize();
+        blobShadow.quaternion.setFromUnitVectors(_vUp, _vNorm);
+        blobShadow.position.set(_vNorm.x * 0.04, _vNorm.y * 0.04, _vNorm.z * 0.04);
+      } else {
+        blobShadow.quaternion.identity();
+        blobShadow.position.set(0, 0.03, 0);
+      }
+    }
+
     // Estimate first-person stride bob even when model hidden in 1st person
     const moving = speedMs > 0.15 && !isFallen && !isKissingRock && !isAirborne;
     if (moving) {
@@ -431,17 +598,24 @@ export function createRunnerCharacter(assetsBase = './') {
     }
     const fpBounce = moving ? Math.abs(Math.sin(strideClock)) * clamp(speedMs / 4.5, 0.25, 1) * 0.065 : 0;
 
-    if (!visible) return fpBounce;
+    if (!visible) {
+      currentVisualHeight = isFallen ? 0.55 : isKissingRock ? 1.25 : 1.74;
+      return fpBounce;
+    }
 
     // Simple subtle bob on placeholder while GLB is streaming
     if (!loaded || !mixer) {
       placeholder.position.y = fpBounce * 0.8;
       placeholder.rotation.x = clamp(-grade * 0.4, -0.25, 0.25);
+      currentVisualHeight = 1.78;
       return fpBounce;
     }
 
     const safeDt = Math.min(0.06, Math.max(0, dt));
-    smoothGrade = lerp(smoothGrade, clamp(grade, -0.45, 0.55), Math.min(1, safeDt * 7));
+    const gradeRate = snapGround ? 1 : Math.min(1, safeDt * 8);
+    smoothGrade = lerp(smoothGrade, clamp(grade, -0.75, 0.85), gradeRate);
+    const targetPowerHike = gait === 'power-hike' && !isFallen && !isKissingRock && !isAirborne && speedMs >= 0.12 ? 1 : 0;
+    smoothPowerHike = lerp(smoothPowerHike, targetPowerHike, gradeRate);
 
     // Fall / Get-up state transitions
     if (isFallen && !wasFallen) {
@@ -485,12 +659,15 @@ export function createRunnerCharacter(assetsBase = './') {
     wasAirborne = isAirborne;
     if (jumpLandTimer > 0) jumpLandTimer = Math.max(0, jumpLandTimer - safeDt);
 
-    // Compute normalized locomotion & action target weights
+    // Compute normalized locomotion & action target weights.
+    // Note: power-hike drives full upright Walk_Loop + procedural uphill torso lean + 2-bone
+    // slope leg IK (never blending Crouch_Fwd_Loop with Walk_Loop, which drops the pelvis
+    // while keeping straight legs and buries shoes ~9cm into the ground).
     let tIdle = 0;
     let tWalk = 0;
     let tJog = 0;
     let tSprint = 0;
-    let tPowerHike = 0;
+    const tPowerHike = 0;
     let tJump = 0;
     let tFall = 0;
     let tGetup = 0;
@@ -507,8 +684,7 @@ export function createRunnerCharacter(assetsBase = './') {
     } else if (speedMs < 0.12) {
       tIdle = 1;
     } else if (gait === 'power-hike') {
-      tPowerHike = 0.62;
-      tWalk = 0.38;
+      tWalk = 1;
     } else if (gait === 'walk' || gait === 'hike' || speedMs < 1.95) {
       const f = clamp((speedMs - 1.35) / 0.85, 0, 1);
       tWalk = 1 - f * 0.35;
@@ -535,7 +711,7 @@ export function createRunnerCharacter(assetsBase = './') {
       }
     }
 
-    const blend = Math.min(1, safeDt * 10);
+    const blend = snapGround ? 1 : Math.min(1, safeDt * 10);
     const snapZero = (cur, tgt, rate) => {
       const v = lerp(cur, tgt, rate);
       return tgt === 0 && v < 0.002 ? 0 : v;
@@ -552,8 +728,9 @@ export function createRunnerCharacter(assetsBase = './') {
 
     // Match clip playback rates directly to ground speed & disable zero-weight clips
     const effectiveSpeed = Math.max(0.4, speedMs);
+    const walkNatural = lerp(NATURAL_SPEEDS.walk, NATURAL_SPEEDS.walk * 0.85, smoothPowerHike);
     applyActionWeight(actions.idle, weights.idle, 1.0);
-    applyActionWeight(actions.walk, weights.walk, clamp(effectiveSpeed / NATURAL_SPEEDS.walk, 0.55, 1.55));
+    applyActionWeight(actions.walk, weights.walk, clamp(effectiveSpeed / walkNatural, 0.55, 1.55));
     applyActionWeight(actions.powerHike, weights.powerHike, clamp(effectiveSpeed / NATURAL_SPEEDS.crouch, 0.6, 1.6));
     applyActionWeight(actions.jog, weights.jog, clamp(effectiveSpeed / NATURAL_SPEEDS.jog, 0.65, 1.45));
     applyActionWeight(actions.sprint, weights.sprint, clamp(effectiveSpeed / NATURAL_SPEEDS.sprint, 0.72, 1.35));
@@ -566,28 +743,145 @@ export function createRunnerCharacter(assetsBase = './') {
 
     mixer.update(safeDt);
 
-    // Post-mixer procedural bone overlays: slope lean, power-hike torso pitch, stumble wobble, head stabilization
+    // Post-mixer procedural bone overlays: slope lean, uphill power-hike posture, stumble wobble, head stabilization
     const uprightMask = Math.max(0, 1 - weights.fall - weights.getup - weights.ceremony);
     if (uprightMask > 0.05) {
-      const moveMask = clamp(speedMs / 0.9, 0, 1) * uprightMask;
-      const slopePitch = clamp(smoothGrade * 0.62, -0.18, 0.34) * moveMask;
-      const phExtra = weights.powerHike * 0.22;
+      const moveMask = clamp(speedMs / 0.65, 0, 1) * uprightMask;
+      const slopePitch = clamp(smoothGrade * 0.58, -0.20, 0.42) * moveMask;
+      const phExtra = smoothPowerHike * clamp(0.18 + Math.max(0, smoothGrade) * 0.25, 0.18, 0.34) * uprightMask;
       const stumbleZ = isStumbling ? Math.sin(idleTime * 22) * 0.22 : 0;
 
       if (bones.spine_01) {
-        bones.spine_01.rotation.x += (slopePitch + phExtra) * 0.45;
+        bones.spine_01.rotation.x += (slopePitch + phExtra) * 0.48;
         bones.spine_01.rotation.z += stumbleZ * 0.5;
       }
       if (bones.spine_02) {
-        bones.spine_02.rotation.x += (slopePitch + phExtra) * 0.55;
+        bones.spine_02.rotation.x += (slopePitch + phExtra) * 0.52;
         bones.spine_02.rotation.z += stumbleZ * 0.5;
       }
       if (bones.Head) {
-        bones.Head.rotation.x -= (slopePitch + phExtra) * 0.65;
+        bones.Head.rotation.x -= (slopePitch + phExtra) * 0.72;
       }
     }
 
-    modelPivot.position.y = 0.01;
+    // Reset pivot before exact steep-slope grounding & 2-bone analytical leg IK
+    modelPivot.position.y = 0;
+    modelPivot.quaternion.copy(_qBasePivot);
+
+    const hasLegBones = Boolean(
+      bones.thigh_l && bones.calf_l && bones.foot_l &&
+      bones.thigh_r && bones.calf_r && bones.foot_r
+    );
+
+    if (typeof getGroundY === 'function' && hasLegBones) {
+      const rootY = root.position.y;
+      const fwdX = -Math.sin(heading);
+      const fwdZ = -Math.cos(heading);
+      const rightX = Math.cos(heading);
+      const rightZ = -Math.sin(heading);
+
+      if (isFallen || isKissingRock || weights.fall > 0.35 || weights.ceremony > 0.35) {
+        // Align fallen/kneeling body gently to terrain normal so torso & limbs rest ON the hillside
+        if (terrainNormal && Number.isFinite(terrainNormal.y)) {
+          const cosH = Math.cos(heading);
+          const sinH = Math.sin(heading);
+          _vNorm.set(
+            terrainNormal.x * cosH - terrainNormal.z * sinH,
+            Math.max(0.25, terrainNormal.y),
+            terrainNormal.x * sinH + terrainNormal.z * cosH
+          ).normalize();
+          _qSlope.setFromUnitVectors(_vUp, _vNorm);
+          modelPivot.quaternion.copy(_qSlope).multiply(_qBasePivot);
+        }
+        root.updateMatrixWorld(true);
+        measureFootSole(bones.foot_l, bones.ball_l, bones.ball_leaf_l, footMeasureL);
+        measureFootSole(bones.foot_r, bones.ball_r, bones.ball_leaf_r, footMeasureR);
+        const gL = Math.max(
+          getGroundY(footMeasureL.heelX, footMeasureL.heelZ),
+          getGroundY(footMeasureL.ballX, footMeasureL.ballZ)
+        );
+        const gR = Math.max(
+          getGroundY(footMeasureR.heelX, footMeasureR.heelZ),
+          getGroundY(footMeasureR.ballX, footMeasureR.ballZ)
+        );
+        let maxPen = Math.max(0, gL - footMeasureL.soleY, gR - footMeasureR.soleY);
+        if (bones.pelvis) {
+          bones.pelvis.getWorldPosition(_vTmp);
+          const gPelvis = getGroundY(_vTmp.x, _vTmp.z);
+          maxPen = Math.max(maxPen, gPelvis + 0.08 - _vTmp.y);
+        }
+        pelvisOffsetY = clamp(maxPen + 0.015, 0, 0.55);
+        modelPivot.position.y = pelvisOffsetY;
+        root.updateMatrixWorld(true);
+      } else {
+        // Step 1: Measure animated feet at neutral pivot (y=0) to extract natural swing lift
+        root.updateMatrixWorld(true);
+        measureFootSole(bones.foot_l, bones.ball_l, bones.ball_leaf_l, footMeasureL);
+        measureFootSole(bones.foot_r, bones.ball_r, bones.ball_leaf_r, footMeasureR);
+
+        const animLiftL = Math.max(0, footMeasureL.soleY - rootY);
+        const animLiftR = Math.max(0, footMeasureR.soleY - rootY);
+
+        // Sample exact terrain height at BOTH heel & forefoot so neither clips into convex/steep terrain
+        const gL = Math.max(
+          getGroundY(footMeasureL.heelX, footMeasureL.heelZ),
+          getGroundY(footMeasureL.ballX, footMeasureL.ballZ)
+        );
+        const gR = Math.max(
+          getGroundY(footMeasureR.heelX, footMeasureR.heelZ),
+          getGroundY(footMeasureR.ballX, footMeasureR.ballZ)
+        );
+
+        // Step 2: Shift pelvis down toward the lower stance foot on steep grades so the downhill
+        // leg reaches the slope naturally while the uphill knee flexes up onto the higher ground.
+        const targetPelvisY = isAirborne
+          ? 0
+          : clamp(Math.min(gL, gR) - rootY, -0.28, 0.14);
+        const pelvisRate = snapGround ? 1 : Math.min(1, safeDt * 18);
+        pelvisOffsetY = lerp(pelvisOffsetY, targetPelvisY, pelvisRate);
+        modelPivot.position.y = pelvisOffsetY;
+        root.updateMatrixWorld(true);
+
+        // Step 3: Solve per-leg 2-bone analytical IK to lock stance soles to gL/gR and lift swing feet over uphill terrain
+        if (!isAirborne && weights.getup < 0.25) {
+          measureFootSole(bones.foot_l, bones.ball_l, bones.ball_leaf_l, footMeasureL);
+          measureFootSole(bones.foot_r, bones.ball_r, bones.ball_leaf_r, footMeasureR);
+
+          const deltaL = clamp((gL + animLiftL) - footMeasureL.soleY, -0.36, 0.50);
+          const deltaR = clamp((gR + animLiftR) - footMeasureR.soleY, -0.36, 0.50);
+
+          const groundPitch = terrainNormal && Number.isFinite(terrainNormal.y) && terrainNormal.y > 0.1
+            ? Math.atan2(-(terrainNormal.x * fwdX + terrainNormal.z * fwdZ), terrainNormal.y)
+            : Math.atan(smoothGrade);
+          const baseFootPitch = clamp(groundPitch * 0.65, -0.42, 0.48);
+          const pitchL = baseFootPitch * clamp(1 - animLiftL / 0.12, 0.15, 1);
+          const pitchR = baseFootPitch * clamp(1 - animLiftR / 0.12, 0.15, 1);
+
+          solveTwoBoneLegIK(bones.thigh_l, bones.calf_l, bones.foot_l, deltaL, fwdX, fwdZ, rightX, rightZ, pitchL);
+          solveTwoBoneLegIK(bones.thigh_r, bones.calf_r, bones.foot_r, deltaR, fwdX, fwdZ, rightX, rightZ, pitchR);
+        }
+
+        // Step 4: Guaranteed zero-penetration safety floor clamp (covers extreme >70% kinks & airborne uphill landings)
+        measureFootSole(bones.foot_l, bones.ball_l, bones.ball_leaf_l, footMeasureL);
+        measureFootSole(bones.foot_r, bones.ball_r, bones.ball_leaf_r, footMeasureR);
+        const maxPen = Math.max(0, gL - footMeasureL.soleY, gR - footMeasureR.soleY);
+        if (maxPen > 0.001) {
+          modelPivot.position.y += Math.min(0.45, maxPen);
+          root.updateMatrixWorld(true);
+        }
+      }
+    } else {
+      modelPivot.position.y = 0.025;
+      root.updateMatrixWorld(true);
+    }
+
+    // Track exact visual head-top height relative to root.position.y for UI screen-bbox occlusion guard
+    if (bones.Head) {
+      bones.Head.getWorldPosition(_vTmp);
+      currentVisualHeight = clamp((_vTmp.y + 0.24) - root.position.y, 0.55, 1.95);
+    } else {
+      currentVisualHeight = isFallen ? 0.55 : isKissingRock ? 1.25 : 1.74;
+    }
 
     return fpBounce;
   }
@@ -612,6 +906,7 @@ export function createRunnerCharacter(assetsBase = './') {
     root,
     ensureLoaded,
     isLoaded: () => loaded,
+    getVisualHeight: () => currentVisualHeight,
     updatePose,
     setShadowsEnabled,
     dispose() {

@@ -366,6 +366,8 @@ export function createTouchControls({ container, engine, getSettings }) {
     if (sig === lastContextSignature) return;
     lastContextSignature = sig;
 
+    const isSideUtility = !showAid && !fallen && !canKissRock && (nearStream || showQuickGel);
+    contextEl.classList.toggle('context-actions--side', isSideUtility);
     contextEl.classList.toggle('context-actions--strip', showAid && !aidBuffetExpanded && !fallen && !canKissRock);
     contextEl.classList.toggle('context-actions--expanded', showAid && aidBuffetExpanded);
 
@@ -390,10 +392,10 @@ export function createTouchControls({ container, engine, getSettings }) {
         : AID_SNACKS;
 
       if (aidBuffetExpanded) {
-        html += `<div class="ctx-aid-label">⛺ ${aidName || 'Aid Station'}</div>`;
         html += `<button type="button" class="ctx-btn ctx-btn--water" data-ctx="refill">💧 Refill</button>`;
         for (const s of rawItems) {
-          html += `<button type="button" class="ctx-btn" data-ctx="eat" data-key="${s.key}" title="${s.hint}">${s.icon} ${s.label}</button>`;
+          const shortLbl = SHORT_AID_LABELS[s.key] || s.label;
+          html += `<button type="button" class="ctx-btn" data-ctx="eat" data-key="${s.key}" title="${s.hint}">${s.icon} ${shortLbl}</button>`;
         }
         html += `<button type="button" class="ctx-btn ctx-btn--more" data-ctx="toggle-aid" aria-expanded="true">⛺ Less ▴</button>`;
       } else {
