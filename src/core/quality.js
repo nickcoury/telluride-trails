@@ -189,12 +189,14 @@ export function createQualityManager({ renderer, events }) {
   const maxAnisoCap = renderer?.capabilities?.getMaxAnisotropy?.() || 4;
   state.maxAnisotropy = Math.min(state.maxAnisotropy, maxAnisoCap);
 
-  // Rolling frame-time ring buffer
+  // Rolling frame-time ring buffer (wall interval + JS CPU time for 60 Hz vsync recovery)
   const FRAME_WINDOW = 90;
   const frameTimes = new Float32Array(FRAME_WINDOW);
+  const cpuTimes = new Float32Array(FRAME_WINDOW);
   const sortedScratch = new Float32Array(FRAME_WINDOW);
   let frameCount = 0;
   let frameIndex = 0;
+  let avgCpuMs = 4.0;
   let overBudgetStreak = 0;
   let underBudgetStreak = 0;
   let lastTierChangeTime = -10;
@@ -288,22 +290,26 @@ export function createQualityManager({ renderer, events }) {
   function updatePercentiles() {
     if (frameCount === 0) return;
     let sum = 0;
+    let cpuSum = 0;
     for (let i = 0; i < frameCount; i++) {
       const v = frameTimes[i];
       sum += v;
+      cpuSum += cpuTimes[i];
       sortedScratch[i] = v;
     }
     const slice = sortedScratch.subarray(0, frameCount);
     slice.sort();
     state.avgFrameMs = sum / frameCount;
+    avgCpuMs = cpuSum / frameCount;
     state.p95FrameMs = slice[Math.min(frameCount - 1, Math.floor(frameCount * 0.95))];
     state.p99FrameMs = slice[Math.min(frameCount - 1, Math.floor(frameCount * 0.99))];
   }
 
-  function recordFrame(frameMs, nowSec) {
+  function recordFrame(frameMs, nowSec, cpuMs = frameMs) {
     if (!Number.isFinite(frameMs) || frameMs <= 0 || frameMs > 500) return;
 
     frameTimes[frameIndex] = frameMs;
+    cpuTimes[frameIndex] = Number.isFinite(cpuMs) && cpuMs > 0 ? Math.min(500, cpuMs) : frameMs;
     frameIndex = (frameIndex + 1) % FRAME_WINDOW;
     if (frameCount < FRAME_WINDOW) frameCount++;
 
@@ -318,10 +324,16 @@ export function createQualityManager({ renderer, events }) {
     const budgetMs = 1000 / state.targetFps;
     const effectiveMs = state.avgFrameMs * 0.65 + state.p95FrameMs * 0.35;
 
-    if (effectiveMs > budgetMs * 1.18) {
+    const isOverBudget = effectiveMs > budgetMs * 1.18;
+    const hasUpscaleHeadroom =
+      state.targetFps < 55
+        ? effectiveMs < budgetMs * 0.68
+        : effectiveMs <= budgetMs * 1.05 && avgCpuMs < budgetMs * 0.55;
+
+    if (isOverBudget) {
       overBudgetStreak++;
       underBudgetStreak = 0;
-    } else if (effectiveMs < budgetMs * 0.68) {
+    } else if (hasUpscaleHeadroom) {
       underBudgetStreak++;
       overBudgetStreak = 0;
     } else {
@@ -354,11 +366,15 @@ export function createQualityManager({ renderer, events }) {
       } else {
         const idx = QUALITY_TIERS.indexOf(currentTier);
         const maxAllowedIdx = QUALITY_TIERS.indexOf(detectedMaxTier);
+        const hasTierUpHeadroom =
+          state.targetFps < 55
+            ? effectiveMs < budgetMs * 0.52
+            : effectiveMs <= budgetMs * 1.05 && avgCpuMs < budgetMs * 0.42;
         if (
           idx >= 0 &&
           idx < maxAllowedIdx &&
           nowSec - lastTierChangeTime > 12 &&
-          effectiveMs < budgetMs * 0.52
+          hasTierUpHeadroom
         ) {
           lastTierChangeTime = nowSec;
           applyTierPreset(QUALITY_TIERS[idx + 1], true);

@@ -144,6 +144,9 @@ export function createInput({ domElement, events }) {
     if (typeof v.hike === 'boolean') touchState.hike = v.hike;
     if (typeof v.jump === 'boolean') touchState.jump = v.jump;
   });
+  const unsubZoom = events.on('ui:zoom', (v) => {
+    if (Number.isFinite(v?.delta)) wheelDelta += v.delta;
+  });
 
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
@@ -244,6 +247,7 @@ export function createInput({ domElement, events }) {
     unsubMove();
     unsubLook();
     unsubActions();
+    unsubZoom();
     prevJumpByPad.clear();
     prevPauseByPad.clear();
     window.removeEventListener('keydown', onKeyDown);

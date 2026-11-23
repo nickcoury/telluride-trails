@@ -187,9 +187,10 @@ export function createEngine({ canvas }) {
     renderer.render(scene, camera);
 
     const cpuMs = performance.now() - frameStart;
-    // Measure max(cpuMs, rafDeltaMs) so GPU-bound mobile slowdowns trigger adaptive scaling
+    // Measure max(cpuMs, rafDeltaMs) so GPU-bound mobile slowdowns trigger adaptive scaling,
+    // and pass cpuMs so 60 Hz vsynced displays can still recover renderScale/tier cleanly.
     const effectiveFrameMs = Math.max(cpuMs, rafDeltaMs);
-    quality.recordFrame(effectiveFrameMs, t);
+    quality.recordFrame(effectiveFrameMs, t, cpuMs);
 
     stats.cpuMs = cpuMs;
     stats.frameMs = effectiveFrameMs;

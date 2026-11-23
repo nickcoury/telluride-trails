@@ -156,19 +156,16 @@ async function bootstrap() {
         return { x, z };
       },
       setTimeOfDay: (hourOrDate) => {
-        let date;
-        let hour;
         if (hourOrDate instanceof Date) {
-          date = hourOrDate;
-          hour = date.getHours() + date.getMinutes() / 60;
+          const hour = hourOrDate.getHours() + hourOrDate.getMinutes() / 60;
+          game.setTimeOfDay?.(hour);
+          world.setTimeOfDay?.(hourOrDate);
         } else {
           const parsed = Number(hourOrDate);
-          hour = Number.isFinite(parsed) ? parsed : 12;
-          date = new Date();
-          date.setHours(Math.floor(hour), Math.round((hour % 1) * 60), 0, 0);
+          const hour = Number.isFinite(parsed) ? parsed : 12;
+          game.setTimeOfDay?.(hour);
+          world.setTimeOfDay?.(hour);
         }
-        game.setTimeOfDay?.(hour);
-        world.setTimeOfDay?.(date);
       },
       triggerStormNow: (durSec) => game.triggerStormNow?.(durSec),
       setTimeScale: (mult) => {
