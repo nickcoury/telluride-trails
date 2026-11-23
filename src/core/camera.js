@@ -13,10 +13,10 @@ export function createCameraRig({ camera, events }) {
   let distance = 7.5;
   let invertY = false;
 
-  // Default scenic title overlook: west end of Telluride Valley looking east
-  // into the Box Canyon toward Ajax Peak, Ingram Falls, and Bridal Veil Falls.
-  const TITLE_BASE_POS = { x: -1250, y: 3040, z: -140 };
-  const TITLE_LOOK_AT = { x: 4800, y: 3240, z: 1050 };
+  // Default scenic title overlook: west end of Telluride Valley above West Colorado Ave
+  // looking east into Telluride Box Canyon toward Ajax Peak, Ingram Falls, and Bridal Veil Falls.
+  const TITLE_BASE_POS = { x: -1050, y: 2945, z: -60 };
+  const TITLE_LOOK_AT = { x: 5200, y: 3290, z: 1150 };
 
   const targetPos = new THREE.Vector3(0, 2680, 0);
   const currentPos = new THREE.Vector3(TITLE_BASE_POS.x, TITLE_BASE_POS.y, TITLE_BASE_POS.z);
@@ -27,6 +27,8 @@ export function createCameraRig({ camera, events }) {
   let terrainRef = null;
   let flythrough = null; // { waypoints, index, elapsed, active }
   let updatedThisFrame = false;
+  let titleDriftActive = false;
+  let titleDriftClock = 0;
 
   camera.position.copy(currentPos);
   camera.lookAt(currentLookAt);
@@ -141,22 +143,51 @@ export function createCameraRig({ camera, events }) {
     camera.updateMatrixWorld();
   }
 
-  function updateTitleScenic(dt, elapsedSec = 0) {
+  function setTitleDriftActive(active) {
+    titleDriftActive = Boolean(active);
+    if (!titleDriftActive) titleDriftClock = 0;
+  }
+
+  function snapToTitleHero() {
+    flythrough = null;
+    titleDriftActive = false;
+    titleDriftClock = 0;
+    currentPos.set(TITLE_BASE_POS.x, TITLE_BASE_POS.y, TITLE_BASE_POS.z);
+    currentLookAt.set(TITLE_LOOK_AT.x, TITLE_LOOK_AT.y, TITLE_LOOK_AT.z);
+    camera.position.copy(currentPos);
+    camera.lookAt(currentLookAt);
+    camera.updateMatrixWorld();
+  }
+
+  function updateTitleScenic(dt) {
     updatedThisFrame = true;
     if (flythrough?.active) {
       updateFlythrough(Math.min(0.1, dt));
       return;
     }
-    const phase = elapsedSec * 0.08;
-    const x = TITLE_BASE_POS.x + Math.sin(phase) * 140;
-    const z = TITLE_BASE_POS.z + Math.cos(phase * 0.7) * 180;
+    if (!titleDriftActive) {
+      // Hold exact hero framing until crossfade so static hero -> live 3D is pixel-aligned
+      currentPos.set(TITLE_BASE_POS.x, TITLE_BASE_POS.y, TITLE_BASE_POS.z);
+      currentLookAt.set(TITLE_LOOK_AT.x, TITLE_LOOK_AT.y, TITLE_LOOK_AT.z);
+      camera.position.copy(currentPos);
+      camera.lookAt(currentLookAt);
+      camera.updateMatrixWorld();
+      return;
+    }
+    titleDriftClock += Math.min(0.1, dt);
+    const ramp = Math.min(1, titleDriftClock / 6.0);
+    const ease = ramp * ramp * (3 - 2 * ramp);
+    const phase = titleDriftClock * 0.065;
+    const x = TITLE_BASE_POS.x + Math.sin(phase) * 110 * ease;
+    const z = TITLE_BASE_POS.z + (1 - Math.cos(phase * 0.7)) * 110 * ease;
     const groundY = terrainRef ? terrainRef.getHeight(x, z) : 2680;
-    const y = Math.max(TITLE_BASE_POS.y, (Number.isFinite(groundY) ? groundY : 2680) + 180) + Math.sin(phase * 0.5) * 28;
+    const baseY = Math.max(TITLE_BASE_POS.y, (Number.isFinite(groundY) ? groundY : 2680) + 140);
+    const y = baseY + Math.sin(phase * 0.5) * 22 * ease;
     currentPos.set(x, y, z);
     currentLookAt.set(
       TITLE_LOOK_AT.x,
-      TITLE_LOOK_AT.y + Math.sin(phase * 0.6) * 40,
-      TITLE_LOOK_AT.z + Math.sin(phase * 0.4) * 160
+      TITLE_LOOK_AT.y + Math.sin(phase * 0.6) * 32 * ease,
+      TITLE_LOOK_AT.z + Math.sin(phase * 0.4) * 120 * ease
     );
     camera.position.copy(currentPos);
     camera.lookAt(currentLookAt);
@@ -251,6 +282,8 @@ export function createCameraRig({ camera, events }) {
     isFlythrough: () => Boolean(flythrough?.active),
     update,
     updateTitleScenic,
+    setTitleDriftActive,
+    snapToTitleHero,
     snapTo,
     setMode,
     setTerrain,

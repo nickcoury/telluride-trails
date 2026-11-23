@@ -46,6 +46,33 @@ def decode_terrarium_rgb(arr: np.ndarray) -> np.ndarray:
     return a[:, :, 0] * 256.0 + a[:, :, 1] + a[:, :, 2] / 256.0 - 32768.0
 
 
+def encode_terrarium_rgb(elev_m: np.ndarray) -> np.ndarray:
+    """Encode elevation meters (float64) into uint8 RGB Terrarium array."""
+    v = np.clip(elev_m + 32768.0, 0.0, 65535.996)
+    r = np.floor(v / 256.0).astype(np.uint8)
+    rem = v - r.astype(np.float64) * 256.0
+    g = np.floor(rem).astype(np.uint8)
+    b = np.rint((rem - g.astype(np.float64)) * 256.0).clip(0, 255).astype(np.uint8)
+    return np.stack([r, g, b], axis=-1)
+
+
+def despike_terrarium(im: Image.Image) -> tuple[Image.Image, int]:
+    """Repair isolated source DEM void/pit artifacts (<1150m or >4450m in SW CO/UT)."""
+    from scipy.ndimage import median_filter
+    rgb = np.asarray(im, dtype=np.uint8)
+    h = decode_terrarium_rgb(rgb)
+    bad = (h < 1150.0) | (h > 4450.0)
+    n_bad = int(bad.sum())
+    if n_bad == 0:
+        return im, 0
+    med = median_filter(h, size=5, mode="nearest")
+    h_fixed = np.where(bad, med, h)
+    rgb_fixed = encode_terrarium_rgb(h_fixed)
+    out = rgb.copy()
+    out[bad] = rgb_fixed[bad]
+    return Image.fromarray(out, mode="RGB"), n_bad
+
+
 def process_tile(task: tuple[int, int, int, bool]) -> tuple[int, int, int, int]:
     """Download one Terrarium PNG, convert to lossless WebP, and optionally verify pixel exactness."""
     z, x, y, verify = task
@@ -56,6 +83,7 @@ def process_tile(task: tuple[int, int, int, bool]) -> tuple[int, int, int, int]:
     cache_path = TERRAIN_CACHE / str(z) / str(x) / f"{y}.png"
     raw_bytes = fetch_cached(TERRARIUM_URL.format(z=z, x=x, y=y), cache_path)
     im = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
+    im, _ = despike_terrarium(im)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     buf = io.BytesIO()

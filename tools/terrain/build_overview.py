@@ -111,15 +111,30 @@ def main() -> None:
 
     min_x, max_z = lonlat_to_world(BBOX[0], BBOX[1])
     max_x, min_z = lonlat_to_world(BBOX[2], BBOX[3])
+    # Exact world coordinates of the cropped pixel grid (eliminates ~15m z12 pixel-rounding offset)
+    k = math.cos(math.radians(ORIGIN[0]))
+    mx0, my0 = lonlat_to_merc(ORIGIN[1], ORIGIN[0])
+    crop_w_m = minx_grid + (px_left / gw) * (maxx_grid - minx_grid)
+    crop_e_m = minx_grid + (px_right / gw) * (maxx_grid - minx_grid)
+    crop_n_m = maxy_grid - (py_top / gh) * (maxy_grid - miny_grid)
+    crop_s_m = maxy_grid - (py_bottom / gh) * (maxy_grid - miny_grid)
+    min_x = (crop_w_m - mx0) * k
+    max_x = (crop_e_m - mx0) * k
+    min_z = -(crop_n_m - my0) * k
+    max_z = -(crop_s_m - my0) * k
+    crop_west = math.degrees(crop_w_m / EARTH_R)
+    crop_east = math.degrees(crop_e_m / EARTH_R)
+    crop_north = math.degrees(2.0 * math.atan(math.exp(crop_n_m / EARTH_R)) - math.pi / 2.0)
+    crop_south = math.degrees(2.0 * math.atan(math.exp(crop_s_m / EARTH_R)) - math.pi / 2.0)
     meta = {
         "image": "data/imagery/overview.webp",
         "width": out_w,
         "height": out_h,
         "bounds": {
-            "west": BBOX[0],
-            "south": BBOX[1],
-            "east": BBOX[2],
-            "north": BBOX[3],
+            "west": round(crop_west, 6),
+            "south": round(crop_south, 6),
+            "east": round(crop_east, 6),
+            "north": round(crop_north, 6),
         },
         "worldBounds": {
             "minX": round(min_x, 2),

@@ -44,13 +44,16 @@ TERRAIN_CACHE = CACHE_DIR / "terrarium"
 IMAGERY_CACHE = CACHE_DIR / "usgs_imagery"
 
 # Exact MRLC GeoServer NLCD 2021 SLD ColorMap RGB -> (forest, rock, water, grass)
+# Note: Developed town classes (21..24) keep rock <= 0.10 so world/rocks.js doesn't spawn alpine
+# talus boulders in town and game/physics.js treats off-road town parks/yards as grass/dirt, not scree.
+# Woody Wetlands (90) keeps forest=0.22 (<0.35) & grass=0.75 so world/vegetation.js spawns riparian willows.
 NLCD_COLOR_PRIORS: dict[tuple[int, int, int], tuple[float, float, float, float]] = {
     (71, 107, 160): (0.00, 0.00, 1.00, 0.00),   # 11 Open Water
     (209, 221, 249): (0.00, 0.78, 0.05, 0.05),  # 12 Perennial Ice/Snow
-    (221, 201, 201): (0.18, 0.25, 0.00, 0.55),  # 21 Developed, Open Space
-    (216, 147, 130): (0.12, 0.45, 0.00, 0.35),  # 22 Developed, Low Intensity
-    (237, 0, 0): (0.04, 0.65, 0.00, 0.18),      # 23 Developed, Medium Intensity
-    (170, 0, 0): (0.00, 0.80, 0.00, 0.08),      # 24 Developed, High Intensity
+    (221, 201, 201): (0.14, 0.04, 0.00, 0.72),  # 21 Developed, Open Space (parks/lawns)
+    (216, 147, 130): (0.12, 0.06, 0.00, 0.52),  # 22 Developed, Low Intensity (yards)
+    (237, 0, 0): (0.06, 0.08, 0.00, 0.30),      # 23 Developed, Medium Intensity (town)
+    (170, 0, 0): (0.02, 0.10, 0.00, 0.18),      # 24 Developed, High Intensity (town core)
     (178, 173, 163): (0.00, 0.94, 0.00, 0.06),  # 31 Barren Land (Rock/Sand/Clay)
     (249, 249, 249): (0.00, 0.75, 0.10, 0.15),  # 32 Unconsolidated Shore
     (104, 170, 99): (0.78, 0.02, 0.00, 0.32),   # 41 Deciduous Forest (Aspen)
@@ -64,8 +67,8 @@ NLCD_COLOR_PRIORS: dict[tuple[int, int, int], tuple[float, float, float, float]]
     (130, 186, 158): (0.00, 0.10, 0.00, 0.85),  # 74 Moss
     (219, 216, 61): (0.04, 0.04, 0.00, 0.88),   # 81 Pasture/Hay
     (170, 112, 40): (0.02, 0.10, 0.00, 0.80),   # 82 Cultivated Crops
-    (186, 216, 234): (0.38, 0.02, 0.10, 0.65),  # 90 Woody Wetlands (Willows)
-    (112, 163, 186): (0.08, 0.02, 0.18, 0.78),  # 95 Emergent Herbaceous Wetlands
+    (186, 216, 234): (0.22, 0.00, 0.08, 0.75),  # 90 Woody Wetlands (Riparian Willows)
+    (112, 163, 186): (0.08, 0.00, 0.14, 0.82),  # 95 Emergent Herbaceous Wetlands
 }
 
 _NLCD_RGB_KEYS = np.array(list(NLCD_COLOR_PRIORS.keys()), dtype=np.int32)
@@ -229,11 +232,25 @@ def process_tile(task: tuple[int, int, int, bool]) -> tuple[int, int, int, int]:
     grass = grass * (1.0 - 0.85 * cliff)
     rock = np.maximum(rock, rock_rule)
 
+    # Identify Developed (21..24) and Wetland (90,95) masks so imagery cues don't turn grey roofs into talus
+    # or wetland shadows into tall spruce forest
+    is_developed = (
+        ((nlcd_rgb[:, :, 0] == 221) & (nlcd_rgb[:, :, 1] == 201) & (nlcd_rgb[:, :, 2] == 201))
+        | ((nlcd_rgb[:, :, 0] == 216) & (nlcd_rgb[:, :, 1] == 147) & (nlcd_rgb[:, :, 2] == 130))
+        | ((nlcd_rgb[:, :, 0] == 237) & (nlcd_rgb[:, :, 1] == 0) & (nlcd_rgb[:, :, 2] == 0))
+        | ((nlcd_rgb[:, :, 0] == 170) & (nlcd_rgb[:, :, 1] == 0) & (nlcd_rgb[:, :, 2] == 0))
+    ).astype(np.float32)
+    is_wetland = (
+        ((nlcd_rgb[:, :, 0] == 186) & (nlcd_rgb[:, :, 1] == 216) & (nlcd_rgb[:, :, 2] == 234))
+        | ((nlcd_rgb[:, :, 0] == 112) & (nlcd_rgb[:, :, 1] == 163) & (nlcd_rgb[:, :, 2] == 186))
+    ).astype(np.float32)
+
     # Subtle imagery refinement: break up 30m NLCD blocks with real NAIP rock chutes & conifer pockets
     below_treeline = smoothstep(3620.0, 3350.0, elev)
-    forest = np.clip(forest + 0.18 * is_dark_canopy * below_treeline * (1.0 - cliff) * (1.0 - water), 0.0, 1.0)
-    # Neutral bright rock chutes/scree in imagery reduce forest & boost rock
-    chute_mask = is_grey_talus * smoothstep(24.0, 36.0, slope_deg) * (1.0 - water)
+    canopy_allow = (1.0 - cliff) * (1.0 - water) * (1.0 - is_wetland) * (1.0 - is_developed)
+    forest = np.clip(forest + 0.18 * is_dark_canopy * below_treeline * canopy_allow, 0.0, 1.0)
+    # Neutral bright rock chutes/scree in imagery reduce forest & boost rock (never on town roofs/roads)
+    chute_mask = is_grey_talus * smoothstep(24.0, 36.0, slope_deg) * (1.0 - water) * (1.0 - is_developed)
     forest = forest * (1.0 - 0.65 * chute_mask)
     grass = grass * (1.0 - 0.45 * chute_mask)
     rock = np.clip(np.maximum(rock, chute_mask * 0.90), 0.0, 1.0)

@@ -19,9 +19,9 @@ async function bootstrap() {
   const world = createWorld(engine, terrain, trailData);
   const game = createGame(engine, terrain, trailData, world);
 
-  // Start Title screen in crisp sunlit mid-July Telluride morning (9:00 AM MDT)
-  // so first impression is never pitch-dark November dusk. Starting a run overrides this.
-  world.setTimeOfDay?.(9.0);
+  // Start Title screen in crisp late-afternoon mid-July Telluride sun (5:30 PM MDT — sun from WSW
+  // illuminating Telluride town, Ajax Peak, and the Box Canyon headwall face-on). Starting a run overrides this.
+  world.setTimeOfDay?.(17.5);
 
   // Wire UI/input pause transitions defensively (avoid double-calling if UI already called game)
   engine.events.on('ui:resume', () => {
@@ -116,6 +116,65 @@ async function bootstrap() {
   const params = new URLSearchParams(window.location.search);
   const isBench = params.has('bench');
   const isDev = params.has('dev');
+  const isCaptureHero = params.has('captureHero');
+
+  const heroEl = document.getElementById('title-hero-backdrop');
+  if (isBench || isCaptureHero) {
+    heroEl?.classList.add('is-instant-hidden');
+  }
+  if (isCaptureHero) {
+    const uiRoot = document.getElementById('ui-root');
+    if (uiRoot) uiRoot.style.display = 'none';
+  }
+
+  let titleRevealToken = 0;
+
+  function hideHeroInstant() {
+    titleRevealToken++;
+    heroEl?.classList.add('is-instant-hidden');
+    heroEl?.classList.remove('is-hidden');
+    engine.cameraRig.setTitleDriftActive(false);
+  }
+
+  function scheduleLiveTitleReveal() {
+    if (isBench || isCaptureHero || !heroEl) return;
+    const token = ++titleRevealToken;
+    engine.cameraRig.snapToTitleHero();
+    heroEl.classList.remove('is-instant-hidden', 'is-hidden');
+
+    // Wait past initial title paint, then wait until Telluride Box Canyon tiles are resident
+    // before crossfading smoothly from the pre-rendered hero shot to the live 3D scene.
+    setTimeout(async () => {
+      if (token !== titleRevealToken || engine.getAppState() !== 'title') return;
+      try {
+        await terrain.ready;
+        if (token !== titleRevealToken || engine.getAppState() !== 'title') return;
+        await Promise.all([
+          terrain.preload(0, 0, 900),
+          trailData.loadArea(0, 0, 900),
+        ]);
+        if (token !== titleRevealToken || engine.getAppState() !== 'title') return;
+        // Let a few frames upload/render decoded tiles so the live scene is crisp before reveal
+        for (let i = 0; i < 10; i++) {
+          await new Promise((r) => requestAnimationFrame(r));
+          if (token !== titleRevealToken || engine.getAppState() !== 'title') return;
+        }
+        heroEl.classList.remove('is-instant-hidden');
+        heroEl.classList.add('is-hidden');
+        engine.cameraRig.setTitleDriftActive(true);
+      } catch {
+        // Keep static hero visible if preload fails
+      }
+    }, 350);
+  }
+
+  engine.events.on('app:state', ({ state }) => {
+    if (state === 'title') {
+      scheduleLiveTitleReveal();
+    } else {
+      hideHeroInstant();
+    }
+  });
 
   if (isBench || isDev) {
     const perfApi = {
@@ -200,6 +259,24 @@ async function bootstrap() {
 
   engine.start();
 
+  if (isCaptureHero) {
+    engine.cameraRig.snapToTitleHero();
+    const hour = params.has('hour') ? Number(params.get('hour')) : 17.5;
+    world.setTimeOfDay?.(Number.isFinite(hour) ? hour : 17.5);
+    await terrain.ready;
+    await Promise.all([
+      terrain.preload(-1050, -60, 2200),
+      terrain.preload(1500, 400, 2800),
+      terrain.preload(4400, 1100, 2400),
+      trailData.loadArea(0, 0, 2400),
+    ]);
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => requestAnimationFrame(r));
+    }
+    window.__heroReady = true;
+    return;
+  }
+
   if (isBench) {
     const startPoi = trailData.pois[0] || { x: 0, z: 0, heading: 0 };
     const x = params.has('x') ? Number(params.get('x')) : startPoi.x;
@@ -211,6 +288,8 @@ async function bootstrap() {
     if (params.get('autopilot') === '1') {
       engine.events.emit('ui:autopilot', { enabled: true });
     }
+  } else {
+    scheduleLiveTitleReveal();
   }
 }
 

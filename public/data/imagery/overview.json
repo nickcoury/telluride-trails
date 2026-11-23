@@ -3,16 +3,16 @@
   "width": 2048,
   "height": 1415,
   "bounds": {
-    "west": -108.02,
-    "south": 37.68,
-    "east": -107.25,
-    "north": 38.1
+    "west": -108.019981,
+    "south": 37.680016,
+    "east": -107.249908,
+    "north": 38.099983
   },
   "worldBounds": {
-    "minX": -18235.16,
-    "maxX": 49367.5,
-    "minZ": -18109.47,
-    "maxZ": 28614.77
+    "minX": -18233.53,
+    "maxX": 49375.54,
+    "minZ": -18107.53,
+    "maxZ": 28612.95
   },
   "attribution": "USGS National Map Orthoimagery + USGS 3DEP shaded relief"
 }

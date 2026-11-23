@@ -159,9 +159,10 @@ def main() -> None:
 
     z15_corridor = clip_set(z15_trails | z15_roads | z15_anchors, 15)
 
-    # Telluride-Ouray-Silverton core z15 terrain subset (trails + anchors inside core race zones)
+    # Telluride-Ouray-Silverton-IceLake core z15 terrain subset (trails + anchors inside core race/scenic zones)
     z15_terrain_boxes = [
         (-107.90, 37.86, -107.62, 38.04),  # Telluride / Sneffels / Imogene / Ouray / Ophir
+        (-107.92, 37.78, -107.72, 37.86),  # Ice Lake Basin / Island Lake / Ophir Pass / Lizard Head
         (-107.72, 37.76, -107.47, 37.94),  # Silverton / Kendall / Handies / Cunningham
     ]
     z15_terrain_allow: set[tuple[int, int]] = set()
