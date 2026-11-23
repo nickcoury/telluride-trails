@@ -48,7 +48,12 @@ export function setupPWA(assetsBase = '/telluride-trails/') {
             });
             for (const entry of performance.getEntriesByType?.('resource') || []) {
               const u = entry.name;
-              if (u && u.startsWith(window.location.origin) && u.includes('/assets/') && /\.(js|css|svg|png|webp)$/i.test(u)) {
+              if (
+                u &&
+                u.startsWith(window.location.origin) &&
+                (u.includes('/assets/') || u.endsWith('/title-hero.webp')) &&
+                /\.(js|css|svg|png|webp|avif|glb)$/i.test(u)
+              ) {
                 urlSet.add(u);
               }
             }

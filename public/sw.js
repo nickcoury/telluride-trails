@@ -8,6 +8,7 @@ const BASE_PATH = new URL('./', self.location.href).pathname;
 const SHELL_PRECACHE = [
   BASE_PATH,
   `${BASE_PATH}index.html`,
+  `${BASE_PATH}title-hero.webp`,
   `${BASE_PATH}manifest.webmanifest`,
   `${BASE_PATH}assets/ui/icon.svg`,
   `${BASE_PATH}assets/ui/icon-192.png`,
@@ -20,7 +21,7 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches
       .open(SHELL_CACHE)
-      .then((cache) => cache.addAll(SHELL_PRECACHE).catch(() => {}))
+      .then((cache) => Promise.all(SHELL_PRECACHE.map((u) => cache.add(u).catch(() => {}))))
       .then(() => self.skipWaiting())
   );
 });
@@ -198,8 +199,10 @@ self.addEventListener('fetch', (event) => {
 
   if (
     url.pathname.includes('/assets/') ||
+    url.pathname.endsWith('/title-hero.webp') ||
     url.pathname.endsWith('.webmanifest') ||
-    url.pathname.endsWith('.json')
+    url.pathname.endsWith('.json') ||
+    /\.(js|css|svg|png|webp|avif|jpg|jpeg|glb|ktx2|mp3|ogg|wav|woff2)$/i.test(url.pathname)
   ) {
     event.respondWith(staleWhileRevalidateShell(request, event));
   }

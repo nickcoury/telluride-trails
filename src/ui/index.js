@@ -89,7 +89,13 @@ export function createUI(engine, { trailData, game, terrain } = {}) {
     onShowToast: (text, tone, ms) => hud.showToast(text, tone, ms),
   });
 
-  async function preloadAndLaunch({ x, z, stageLabel, launchFn }) {
+  const nextTick = () =>
+    Promise.race([
+      new Promise((r) => requestAnimationFrame(r)),
+      new Promise((r) => setTimeout(r, 45)),
+    ]);
+
+  async function preloadAndLaunch({ x, z, heading = 0, stageLabel, launchFn }) {
     dialogs.resetDilationFlag();
     engine.setAppState?.('loading');
     screens.showScreen('loading');
@@ -97,24 +103,56 @@ export function createUI(engine, { trailData, game, terrain } = {}) {
 
     let progress = 10;
     const pulse = setInterval(() => {
-      progress = Math.min(88, progress + 7);
+      progress = Math.min(86, progress + 5);
       screens.setLoadingProgress(progress);
-    }, 140);
+    }, 160);
+
+    const unsubProg = engine.events?.on?.('loading:progress', (p) => {
+      const pct = Number.isFinite(p?.pct) ? p.pct : Number.isFinite(p?.progress) ? p.progress * 100 : null;
+      if (pct !== null) {
+        progress = Math.max(progress, Math.min(90, pct));
+        screens.setLoadingProgress(progress, p?.stage || undefined);
+      }
+    });
 
     try {
+      if (terrain?.ready) {
+        await terrain.ready;
+      }
       const tasks = [];
       if (typeof terrain?.preload === 'function') {
-        tasks.push(terrain.preload(x, z, 1200));
+        tasks.push(
+          terrain.preload(x, z, 1400).then(() => {
+            progress = Math.max(progress, 72);
+            screens.setLoadingProgress(progress, 'Decoding elevation & NAIP orthoimagery…');
+          })
+        );
       }
       if (typeof trailData?.loadArea === 'function') {
-        tasks.push(trailData.loadArea(x, z, 1800));
+        tasks.push(
+          trailData.loadArea(x, z, 1800).then(() => {
+            progress = Math.max(progress, 55);
+            screens.setLoadingProgress(progress);
+          })
+        );
       }
       await Promise.all(tasks);
+
+      // Snap camera to spawn target while Loading screen is still opaque so terrain.update,
+      // world.update (trees/buildings/rocks), and WebGL uploads settle before revealing HUD!
+      const rawY = typeof terrain?.getHeight === 'function' ? terrain.getHeight(x, z) : 2700;
+      const spawnY = Number.isFinite(rawY) ? rawY : 2700;
+      engine.cameraRig?.snapTo?.({ x, y: spawnY, z }, heading);
+      screens.setLoadingProgress(93, 'Populating alpine forest & trails…');
+      for (let i = 0; i < 6; i++) {
+        await nextTick();
+      }
       screens.setLoadingProgress(100, 'Lacing trail shoes…');
     } catch (err) {
       console.warn('[ui] preload warning:', err);
     } finally {
       clearInterval(pulse);
+      if (unsubProg) unsubProg();
     }
 
     launchFn();
@@ -142,6 +180,7 @@ export function createUI(engine, { trailData, game, terrain } = {}) {
       preloadAndLaunch({
         x,
         z,
+        heading,
         stageLabel: `Preloading ${loc.name || 'San Juan trailhead'}…`,
         launchFn: () => {
           game.startFreeRun({ x, z, heading, startTime, startHour });
@@ -153,9 +192,11 @@ export function createUI(engine, { trailData, game, terrain } = {}) {
       lastRaceId = race.id;
       const sx = race.start?.x ?? 0;
       const sz = race.start?.z ?? 0;
+      const sh = race.start?.heading ?? 0;
       preloadAndLaunch({
         x: sx,
         z: sz,
+        heading: sh,
         stageLabel: `Staging start line for ${race.name}…`,
         launchFn: () => {
           game.startRace(race.id);
@@ -167,10 +208,12 @@ export function createUI(engine, { trailData, game, terrain } = {}) {
       const saved = game.getSavedRun?.();
       const sx = saved?.x ?? 0;
       const sz = saved?.z ?? 0;
+      const sh = saved?.heading ?? 0;
       lastRaceId = saved?.raceId || null;
       preloadAndLaunch({
         x: sx,
         z: sz,
+        heading: sh,
         stageLabel: 'Restoring saved mountain run…',
         launchFn: () => {
           if (typeof game.resumeSaved === 'function') game.resumeSaved();
