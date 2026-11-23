@@ -24,7 +24,7 @@ export function createTerrain(engine) {
 
   const detailAssets = createDetailAssets(engine);
   const tileCache = createTileCache({ engine, manifests, tierConfig });
-  const trailMask = createTrailMaskManager({ engine });
+  const trailMask = createTrailMaskManager({ engine, tierConfig });
   const materialPool = createTerrainMaterialPool({ engine, detailAssets });
   materialPool.setShaderMode(engine.quality.tier);
 
@@ -51,22 +51,45 @@ export function createTerrain(engine) {
     });
 
   function ensureDetailTexturesLoaded() {
-    if (detailLoadStarted || disposed) return;
+    if (disposed) return Promise.resolve();
     detailLoadStarted = true;
-    detailAssets.loadTierTextures(engine.quality.tier);
+    return detailAssets.loadTierTextures(engine.quality.tier);
   }
 
+  let currentTier = engine.quality.tier;
+  let currentAniso = engine.quality.maxAnisotropy || 4;
+
+  // Strictly ignore renderScale-only quality:changed ticks (zero rebuilds / zero GPU re-uploads!)
   const offQuality = engine.events.on('quality:changed', (q) => {
     if (disposed) return;
-    tierConfig = getTierConfig(q.tier);
-    materialPool.setShaderMode(q.tier);
-    detailAssets.setAnisotropy(q.maxAnisotropy || 4);
-    quadtree.setTierConfig(tierConfig);
-    if (detailLoadStarted) {
-      detailAssets.loadTierTextures(q.tier);
+    const nextTier = q?.tier ?? engine.quality.tier;
+    const nextAniso = q?.maxAnisotropy ?? engine.quality.maxAnisotropy ?? 4;
+    const tierChanged = nextTier !== currentTier;
+    const anisoChanged = nextAniso !== currentAniso;
+
+    if (!tierChanged && !anisoChanged) {
+      return;
+    }
+
+    if (anisoChanged) {
+      currentAniso = nextAniso;
+      detailAssets.setAnisotropy(nextAniso);
+    }
+
+    if (tierChanged) {
+      currentTier = nextTier;
+      tierConfig = getTierConfig(nextTier);
+      materialPool.setShaderMode(nextTier);
+      quadtree.setTierConfig(tierConfig);
+      if (detailLoadStarted) {
+        detailAssets.loadTierTextures(nextTier);
+      }
+    } else if (anisoChanged) {
+      tileCache.setTierConfig(tierConfig);
     }
   });
 
+  // Defer PBR detail WebPs until leaving Title screen so Title cold payload stays < 1.5 MB!
   const offAppState = engine.events.on('app:state', ({ state }) => {
     if (state !== 'title') {
       ensureDetailTexturesLoaded();
@@ -76,11 +99,12 @@ export function createTerrain(engine) {
   const offContextRestored = engine.events.on('engine:contextrestored', () => {
     detailAssets.getAlbedoArray().needsUpdate = true;
     detailAssets.getNormalRoughArray().needsUpdate = true;
+    tileCache.onContextRestored();
   });
 
   function update(cameraPos) {
     if (disposed || !manifestsReady) return;
-    if (engine.getAppState?.() === 'title') return;
+    // Run during 'loading' too so @ui's loading-curtain settle frames populate the spawn view!
     quadtree.update(cameraPos);
   }
 
@@ -99,8 +123,13 @@ export function createTerrain(engine) {
   async function preload(x, z, radiusM = 1200) {
     await ready;
     if (disposed) return;
-    ensureDetailTexturesLoaded();
-    await quadtree.preload(x, z, radiusM);
+    const isTitle = engine.getAppState?.() === 'title';
+    if (isTitle) {
+      await quadtree.preload(x, z, radiusM);
+    } else {
+      // Await BOTH high-zoom raster tiles AND parallelized 512px detail PBR arrays before play starts!
+      await Promise.all([quadtree.preload(x, z, radiusM), ensureDetailTexturesLoaded()]);
+    }
   }
 
   function dispose() {

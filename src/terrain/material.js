@@ -28,12 +28,12 @@ vec3 applySanJuanAtmosphere(vec3 color, vec3 worldPos, vec3 camPos) {
     : exp(-clamp(h0 * falloff, -10.0, 10.0));
 
   float opticalDepth = uFogDensity * dist * avgExp;
-  float fogAmt = 1.0 - exp(-opticalDepth - dist * (0.000016 + uRainAmount * 0.00016) * uAerialScatter);
+  float fogAmt = 1.0 - exp(-opticalDepth - dist * (0.000016 + uRainAmount * 0.00018) * uAerialScatter);
   fogAmt = clamp(fogAmt, 0.0, 1.0);
 
   float sunCos = max(dot(viewDir, uSunDir), 0.0);
   float mieGlow = pow(sunCos, 6.0) * 0.42 + pow(sunCos, 32.0) * 0.35;
-  vec3 scatterColor = mix(uFogColor, uHorizonColor + uSunColor * 0.32, mieGlow * (1.0 - uRainAmount * 0.85));
+  vec3 scatterColor = mix(uFogColor, uHorizonColor + uSunColor * 0.32, mieGlow * (1.0 - uRainAmount * 0.88));
 
   return mix(color, scatterColor, fogAmt);
 }
@@ -44,7 +44,6 @@ uniform sampler2D uHeightTex;
 uniform vec4 uHeightUvTransform;
 uniform vec4 uTileBounds;
 uniform vec2 uHeightTexSize;
-uniform vec2 uHeightTexelWorld;
 uniform vec4 uMorphParams;
 uniform vec3 uCamPos;
 uniform vec4 uFlags;
@@ -60,23 +59,19 @@ float decodeTerrarium(vec4 t) {
   return (t.r * 255.0 * 256.0) + (t.g * 255.0) + (t.b * 255.0 / 256.0) - 32768.0;
 }
 
+// Sample vertex-aligned (N+1)x(N+1) stitched Terrarium grid: hUv=0 -> texel 0, hUv=1 -> texel N
 float sampleHeightAtUv(vec2 hUv) {
   if (uFlags.x < 0.5) return 2667.0;
   vec2 maxCoord = max(uHeightTexSize - 1.0, vec2(0.0));
-  vec2 fCoord = clamp(hUv, vec2(0.0), vec2(1.0)) * uHeightTexSize - 0.5;
+  vec2 fCoord = clamp(hUv, vec2(0.0), vec2(1.0)) * maxCoord;
   vec2 base = clamp(floor(fCoord), vec2(0.0), maxCoord);
   vec2 next = clamp(base + 1.0, vec2(0.0), maxCoord);
-  vec2 f = clamp(fCoord - floor(fCoord), vec2(0.0), vec2(1.0));
+  vec2 f = clamp(fCoord - base, vec2(0.0), vec2(1.0));
 
-  ivec2 i00 = ivec2(base);
-  ivec2 i10 = ivec2(next.x, base.y);
-  ivec2 i01 = ivec2(base.x, next.y);
-  ivec2 i11 = ivec2(next);
-
-  float h00 = decodeTerrarium(texelFetch(uHeightTex, i00, 0));
-  float h10 = decodeTerrarium(texelFetch(uHeightTex, i10, 0));
-  float h01 = decodeTerrarium(texelFetch(uHeightTex, i01, 0));
-  float h11 = decodeTerrarium(texelFetch(uHeightTex, i11, 0));
+  float h00 = decodeTerrarium(texelFetch(uHeightTex, ivec2(base), 0));
+  float h10 = decodeTerrarium(texelFetch(uHeightTex, ivec2(next.x, base.y), 0));
+  float h01 = decodeTerrarium(texelFetch(uHeightTex, ivec2(base.x, next.y), 0));
+  float h11 = decodeTerrarium(texelFetch(uHeightTex, ivec2(next), 0));
 
   return mix(mix(h00, h10, f.x), mix(h01, h11, f.x), f.y);
 }
@@ -88,56 +83,23 @@ float samplePatchHeight(vec2 patchUv) {
 `;
 
 const FRAG_HELPERS_GLSL = /* glsl */ `
-uniform sampler2D uHeightTex;
+uniform sampler2D uNormalAoTex;
 uniform sampler2D uImageryTex;
 uniform sampler2D uCoverTex;
 uniform sampler2D uTrailMaskTex;
 uniform highp sampler2DArray uDetailAlbedoArray;
 uniform highp sampler2DArray uDetailNrmRoughArray;
 
-uniform vec4 uHeightUvTransform;
 uniform vec4 uImageryUvTransform;
 uniform vec4 uCoverUvTransform;
 uniform vec4 uTrailUvTransform;
 uniform vec2 uHeightTexSize;
-uniform vec2 uHeightTexelWorld;
 uniform vec3 uCamPos;
 uniform vec4 uFlags;
 
 varying vec3 vWorldPos;
 varying vec2 vPatchUv;
 varying vec2 vHeightUv;
-
-float decodeTerrariumF(vec4 t) {
-  return (t.r * 255.0 * 256.0) + (t.g * 255.0) + (t.b * 255.0 / 256.0) - 32768.0;
-}
-
-float sampleHeightFrag(vec2 hUv) {
-  if (uFlags.x < 0.5) return 2667.0;
-  vec2 maxCoord = max(uHeightTexSize - 1.0, vec2(0.0));
-  vec2 fCoord = clamp(hUv, vec2(0.0), vec2(1.0)) * uHeightTexSize - 0.5;
-  vec2 base = clamp(floor(fCoord), vec2(0.0), maxCoord);
-  vec2 next = clamp(base + 1.0, vec2(0.0), maxCoord);
-  vec2 f = clamp(fCoord - floor(fCoord), vec2(0.0), vec2(1.0));
-
-  float h00 = decodeTerrariumF(texelFetch(uHeightTex, ivec2(base), 0));
-  float h10 = decodeTerrariumF(texelFetch(uHeightTex, ivec2(next.x, base.y), 0));
-  float h01 = decodeTerrariumF(texelFetch(uHeightTex, ivec2(base.x, next.y), 0));
-  float h11 = decodeTerrariumF(texelFetch(uHeightTex, ivec2(next), 0));
-
-  return mix(mix(h00, h10, f.x), mix(h01, h11, f.x), f.y);
-}
-
-vec3 computeTerrainWorldNormal(vec2 hUv) {
-  vec2 duv = 1.0 / max(uHeightTexSize, vec2(1.0));
-  float hL = sampleHeightFrag(hUv - vec2(duv.x, 0.0));
-  float hR = sampleHeightFrag(hUv + vec2(duv.x, 0.0));
-  float hN = sampleHeightFrag(hUv - vec2(0.0, duv.y));
-  float hS = sampleHeightFrag(hUv + vec2(0.0, duv.y));
-  float dx = max(uHeightTexelWorld.x * 2.0, 0.5);
-  float dz = max(uHeightTexelWorld.y * 2.0, 0.5);
-  return normalize(vec3((hL - hR) / dx, 1.0, (hN - hS) / dz));
-}
 
 float hash21(vec2 p) {
   p = fract(p * vec2(123.34, 456.21));
@@ -156,22 +118,31 @@ float valueNoise2(vec2 p) {
   return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
-vec4 sampleTriplanarAlbedo(vec3 wp, vec3 wn, float layer, float scale) {
+// 2-axis dominant-plane triplanar on steep cliffs (4 fetches instead of 6 for albedo+normal, crisp strata)
+vec3 sampleTriplanarCliffAlb(vec3 wp, vec3 wn, float scale) {
   vec3 blend = pow(abs(wn), vec3(4.0));
   blend /= max(blend.x + blend.y + blend.z, 0.0001);
-  vec4 xProj = texture(uDetailAlbedoArray, vec3(wp.zy * scale, layer));
-  vec4 yProj = texture(uDetailAlbedoArray, vec3(wp.xz * scale, layer));
-  vec4 zProj = texture(uDetailAlbedoArray, vec3(wp.xy * scale, layer));
-  return xProj * blend.x + yProj * blend.y + zProj * blend.z;
+  vec3 col = vec3(0.0);
+  if (blend.x > 0.04) col += texture(uDetailAlbedoArray, vec3(wp.zy * scale, 0.0)).rgb * blend.x;
+  if (blend.y > 0.04) col += texture(uDetailAlbedoArray, vec3(wp.xz * scale, 0.0)).rgb * blend.y;
+  if (blend.z > 0.04) col += texture(uDetailAlbedoArray, vec3(wp.xy * scale, 0.0)).rgb * blend.z;
+  return col;
 }
 
-vec3 sampleTriplanarNrmRough(vec3 wp, vec3 wn, float layer, float scale) {
+vec3 sampleTriplanarCliffNR(vec3 wp, vec3 wn, float scale) {
   vec3 blend = pow(abs(wn), vec3(4.0));
   blend /= max(blend.x + blend.y + blend.z, 0.0001);
-  vec3 xProj = texture(uDetailNrmRoughArray, vec3(wp.zy * scale, layer)).rgb;
-  vec3 yProj = texture(uDetailNrmRoughArray, vec3(wp.xz * scale, layer)).rgb;
-  vec3 zProj = texture(uDetailNrmRoughArray, vec3(wp.xy * scale, layer)).rgb;
-  return xProj * blend.x + yProj * blend.y + zProj * blend.z;
+  vec3 nr = vec3(0.0);
+  if (blend.x > 0.04) nr += texture(uDetailNrmRoughArray, vec3(wp.zy * scale, 0.0)).rgb * blend.x;
+  if (blend.y > 0.04) nr += texture(uDetailNrmRoughArray, vec3(wp.xz * scale, 0.0)).rgb * blend.y;
+  if (blend.z > 0.04) nr += texture(uDetailNrmRoughArray, vec3(wp.xy * scale, 0.0)).rgb * blend.z;
+  return nr;
+}
+
+// Center-normalized detail contrast multiplier centered at 1.0 with full tactile relief
+vec3 normalizeDetailContrast(vec3 alb, float expectedMean, float contrastBoost) {
+  vec3 ratio = alb / max(expectedMean, 0.025);
+  return clamp(vec3(1.0) + (ratio - vec3(1.0)) * contrastBoost, vec3(0.32), vec3(1.75));
 }
 `;
 
@@ -266,23 +237,46 @@ export function createTerrainMaterialPool({ engine, detailAssets }) {
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <map_fragment>',
         /* glsl */ `
-        vec3 terrainWorldN = computeTerrainWorldNormal(vHeightUv);
+        // 1 hardware-bilinear fetch for precomputed terrain world normal + cavity/ridge AO!
+        vec2 nUv = (clamp(vHeightUv, 0.0, 1.0) * max(uHeightTexSize - 1.0, vec2(0.0)) + 0.5) / max(uHeightTexSize, vec2(1.0));
+        vec4 nAoSample = texture2D(uNormalAoTex, nUv);
+        vec2 nXZ = nAoSample.rg * 2.0 - 1.0;
+        float nY = sqrt(max(0.002, 1.0 - dot(nXZ, nXZ)));
+        vec3 terrainWorldN = normalize(vec3(nXZ.x, nY, nXZ.y));
+        float terrainAO = mix(0.66, 1.06, nAoSample.b);
         float terrainSlope = clamp(1.0 - terrainWorldN.y, 0.0, 1.0);
         float elev = vWorldPos.y;
         float camDist = length(vWorldPos - uCamPos);
 
-        // Macro variation noise (kills tiling & adds natural geological/alpine variation)
-        float macroA = valueNoise2(vWorldPos.xz * 0.011);
-        float macroB = valueNoise2(vWorldPos.xz * 0.043 + 17.3);
-        float macroVar = macroA * 0.65 + macroB * 0.35;
+        // Wrapped world coordinates (safe for mobile mediump precision at 60 km+)
+        vec2 wp64 = mod(vWorldPos.xz, 64.0);
+        vec2 wp128 = mod(vWorldPos.xz, 128.0);
+        vec2 wp256 = mod(vWorldPos.xz, 256.0);
 
-        // Cover weights (R=forest, G=rock/talus, B=water, A=tundra/grass)
+        // Multi-scale macro noise (kills tiling & adds natural San Juan geology variation)
+        float macroA = valueNoise2(wp256 * 0.0625); // 16 m wavelength
+        float macroB = valueNoise2(wp128 * 0.1875 + 17.3); // 5.3 m wavelength
+        float macroVar = macroA * 0.62 + macroB * 0.38;
+
+        // 1 fetch: Real NAIP orthoimagery (linearized by hardware SRGB8_ALPHA8)
+        vec3 rawImg = vec3(0.14);
+        float rawLum = 0.14;
+        float imgSat = 0.0;
+        if (uFlags.y > 0.5) {
+          vec2 iUv = uImageryUvTransform.xy + vPatchUv * uImageryUvTransform.zw;
+          rawImg = texture2D(uImageryTex, iUv).rgb;
+          rawLum = dot(rawImg, vec3(0.299, 0.587, 0.114));
+          float maxC = max(rawImg.r, max(rawImg.g, rawImg.b));
+          float minC = min(rawImg.r, min(rawImg.g, rawImg.b));
+          imgSat = (maxC - minC) / max(maxC, 0.001);
+        }
+
+        // 1 fetch: Cover mask (R=forest, G=rock/talus, B=water, A=tundra/grass)
         vec4 coverSample = vec4(0.0);
         if (uFlags.z > 0.5) {
           vec2 cUv = uCoverUvTransform.xy + vPatchUv * uCoverUvTransform.zw;
           coverSample = texture2D(uCoverTex, cUv);
         } else {
-          // Physically grounded San Juan cover fallback from elevation, slope & aspect
           float forestAlt = 1.0 - smoothstep(3420.0, 3680.0, elev + (macroVar - 0.5) * 140.0);
           float cliffMask = smoothstep(0.22, 0.48, terrainSlope);
           float alpineMask = smoothstep(3350.0, 3650.0, elev);
@@ -291,25 +285,51 @@ export function createTerrainMaterialPool({ engine, detailAssets }) {
           coverSample.a = clamp((1.0 - cliffMask) * (0.45 + alpineMask * 0.35), 0.0, 1.0);
         }
 
-        // Layer blend weights: rock(0), talus(1), dirt(2), grass(3), forest(4), snow(5)
-        float cliffW = smoothstep(0.24, 0.52, terrainSlope);
-        float steepTalus = smoothstep(0.12, 0.30, terrainSlope) * (1.0 - cliffW * 0.65);
-        float snowLine = smoothstep(3780.0, 4150.0, elev + (macroVar - 0.5) * 180.0 - terrainWorldN.z * 110.0)
-                       * (1.0 - smoothstep(0.32, 0.58, terrainSlope));
-        float wRock = clamp(cliffW + coverSample.g * 0.45, 0.0, 1.0);
-        float wTalus = clamp(steepTalus * 0.75 + coverSample.g * 0.55 * (1.0 - cliffW), 0.0, 1.0);
-        float wForest = clamp(coverSample.r * (1.0 - cliffW), 0.0, 1.0);
-        float wGrass = clamp(coverSample.a * (1.0 - cliffW), 0.0, 1.0);
-        float wDirt = clamp(0.15 * (1.0 - wForest) * (1.0 - wGrass) * (1.0 - cliffW), 0.0, 1.0);
-        float wSnow = clamp(snowLine, 0.0, 1.0);
-
-        float trailMask = 0.0;
+        // 1 fetch (when active): Semantic RGB trail/road mask (R=dirt trail, G=paved asphalt, B=sidewalk/curb)
+        vec3 trailSample = vec3(0.0);
         if (uFlags.w > 0.5) {
           vec2 tUv = uTrailUvTransform.xy + vPatchUv * uTrailUvTransform.zw;
-          trailMask = texture2D(uTrailMaskTex, tUv).r;
+          trailSample = texture2D(uTrailMaskTex, tUv).rgb;
         }
+        float asphaltMask = smoothstep(0.18, 0.58, trailSample.g);
+        float curbApron = smoothstep(0.15, 0.55, trailSample.b) * (1.0 - asphaltMask);
+        // Organic noise-perturbed edge on dirt singletrack & jeep roads so edges feel naturally worn
+        float edgeNoise = (macroB - 0.5) * 0.24;
+        float dirtTrailMask = smoothstep(0.14, 0.52, trailSample.r + edgeNoise * step(0.04, trailSample.r)) * (1.0 - asphaltMask);
 
-        // Normalize base weights
+        // Imagery-hue material cues (sub-meter NAIP refines 30m NLCD cover!)
+        float imgGreenness = uFlags.y > 0.5 ? clamp((rawImg.g - max(rawImg.r, rawImg.b) * 0.90) * 6.5, 0.0, 1.0) : 0.0;
+        float imgRedEarth = uFlags.y > 0.5
+          ? clamp((rawImg.r - rawImg.g * 1.06) * 5.5, 0.0, 1.0) * clamp((rawImg.r - rawImg.b * 1.25) * 4.5, 0.0, 1.0)
+          : 0.0;
+        float imgDarkForest = uFlags.y > 0.5 ? smoothstep(0.13, 0.025, rawLum) * smoothstep(3620.0, 3260.0, elev) : 0.0;
+        float imgPaleScree = uFlags.y > 0.5 ? smoothstep(0.13, 0.34, rawLum) * (1.0 - smoothstep(0.08, 0.26, imgSat)) : 0.0;
+
+        // Physically grounded layer weights: rock(0), talus(1), dirt(2), grass(3), forest(4), snow(5)
+        // Note: terrainSlope = 1 - ny = 1 - cos(angle): 22deg=0.07, 31deg=0.14, 42deg=0.26, 48deg=0.33
+        float cliffW = smoothstep(0.14, 0.32, terrainSlope);
+        float steepTalus = smoothstep(0.06, 0.17, terrainSlope) * (1.0 - cliffW * 0.72);
+        float alpineElev = smoothstep(3450.0, 3820.0, elev);
+        float northCouloir = smoothstep(-0.10, -0.40, terrainWorldN.z);
+        float snowLine = smoothstep(4040.0, 4340.0, elev + (macroVar - 0.5) * 140.0)
+                       * northCouloir
+                       * (1.0 - smoothstep(0.20, 0.38, terrainSlope));
+
+        float wRock = clamp(cliffW * 1.15 + coverSample.g * 0.38 * smoothstep(0.08, 0.26, terrainSlope), 0.0, 1.0);
+        float wTalus = clamp(
+          steepTalus * 0.72 + coverSample.g * 0.68 * (1.0 - cliffW * 0.75) + alpineElev * imgPaleScree * 0.55,
+          0.0,
+          1.0
+        );
+        float wForest = clamp((coverSample.r * 0.85 + imgDarkForest * 0.45) * (1.0 - cliffW) * (1.0 - alpineElev * 0.8), 0.0, 1.0);
+        float wGrass = clamp((coverSample.a * 0.85 + imgGreenness * 0.58) * (1.0 - cliffW), 0.0, 1.0);
+        float wDirt = clamp(
+          0.16 * (1.0 - wForest * 0.7) * (1.0 - wGrass * 0.6) * (1.0 - cliffW) + imgRedEarth * 0.55 + alpineElev * 0.18 * (1.0 - wGrass),
+          0.0,
+          1.0
+        );
+        float wSnow = clamp(snowLine * 0.72, 0.0, 0.72);
+
         float wSum = max(wRock + wTalus + wDirt + wGrass + wForest, 0.0001);
         wRock /= wSum;
         wTalus /= wSum;
@@ -317,124 +337,339 @@ export function createTerrainMaterialPool({ engine, detailAssets }) {
         wGrass /= wSum;
         wForest /= wSum;
 
-        // Base orthoimagery (or procedural San Juan palette if imagery still streaming)
+        // Calibrated macro orthoimagery: preserves deep forest & vibrant meadow colors while gently rolling off bright sunlit highlights
         vec3 baseColor;
         if (uFlags.y > 0.5) {
-          vec2 iUv = uImageryUvTransform.xy + vPatchUv * uImageryUvTransform.zw;
-          baseColor = texture2D(uImageryTex, iUv).rgb;
+          float targetLum = (rawLum / (1.0 + rawLum * 1.35)) * 1.08;
+          baseColor = rawImg * (targetLum / max(rawLum, 0.0005));
+          // Subtle vibrance restoration for crisp high-altitude Colorado light
+          float calLum = dot(baseColor, vec3(0.299, 0.587, 0.114));
+          baseColor = max(mix(vec3(calLum), baseColor, 1.15), vec3(0.008));
+
+          // Gentle mid-July guard ONLY for blown-out white snowdrifts on sunlit passes (preserves real San Juan iron-oxide/scree colors!)
+          float highAlpine = smoothstep(3520.0, 3860.0, elev) * (1.0 - wSnow);
+          if (highAlpine > 0.01 && rawLum > 0.42 && imgSat < 0.12) {
+            float glarePatch = smoothstep(0.42, 0.68, rawLum) * (1.0 - smoothstep(0.05, 0.12, imgSat));
+            vec3 screeWarm = mix(vec3(0.145, 0.125, 0.105), vec3(0.105, 0.115, 0.070), wGrass);
+            baseColor = mix(baseColor, screeWarm * (0.82 + macroVar * 0.36), highAlpine * glarePatch * 0.58);
+          }
         } else {
-          vec3 cRock = vec3(0.24, 0.22, 0.21);
-          vec3 cTalus = vec3(0.30, 0.28, 0.25);
-          vec3 cGrass = vec3(0.16, 0.24, 0.10);
-          vec3 cForest = vec3(0.08, 0.14, 0.07);
-          vec3 cDirt = vec3(0.28, 0.21, 0.14);
+          vec3 cRock = vec3(0.14, 0.115, 0.095);
+          vec3 cTalus = vec3(0.16, 0.15, 0.135);
+          vec3 cGrass = vec3(0.085, 0.13, 0.052);
+          vec3 cForest = vec3(0.045, 0.082, 0.038);
+          vec3 cDirt = vec3(0.14, 0.10, 0.065);
           baseColor = cRock * wRock + cTalus * wTalus + cGrass * wGrass + cForest * wForest + cDirt * wDirt;
-          baseColor = mix(baseColor, vec3(0.84, 0.87, 0.92), wSnow * 0.8);
+          baseColor = mix(baseColor, vec3(0.62, 0.66, 0.72), wSnow * 0.75);
         }
 
-        // Detail PBR sampling with smooth distance fade
-        float nearFade = 1.0 - smoothstep(140.0, 820.0, camDist);
-        float cliffFade = 1.0 - smoothstep(400.0, 2600.0, camDist);
+        // Keep clean calibrated macro imagery copy (unpolluted by off-road grass/dirt) for paved streets & sidewalks
+        vec3 macroImageryCol = baseColor;
+
+        // Apply subtle DEM cavity/ridge ambient occlusion across macro terrain
+        baseColor *= terrainAO;
+
+        // Detail PBR sampling ranges
+        float microFade = 1.0 - smoothstep(14.0, 75.0, camDist);
+        float nearFade = 1.0 - smoothstep(110.0, 560.0, camDist);
+        float cliffFade = 1.0 - smoothstep(360.0, 2200.0, camDist);
         float terrainRoughness = 0.90;
-        vec3 detailTangentN = vec3(0.0);
+        vec2 detailNormalXY = vec2(0.0);
+        vec3 dirtMicroAlb = vec3(0.055, 0.038, 0.024);
+        vec3 dirtMicroNR = vec3(0.5, 0.5, 0.88);
+        vec3 talusMicroAlb = vec3(0.175);
+
+        // Zero-fetch crisp procedural turf/pebble micro-grain for close-range tactile crispness
+        float fineGrain1 = valueNoise2(wp64 * 3.4 + 5.1);
+        float fineGrain2 = valueNoise2(wp64 * 11.2 + 19.7);
+        float microTurf = (fineGrain1 * 0.55 + fineGrain2 * 0.45) - 0.5;
 
         ${
           isLow
             ? /* glsl */ `
-          if (nearFade > 0.01) {
-            vec2 detUv = vWorldPos.xz * 0.16;
-            vec3 dRock = texture(uDetailAlbedoArray, vec3(detUv * 0.65, 0.0)).rgb;
-            vec3 dGrass = texture(uDetailAlbedoArray, vec3(detUv, 3.0)).rgb;
-            vec3 dDirt = texture(uDetailAlbedoArray, vec3(detUv * 1.15, 2.0)).rgb;
-            vec3 det = mix(dGrass, dRock, clamp(wRock + wTalus * 0.6, 0.0, 1.0));
-            det = mix(det, dDirt, trailMask);
-            baseColor = mix(baseColor, baseColor * (0.68 + det * 1.75), nearFade * 0.65);
+          // MINIMAL-FETCH LOW TIER: 1 single detail albedo fetch (zero normal array, zero triplanar!)
+          if (nearFade > 0.01 && asphaltMask < 0.85) {
+            float domLayer = 3.0;
+            float domMean = 0.052;
+            float domScale = 0.35;
+            if (dirtTrailMask > 0.08) {
+              domLayer = 2.0; domMean = 0.044; domScale = 0.42;
+            } else if (wRock >= wTalus && wRock >= wGrass && wRock >= wForest) {
+              domLayer = 0.0; domMean = 0.115; domScale = 0.16;
+            } else if (wTalus >= wGrass && wTalus >= wForest) {
+              domLayer = 1.0; domMean = 0.175; domScale = 0.32;
+            } else if (wForest >= wGrass) {
+              domLayer = 4.0; domMean = 0.112; domScale = 0.34;
+            }
+            vec3 domAlb = texture(uDetailAlbedoArray, vec3(wp64 * domScale, domLayer)).rgb;
+            if (domLayer > 1.5 && domLayer < 2.5) dirtMicroAlb = domAlb;
+            vec3 contrast = normalizeDetailContrast(domAlb, domMean, 1.40);
+            baseColor = mix(baseColor, baseColor * contrast * (1.0 + microTurf * 0.22 * microFade), nearFade * 0.84);
           }
           `
             : /* glsl */ `
-          vec3 detAlb = vec3(0.5);
-          vec3 detNR = vec3(0.5, 0.5, 0.9);
+          if ((nearFade > 0.01 || (cliffFade > 0.01 && wRock > 0.06)) && asphaltMask < 0.92) {
+            // Anti-tiled dual-rotated UVs with gentle domain warp (kills grid alignment on wide talus & meadows!)
+            vec2 uvWarp = vec2(macroA - 0.5, macroB - 0.5) * 0.18;
+            vec2 rotMicro = vec2(wp64.x * 0.9205 - wp64.y * 0.3907, wp64.x * 0.3907 + wp64.y * 0.9205);
+            vec2 rotMeso = vec2(wp128.x * 0.6293 + wp128.y * 0.7771, -wp128.x * 0.7771 + wp128.y * 0.6293);
+            vec2 uvMicro = rotMicro * 0.44 + uvWarp;
+            vec2 uvMeso = rotMeso * 0.092 + vec2(macroA * 0.34, macroB * 0.34);
+            float mesoWeight = mix(0.20, 0.52, smoothstep(14.0, 95.0, camDist));
 
-          if (nearFade > 0.01 || cliffFade > 0.01) {
-            vec2 uv1 = vWorldPos.xz * 0.18;
-            vec2 uv2 = vWorldPos.xz * 0.045 + vec2(macroA * 0.35, macroB * 0.35);
-
-            // Triplanar rock on steep canyon walls / cliffs so textures never stretch
-            vec3 rockAlb = sampleTriplanarAlbedo(vWorldPos, terrainWorldN, 0.0, 0.095).rgb;
-            vec3 rockNR = sampleTriplanarNrmRough(vWorldPos, terrainWorldN, 0.0, 0.095);
-
-            if (nearFade > 0.01) {
-              vec3 talusAlb = mix(
-                texture(uDetailAlbedoArray, vec3(uv1 * 0.85, 1.0)).rgb,
-                texture(uDetailAlbedoArray, vec3(uv2, 1.0)).rgb,
-                0.35
-              );
-              vec3 dirtAlb = texture(uDetailAlbedoArray, vec3(uv1 * 1.2, 2.0)).rgb;
-              vec3 grassAlb = mix(
-                texture(uDetailAlbedoArray, vec3(uv1, 3.0)).rgb,
-                texture(uDetailAlbedoArray, vec3(uv2 * 1.4, 3.0)).rgb,
-                0.38
-              );
-              vec3 forestAlb = texture(uDetailAlbedoArray, vec3(uv1 * 0.9, 4.0)).rgb;
-              vec3 snowAlb = texture(uDetailAlbedoArray, vec3(uv1 * 0.6, 5.0)).rgb;
-
-              detAlb = rockAlb * wRock + talusAlb * wTalus + dirtAlb * wDirt + grassAlb * wGrass + forestAlb * wForest;
-              detAlb = mix(detAlb, snowAlb, wSnow * 0.85);
-              detAlb = mix(detAlb, dirtAlb, trailMask);
-
-              vec3 talusNR = texture(uDetailNrmRoughArray, vec3(uv1 * 0.85, 1.0)).rgb;
-              vec3 dirtNR = texture(uDetailNrmRoughArray, vec3(uv1 * 1.2, 2.0)).rgb;
-              vec3 grassNR = texture(uDetailNrmRoughArray, vec3(uv1, 3.0)).rgb;
-              vec3 forestNR = texture(uDetailNrmRoughArray, vec3(uv1 * 0.9, 4.0)).rgb;
-
-              detNR = rockNR * wRock + talusNR * wTalus + dirtNR * wDirt + grassNR * wGrass + forestNR * wForest;
-              detNR = mix(detNR, dirtNR, trailMask);
-            } else {
-              detAlb = mix(vec3(0.5), rockAlb, wRock);
-              detNR = mix(vec3(0.5, 0.5, 0.9), rockNR, wRock);
+            // 0: Rock (triplanar on steep cliffs, active-culled)
+            vec3 rockAlb = vec3(0.115);
+            vec3 rockNR = vec3(0.5, 0.5, 0.86);
+            float rockH = 0.5;
+            if (wRock > 0.03) {
+              if (cliffW > 0.08 && cliffFade > 0.01) {
+                vec3 triPos = vec3(mod(vWorldPos.x, 100.0), mod(vWorldPos.y, 100.0), mod(vWorldPos.z, 100.0));
+                rockAlb = sampleTriplanarCliffAlb(triPos, terrainWorldN, 0.12);
+                ${isHigh ? `if (camDist < 120.0) rockAlb = mix(rockAlb, sampleTriplanarCliffAlb(triPos, terrainWorldN, 0.045), 0.30);` : ''}
+                rockNR = sampleTriplanarCliffNR(triPos, terrainWorldN, 0.12);
+              } else {
+                rockAlb = texture(uDetailAlbedoArray, vec3(uvMicro * 0.45, 0.0)).rgb;
+                rockNR = texture(uDetailNrmRoughArray, vec3(uvMicro * 0.45, 0.0)).rgb;
+              }
+              rockH = clamp(dot(rockAlb, vec3(0.35, 0.45, 0.2)) / 0.16, 0.0, 1.0);
             }
 
-            // Blend detail micro-contrast onto orthoimagery, preserving aerial color while adding crisp ground texture
-            float detMix = max(nearFade * 0.78, cliffFade * wRock * 0.72);
-            vec3 modulated = baseColor * clamp(0.68 + detAlb * 1.75, 0.45, 1.55);
-            // At very close range (<60m), allow detail texture natural hues to shine on rock & dirt
-            float closeBlend = (1.0 - smoothstep(18.0, 95.0, camDist)) * (wRock * 0.45 + wTalus * 0.35 + trailMask * 0.55);
-            baseColor = mix(baseColor, mix(modulated, detAlb, closeBlend), detMix);
+            // 1: Angular alpine talus / scree
+            vec3 talusAlb = vec3(0.175);
+            vec3 talusNR = vec3(0.5, 0.5, 0.84);
+            float talusH = 0.5;
+            if (nearFade > 0.01 && (wTalus > 0.03 || (dirtTrailMask > 0.03 && elev > 3350.0))) {
+              talusAlb = texture(uDetailAlbedoArray, vec3(uvMicro * 0.78, 1.0)).rgb;
+              ${isHigh ? `talusAlb = mix(talusAlb, texture(uDetailAlbedoArray, vec3(uvMeso * 0.92, 1.0)).rgb, mesoWeight * 0.9);` : ''}
+              talusNR = texture(uDetailNrmRoughArray, vec3(uvMicro * 0.78, 1.0)).rgb;
+              talusMicroAlb = talusAlb;
+              talusH = clamp(dot(talusAlb, vec3(0.33, 0.34, 0.33)) / 0.24, 0.0, 1.0);
+            }
 
-            // Macro tone modulation to eliminate repetition
+            // 2: Stony trail dirt & soil
+            vec3 dirtAlb = vec3(0.046, 0.034, 0.022);
+            vec3 dirtNR = vec3(0.5, 0.5, 0.88);
+            float dirtH = 0.5;
+            if (nearFade > 0.01 && (wDirt > 0.03 || dirtTrailMask > 0.03)) {
+              dirtAlb = texture(uDetailAlbedoArray, vec3(uvMicro * 1.15, 2.0)).rgb;
+              ${isHigh ? `dirtAlb = mix(dirtAlb, texture(uDetailAlbedoArray, vec3(uvMeso * 1.1, 2.0)).rgb, mesoWeight * 0.8);` : ''}
+              dirtNR = texture(uDetailNrmRoughArray, vec3(uvMicro * 1.15, 2.0)).rgb;
+              dirtMicroAlb = dirtAlb;
+              dirtMicroNR = dirtNR;
+              dirtH = clamp(dot(dirtAlb, vec3(0.4, 0.4, 0.2)) / 0.08, 0.0, 1.0);
+            }
+
+            // 3: Alpine grass / meadow tundra
+            vec3 grassAlb = vec3(0.058, 0.052, 0.020);
+            vec3 grassNR = vec3(0.5, 0.5, 0.92);
+            float grassH = 0.5;
+            if (nearFade > 0.01 && wGrass > 0.03) {
+              grassAlb = texture(uDetailAlbedoArray, vec3(uvMicro * 1.05, 3.0)).rgb;
+              ${isHigh ? `grassAlb = mix(grassAlb, texture(uDetailAlbedoArray, vec3(uvMeso * 1.15, 3.0)).rgb, mesoWeight * 0.85);` : ''}
+              grassNR = texture(uDetailNrmRoughArray, vec3(uvMicro * 1.05, 3.0)).rgb;
+              grassH = clamp(dot(grassAlb, vec3(0.3, 0.55, 0.15)) / 0.075, 0.0, 1.0);
+            }
+
+            // 4: Forest floor pine duff & needles
+            vec3 forestAlb = vec3(0.115, 0.095, 0.068);
+            vec3 forestNR = vec3(0.5, 0.5, 0.90);
+            float forestH = 0.5;
+            if (nearFade > 0.01 && wForest > 0.03) {
+              forestAlb = texture(uDetailAlbedoArray, vec3(uvMicro * 0.98, 4.0)).rgb;
+              ${isHigh ? `forestAlb = mix(forestAlb, texture(uDetailAlbedoArray, vec3(uvMeso * 1.0, 4.0)).rgb, mesoWeight * 0.85);` : ''}
+              forestNR = texture(uDetailNrmRoughArray, vec3(uvMicro * 0.98, 4.0)).rgb;
+              forestH = clamp(dot(forestAlb, vec3(0.4, 0.4, 0.2)) / 0.16, 0.0, 1.0);
+            }
+
+            // 5: High north-couloir summer snow (only when present)
+            vec3 snowAlb = vec3(0.42);
+            if (nearFade > 0.01 && wSnow > 0.03) {
+              snowAlb = texture(uDetailAlbedoArray, vec3(uvMicro * 0.55, 5.0)).rgb;
+            }
+
+            // Height-based splat blending: crisp interlocking patches of talus, grass tufts, pine duff & cliff rock!
+            float nJitter = (macroB - 0.5) * 0.18;
+            float hR = wRock   > 0.03 ? wRock   + rockH   * 0.28 + 0.04 : -1.0;
+            float hT = wTalus  > 0.03 ? wTalus  + talusH  * 0.30 + nJitter : -1.0;
+            float hD = wDirt   > 0.03 ? wDirt   + dirtH   * 0.24 - nJitter : -1.0;
+            float hG = wGrass  > 0.03 ? wGrass  + grassH  * 0.26 + nJitter * 0.8 : -1.0;
+            float hF = wForest > 0.03 ? wForest + forestH * 0.26 - nJitter * 0.6 : -1.0;
+            float maxH = max(max(hR, hT), max(max(hD, hG), hF));
+            float depth = 0.13;
+
+            float bR = max(hR - (maxH - depth), 0.0);
+            float bT = max(hT - (maxH - depth), 0.0);
+            float bD = max(hD - (maxH - depth), 0.0);
+            float bG = max(hG - (maxH - depth), 0.0);
+            float bF = max(hF - (maxH - depth), 0.0);
+            float bSum = max(bR + bT + bD + bG + bF, 0.0001);
+            bR /= bSum; bT /= bSum; bD /= bSum; bG /= bSum; bF /= bSum;
+
+            // Per-layer contrast-normalized detail multipliers (crisp micro-relief, zero washout!)
+            vec3 cR = normalizeDetailContrast(rockAlb, 0.115, 1.35);
+            vec3 cT = normalizeDetailContrast(talusAlb, 0.175, 1.42);
+            vec3 cD = normalizeDetailContrast(dirtAlb, 0.044, 1.22);
+            vec3 cG = normalizeDetailContrast(grassAlb, 0.052, 1.98);
+            vec3 cF = normalizeDetailContrast(forestAlb, 0.112, 1.65);
+
+            vec3 detailContrast = cR * bR + cT * bT + cD * bD + cG * bG + cF * bF;
+            // Add crisp procedural blade/needle/pebble micro-texture on smooth meadows & forest floor
+            float turfRelief = 1.0 + microTurf * (0.34 * bG + 0.28 * bF + 0.20 * bD + 0.14 * bT) * microFade;
+            detailContrast *= turfRelief;
+
+            // Organic meadow/tundra patchwork variegation (emerald grass, golden sedge, dark soil pockets)
+            vec3 meadowTint = mix(vec3(0.84, 1.06, 0.72), vec3(1.12, 1.02, 0.68), smoothstep(0.28, 0.74, macroB));
+            vec3 forestTint = mix(vec3(0.78, 0.86, 0.64), vec3(0.96, 0.82, 0.62), smoothstep(0.32, 0.72, fineGrain1));
+
+            // Hue-grounded physical PBR layer tints
+            vec3 pbrRock = rockAlb * vec3(1.04, 1.00, 0.96);
+            vec3 pbrTalus = talusAlb * vec3(0.84, 0.81, 0.78);
+            vec3 pbrDirt = dirtAlb * vec3(1.58, 1.54, 1.44);
+            vec3 pbrGrass = grassAlb * vec3(1.22, 1.78, 0.98) * meadowTint;
+            vec3 pbrForest = forestAlb * vec3(0.82, 0.78, 0.64) * forestTint;
+            vec3 pbrAlb = pbrRock * bR + pbrTalus * bT + pbrDirt * bD + pbrGrass * bG + pbrForest * bF;
+
+            float macroLum = clamp(dot(baseColor, vec3(0.299, 0.587, 0.114)), 0.032, 0.28);
+            float pbrLum = max(dot(pbrAlb, vec3(0.299, 0.587, 0.114)), 0.018);
+            vec3 lumMatchedPbr = pbrAlb * clamp(macroLum / pbrLum, 0.48, 1.75) * turfRelief;
+
+            vec3 modulated = baseColor * detailContrast * mix(vec3(1.0), meadowTint, bG * 0.35 * nearFade);
+            float pbrColorMix = clamp(microFade * (0.38 + bR * 0.34 + bT * 0.32 + bD * 0.22 + bG * 0.16) + cliffW * 0.44 * cliffFade, 0.0, 0.80);
+            vec3 detailedColor = mix(modulated, lumMatchedPbr, pbrColorMix);
+
+            // Mid-July high-alpine volcanic rust/ochre/charcoal geological variation on talus & scree
+            if (alpineElev > 0.05 && (bT + bR) > 0.22) {
+              vec3 ironOchre = vec3(1.10, 0.96, 0.85);
+              vec3 charcoalAndesite = vec3(0.86, 0.89, 0.95);
+              detailedColor *= mix(charcoalAndesite, ironOchre, smoothstep(0.26, 0.74, macroA)) * (0.92 + macroB * 0.16);
+            }
+
+            if (wSnow > 0.03) {
+              vec3 snowCol = mix(vec3(0.55, 0.59, 0.65), snowAlb * 1.35, nearFade * 0.65);
+              detailedColor = mix(detailedColor, snowCol, wSnow * 0.80);
+            }
+
+            float detAmt = max(nearFade * 0.95, cliffFade * cliffW * 0.88);
+            baseColor = mix(baseColor, detailedColor, detAmt);
+
+            // Subtle macro tone modulation to eliminate repetition across wide basins
             baseColor *= 0.90 + macroVar * 0.20;
 
-            ${
-              isHigh
-                ? /* glsl */ `
-              float nrmStr = max(nearFade * 0.85, cliffFade * wRock * 0.75);
-              detailTangentN = vec3((detNR.rg * 2.0 - 1.0) * nrmStr, 0.0);
-              terrainRoughness = mix(0.92, clamp(detNR.b, 0.45, 0.98), max(nearFade, cliffFade * wRock));
-              `
-                : /* glsl */ `
-              float nrmStr = nearFade * 0.55;
-              detailTangentN = vec3((detNR.rg * 2.0 - 1.0) * nrmStr, 0.0);
-              terrainRoughness = mix(0.92, clamp(detNR.b, 0.5, 0.98), nearFade);
-              `
-            }
+            // Strong per-layer normal perturbation + procedural micro-tuft bump on meadows/forests!
+            vec2 nR = (rockNR.rg * 2.0 - 1.0) * 1.70;
+            vec2 nT = (talusNR.rg * 2.0 - 1.0) * 1.60;
+            vec2 nD = (dirtNR.rg * 2.0 - 1.0) * 1.95;
+            vec2 nG = (grassNR.rg * 2.0 - 1.0) * 2.15;
+            vec2 nF = (forestNR.rg * 2.0 - 1.0) * 2.05;
+            vec2 blendedN = nR * bR + nT * bT + nD * bD + nG * bG + nF * bF;
+
+            // Fine procedural micro-bump on grass/forest/soil so low-contrast textures have crisp sunlit relief
+            float fxN = valueNoise2(wp64 * 9.5 + vec2(0.18, 0.0)) - valueNoise2(wp64 * 9.5 - vec2(0.18, 0.0));
+            float fzN = valueNoise2(wp64 * 9.5 + vec2(0.0, 0.18)) - valueNoise2(wp64 * 9.5 - vec2(0.0, 0.18));
+            blendedN += vec2(fxN, fzN) * (0.85 * bG + 0.65 * bF + 0.35 * bD) * microFade;
+
+            float blendedRough = rockNR.b * bR + talusNR.b * bT + dirtNR.b * bD + grassNR.b * bG + forestNR.b * bF;
+            float nrmGain = ${isHigh ? 'max(nearFade * 1.0, cliffFade * cliffW * 0.95)' : 'max(nearFade * 0.78, cliffFade * cliffW * 0.75)'};
+            detailNormalXY = blendedN * nrmGain * (1.0 - wSnow * 0.85);
+            terrainRoughness = mix(0.92, clamp(blendedRough, 0.48, 0.98), max(nearFade, cliffFade * cliffW));
           }
           `
         }
 
-        // Trail & road dirt ribbon overlay (smooth shoulder blend, zero z-fighting)
-        if (trailMask > 0.03) {
-          vec3 trailColor = vec3(0.32, 0.24, 0.16) * (0.85 + macroB * 0.3);
-          if (uFlags.y > 0.5) {
-            trailColor = mix(baseColor * vec3(1.12, 0.98, 0.82), trailColor, 0.55);
+        // === SEMANTIC TRAILS, JEEP ROADS, PAVED ASPHALT & SIDEWALKS ===
+
+        // 1. Dirt singletrack, rocky jeep roads, and mountain tracks (R channel)
+        if (dirtTrailMask > 0.02) {
+          vec3 dirtContrast = normalizeDetailContrast(dirtMicroAlb, 0.044, 1.28);
+          float highTrail = smoothstep(3350.0, 3850.0, elev);
+          // Authentic dusty Colorado montane trail soil (brown-tan-grey, NOT terracotta orange!) -> rocky grey-ochre scree above treeline
+          vec3 montaneDust = vec3(0.108, 0.091, 0.071);
+          vec3 alpineScreeRd = vec3(0.132, 0.123, 0.110);
+          vec3 trailSoil = mix(montaneDust, alpineScreeRd, highTrail) * (0.86 + macroVar * 0.28);
+          // On high alpine jeep roads (Imogene Pass), blend crushed talus pebbles into the rocky track!
+          vec3 rockyContrast = highTrail > 0.05
+            ? mix(dirtContrast, normalizeDetailContrast(talusMicroAlb, 0.175, 1.32), highTrail * 0.45)
+            : dirtContrast;
+          vec3 pbrTrail = trailSoil * rockyContrast * (1.0 + microTurf * 0.18 * microFade);
+          vec3 trailCol = uFlags.y > 0.5
+            ? mix(pbrTrail, macroImageryCol * terrainAO * vec3(1.02, 0.96, 0.88) * rockyContrast, 0.30)
+            : pbrTrail;
+          baseColor = mix(baseColor, trailCol, clamp(dirtTrailMask * 0.88, 0.0, 0.92));
+          ${
+            !isLow
+              ? /* glsl */ `
+            vec2 trailN = (dirtMicroNR.rg * 2.0 - 1.0) * 1.95 * nearFade;
+            detailNormalXY = mix(detailNormalXY, trailN, dirtTrailMask * 0.88);
+            terrainRoughness = mix(terrainRoughness, clamp(dirtMicroNR.b, 0.76, 0.96), dirtTrailMask * 0.8);
+            `
+              : ''
           }
-          baseColor = mix(baseColor, trailColor, clamp(trailMask * 0.85, 0.0, 0.9));
-          terrainRoughness = mix(terrainRoughness, 0.86, trailMask * 0.6);
+        }
+
+        // 2. Concrete sidewalk & curb apron alongside paved town streets ONLY (B * (1 - G))
+        if (curbApron > 0.02) {
+          float aggFine = valueNoise2(wp64 * 26.0);
+          float aggMed = valueNoise2(wp64 * 6.0 + 4.1);
+          float slabX = abs(fract(wp64.x * 0.62) - 0.5);
+          float slabZ = abs(fract(wp64.y * 0.62) - 0.5);
+          float jointLine = 1.0 - smoothstep(0.475, 0.50, max(slabX, slabZ)) * 0.24 * microFade;
+          vec3 sidewalkBase = vec3(0.155, 0.150, 0.140) * (0.90 + aggFine * 0.12 + aggMed * 0.08) * jointLine;
+          // Preserve desaturated macro NAIP building shadows without letting off-road grass bleed onto concrete
+          float swImgLum = dot(macroImageryCol, vec3(0.299, 0.587, 0.114));
+          vec3 swCol = uFlags.y > 0.5
+            ? mix(sidewalkBase, mix(sidewalkBase, vec3(swImgLum * 0.92, swImgLum * 0.90, swImgLum * 0.86), 0.45), 0.55)
+            : sidewalkBase;
+          // Crisp dark curb gutter line right at the asphalt boundary
+          float curbSeam = smoothstep(0.02, 0.18, trailSample.g) * (1.0 - asphaltMask);
+          swCol *= 1.0 - curbSeam * 0.42;
+          baseColor = mix(baseColor, swCol, curbApron * 0.86);
+          ${
+            !isLow
+              ? /* glsl */ `
+            float gx = valueNoise2(wp64 * 28.0 + vec2(0.12, 0.0)) - aggFine;
+            float gz = valueNoise2(wp64 * 28.0 + vec2(0.0, 0.12)) - aggFine;
+            detailNormalXY = mix(detailNormalXY, vec2(gx, gz) * 0.45 * microFade, curbApron * 0.85);
+            terrainRoughness = mix(terrainRoughness, 0.86, curbApron * 0.85);
+            `
+              : ''
+          }
+        }
+
+        // 3. Paved Telluride / Ouray / Silverton town asphalt (G channel)
+        if (asphaltMask > 0.02) {
+          // Fine isotropic asphalt mineral aggregate (centimeter-scale, NOT lumpy gravel!)
+          float gritFine = valueNoise2(wp64 * 34.0 + 1.3);
+          float gritUltra = valueNoise2(wp64 * 86.0 + 7.9);
+          float wear = valueNoise2(wp64 * 0.55 + 9.2);
+          float crack = smoothstep(0.47, 0.50, abs(valueNoise2(wp64 * 1.4 + 2.3) - 0.5));
+          float grain = 0.85 + gritFine * 0.16 + gritUltra * 0.14 - (1.0 - crack) * 0.06 * microFade;
+
+          // Authentic cool weathered charcoal-slate asphalt (~0.048-0.068 linear, completely free of grass/dirt hues!)
+          vec3 asphaltCore = vec3(0.050, 0.053, 0.058) * grain * (0.88 + wear * 0.24);
+          // Let crisp z17 NAIP road shadows & pale lane/crosswalk markings come through cleanly (desaturated!)
+          float roadImgLum = dot(macroImageryCol, vec3(0.299, 0.587, 0.114));
+          float markingHint = uFlags.y > 0.5 ? smoothstep(0.22, 0.44, rawLum) * (1.0 - smoothstep(0.10, 0.24, imgSat)) : 0.0;
+          vec3 shadedAsphalt = asphaltCore * mix(0.75, 1.18, smoothstep(0.04, 0.24, roadImgLum));
+          vec3 finalRoad = mix(shadedAsphalt, vec3(0.24, 0.235, 0.22) * grain, markingHint * 0.42);
+
+          baseColor = mix(baseColor, finalRoad, asphaltMask * 0.94);
+          ${
+            !isLow
+              ? /* glsl */ `
+            float ax = valueNoise2(wp64 * 46.0 + vec2(0.15, 0.0)) - valueNoise2(wp64 * 46.0 - vec2(0.15, 0.0));
+            float az = valueNoise2(wp64 * 46.0 + vec2(0.0, 0.15)) - valueNoise2(wp64 * 46.0 - vec2(0.0, 0.15));
+            vec2 asphaltN = vec2(ax, az) * 0.72 * microFade;
+            detailNormalXY = mix(detailNormalXY, asphaltN, asphaltMask * 0.95);
+            terrainRoughness = mix(terrainRoughness, mix(0.74, 0.84, wear), asphaltMask * 0.94);
+            `
+              : ''
+          }
         }
 
         // Wetness darkening & sheen during monsoon rain
         if (uRainAmount > 0.01) {
-          baseColor *= mix(1.0, 0.72, uRainAmount * 0.65);
-          terrainRoughness = mix(terrainRoughness, 0.38, uRainAmount * (0.45 + wRock * 0.4));
+          baseColor *= mix(1.0, 0.68, uRainAmount * (0.60 + asphaltMask * 0.25));
+          terrainRoughness = mix(terrainRoughness, mix(0.36, 0.22, asphaltMask), uRainAmount * (0.50 + wRock * 0.35 + asphaltMask * 0.45));
         }
 
         diffuseColor.rgb *= baseColor;
@@ -445,10 +680,11 @@ export function createTerrainMaterialPool({ engine, detailAssets }) {
         '#include <normal_fragment_begin>',
         /* glsl */ `
         vec3 perturbedWorldN = terrainWorldN;
-        if (length(detailTangentN.xy) > 0.001) {
-          vec3 tVec = normalize(cross(vec3(0.0, 0.0, -1.0), terrainWorldN));
+        if (dot(detailNormalXY, detailNormalXY) > 0.0001) {
+          vec3 refAxis = abs(terrainWorldN.z) < 0.9 ? vec3(0.0, 0.0, -1.0) : vec3(1.0, 0.0, 0.0);
+          vec3 tVec = normalize(cross(refAxis, terrainWorldN));
           vec3 bVec = cross(terrainWorldN, tVec);
-          perturbedWorldN = normalize(terrainWorldN + tVec * detailTangentN.x + bVec * detailTangentN.y);
+          perturbedWorldN = normalize(terrainWorldN + tVec * detailNormalXY.x + bVec * detailNormalXY.y);
         }
         vec3 normal = normalize((viewMatrix * vec4(perturbedWorldN, 0.0)).xyz);
         vec3 nonPerturbedNormal = normal;
@@ -477,7 +713,7 @@ export function createTerrainMaterialPool({ engine, detailAssets }) {
       );
     };
 
-    mat.customProgramCacheKey = () => `telluride-terrain-surface-${shaderMode}-v1`;
+    mat.customProgramCacheKey = () => `telluride-terrain-surface-${shaderMode}-v4`;
   }
 
   function patchDepthMaterial(depthMat, patchUniforms) {
@@ -506,14 +742,21 @@ export function createTerrainMaterialPool({ engine, detailAssets }) {
         `,
       );
     };
-    depthMat.customProgramCacheKey = () => 'telluride-terrain-depth-v1';
+    depthMat.customProgramCacheKey = () => 'telluride-terrain-depth-v2';
   }
 
   const slots = [];
 
-  function createSlot(fallbackHeightTex, fallbackImageryTex, fallbackCoverTex, fallbackTrailTex) {
+  function createSlot(
+    fallbackHeightTex,
+    fallbackNormalAoTex,
+    fallbackImageryTex,
+    fallbackCoverTex,
+    fallbackTrailTex,
+  ) {
     const patchUniforms = {
       uHeightTex: { value: fallbackHeightTex },
+      uNormalAoTex: { value: fallbackNormalAoTex },
       uImageryTex: { value: fallbackImageryTex },
       uCoverTex: { value: fallbackCoverTex },
       uTrailMaskTex: { value: fallbackTrailTex },
@@ -522,9 +765,8 @@ export function createTerrainMaterialPool({ engine, detailAssets }) {
       uCoverUvTransform: { value: new THREE.Vector4(0, 0, 1, 1) },
       uTrailUvTransform: { value: new THREE.Vector4(0, 0, 1, 1) },
       uTileBounds: { value: new THREE.Vector4(0, 0, 1000, 1000) },
-      uHeightTexSize: { value: new THREE.Vector2(256, 256) },
-      uHeightTexelWorld: { value: new THREE.Vector2(15, 15) },
-      uMorphParams: { value: new THREE.Vector4(1000, 0.001, 48, 8) },
+      uHeightTexSize: { value: new THREE.Vector2(257, 257) },
+      uMorphParams: { value: new THREE.Vector4(1000, 0.001, 48, 6) },
       uFlags: { value: new THREE.Vector4(0, 0, 0, 0) },
     };
 

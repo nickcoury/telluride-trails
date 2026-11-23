@@ -3,44 +3,66 @@ import * as THREE from 'three';
 const LAYERS = ['rock', 'talus', 'dirt', 'grass', 'forest', 'snow'];
 
 const FALLBACK_COLORS = [
-  [128, 126, 122], // rock
-  [138, 134, 126], // talus
-  [126, 98, 70],   // dirt
-  [104, 124, 72],  // grass
-  [68, 86, 54],    // forest
-  [235, 240, 246], // snow
+  [124, 83, 49],   // rock
+  [120, 113, 100], // talus
+  [71, 53, 35],    // dirt
+  [80, 74, 34],    // grass
+  [102, 88, 65],   // forest
+  [196, 200, 206], // snow
 ];
 
-const FALLBACK_ROUGHNESS = [225, 232, 220, 215, 225, 165];
+const FALLBACK_ROUGHNESS = [220, 210, 224, 236, 228, 198];
 
+/**
+ * Tileable procedural fallback arrays with genuine multi-octave grain & Sobel normals
+ * so terrain never looks like featureless grey plastic even on the Title screen or offline.
+ */
 function makeProceduralDetailArrays(maxAnisotropy = 4) {
   const size = 64;
   const depth = LAYERS.length;
   const albData = new Uint8Array(size * size * depth * 4);
   const nrmData = new Uint8Array(size * size * depth * 4);
+  const heightField = new Float32Array(size * size);
 
   for (let l = 0; l < depth; l++) {
     const [br, bg, bb] = FALLBACK_COLORS[l];
     const rough = FALLBACK_ROUGHNESS[l];
     const layerOffset = l * size * size * 4;
+    const amp = l === 5 ? 0.35 : l === 0 || l === 1 ? 1.15 : 0.9;
 
     for (let y = 0; y < size; y++) {
+      const ty = (y / size) * Math.PI * 2;
       for (let x = 0; x < size; x++) {
-        // Simple tileable hash noise for immediate procedural grain
-        const n =
-          Math.sin((x / size) * Math.PI * 4 + l * 1.7) *
-          Math.cos((y / size) * Math.PI * 4 - l * 2.3);
-        const h = ((x * 73856093) ^ (y * 19349663) ^ (l * 83492791)) & 255;
-        const delta = (h / 255 - 0.5) * 22 + n * 10;
+        const tx = (x / size) * Math.PI * 2;
+        const w1 = Math.sin(tx * 2 + l * 1.7) * Math.cos(ty * 2 - l * 2.3) * 0.45;
+        const w2 = Math.sin(tx * 5 - ty * 3 + l * 3.1) * 0.3;
+        const h1 = (((x * 73856093) ^ (y * 19349663) ^ (l * 83492791)) & 255) / 255 - 0.5;
+        const h2 = ((((x >> 1) * 2654435761) ^ ((y >> 1) * 2246822519) ^ (l * 3266489917)) & 255) / 255 - 0.5;
+        const hVal = (w1 + w2 + h1 * 0.9 + h2 * 0.7) * amp;
+        heightField[y * size + x] = hVal;
 
+        const delta = hVal * 26;
         const p = layerOffset + (y * size + x) * 4;
         albData[p] = Math.max(0, Math.min(255, Math.round(br + delta)));
-        albData[p + 1] = Math.max(0, Math.min(255, Math.round(bg + delta)));
-        albData[p + 2] = Math.max(0, Math.min(255, Math.round(bb + delta)));
+        albData[p + 1] = Math.max(0, Math.min(255, Math.round(bg + delta * 0.96)));
+        albData[p + 2] = Math.max(0, Math.min(255, Math.round(bb + delta * 0.92)));
         albData[p + 3] = 255;
+      }
+    }
 
-        nrmData[p] = 128;
-        nrmData[p + 1] = 128;
+    // Derive tileable tangent normals from heightField
+    for (let y = 0; y < size; y++) {
+      const ym = (y + size - 1) & (size - 1);
+      const yp = (y + 1) & (size - 1);
+      for (let x = 0; x < size; x++) {
+        const xm = (x + size - 1) & (size - 1);
+        const xp = (x + 1) & (size - 1);
+        const dx = (heightField[y * size + xp] - heightField[y * size + xm]) * 0.55;
+        const dy = (heightField[yp * size + x] - heightField[ym * size + x]) * 0.55;
+        const invLen = 1 / Math.hypot(dx, dy, 1);
+        const p = layerOffset + (y * size + x) * 4;
+        nrmData[p] = Math.max(0, Math.min(255, Math.round((-dx * invLen * 0.5 + 0.5) * 255)));
+        nrmData[p + 1] = Math.max(0, Math.min(255, Math.round((-dy * invLen * 0.5 + 0.5) * 255)));
         nrmData[p + 2] = rough;
         nrmData[p + 3] = 255;
       }
@@ -95,7 +117,8 @@ async function fetchLayerPixels(url, targetSize) {
 
 /**
  * Manages the 6-layer CC0 PBR detail texture arrays (albedo + packed normal/roughness).
- * Starts immediately with lightweight procedural arrays, then upgrades lazily to 512x512 WebPs.
+ * Starts immediately with procedural arrays (zero network on Title screen), then upgrades
+ * in parallel via Promise.all() when entering play. Low tier skips *_nrm_rough.webp completely.
  */
 export function createDetailAssets(engine) {
   const base = engine.assetsBase.endsWith('/') ? engine.assetsBase : `${engine.assetsBase}/`;
@@ -104,7 +127,12 @@ export function createDetailAssets(engine) {
   let albedoArray = initial.albedoArray;
   let nrmRoughArray = initial.nrmRoughArray;
   let disposed = false;
-  let upgradedSize = 0;
+  let upgradedAlbedoSize = 0;
+  let upgradedNormalSize = 0;
+  let loadGen = 0;
+  let activePromise = null;
+  let activeTargetKey = '';
+  let currentAnisotropy = engine.quality.maxAnisotropy || 4;
 
   const listeners = new Set();
 
@@ -117,64 +145,109 @@ export function createDetailAssets(engine) {
     for (const fn of listeners) fn({ albedoArray, nrmRoughArray });
   }
 
-  async function loadTierTextures(tier) {
+  function loadTierTextures(tier) {
+    if (disposed) return Promise.resolve();
     const targetSize = tier === 'low' ? 256 : 512;
     const needNormals = tier !== 'low';
-    if (upgradedSize >= targetSize && (!needNormals || nrmRoughArray.image.width >= targetSize)) {
-      return;
+    const albedoDone = upgradedAlbedoSize >= targetSize;
+    const normalsDone = !needNormals || upgradedNormalSize >= targetSize;
+
+    if (albedoDone && normalsDone) {
+      return Promise.resolve();
     }
 
-    try {
-      const depth = LAYERS.length;
-      const albBuf = new Uint8Array(targetSize * targetSize * depth * 4);
-      const layerStride = targetSize * targetSize * 4;
+    const targetKey = `${targetSize}:${needNormals ? 1 : 0}`;
+    if (activePromise && activeTargetKey === targetKey) {
+      return activePromise;
+    }
 
-      // Load albedos sequentially/in small batches so we don't spike memory or network
-      for (let i = 0; i < depth; i++) {
-        if (disposed) return;
-        const pixels = await fetchLayerPixels(`${base}assets/terrain/${LAYERS[i]}_albedo.webp`, targetSize);
-        albBuf.set(pixels, i * layerStride);
-      }
+    const myGen = ++loadGen;
+    activeTargetKey = targetKey;
 
-      if (disposed) return;
-      const nextAlbedo = configureArrayTex(
-        new THREE.DataArrayTexture(albBuf, targetSize, targetSize, depth),
-        THREE.SRGBColorSpace,
-        engine.quality.maxAnisotropy || 4,
-      );
-      const prevAlbedo = albedoArray;
-      albedoArray = nextAlbedo;
-      upgradedSize = targetSize;
-      notify();
-      prevAlbedo.dispose();
+    const promise = (async () => {
+      try {
+        const depth = LAYERS.length;
+        const layerStride = targetSize * targetSize * 4;
 
-      if (needNormals) {
-        const nrmBuf = new Uint8Array(targetSize * targetSize * depth * 4);
-        for (let i = 0; i < depth; i++) {
-          if (disposed) return;
-          const pixels = await fetchLayerPixels(
-            `${base}assets/terrain/${LAYERS[i]}_nrm_rough.webp`,
-            targetSize,
+        // Fetch albedo and (when tier !== 'low') normal/roughness layers in parallel!
+        const albPromise =
+          upgradedAlbedoSize < targetSize
+            ? Promise.all(
+                LAYERS.map((name) =>
+                  fetchLayerPixels(`${base}assets/terrain/${name}_albedo.webp`, targetSize),
+                ),
+              )
+            : Promise.resolve(null);
+
+        const nrmPromise =
+          needNormals && upgradedNormalSize < targetSize
+            ? Promise.all(
+                LAYERS.map((name) =>
+                  fetchLayerPixels(`${base}assets/terrain/${name}_nrm_rough.webp`, targetSize),
+                ),
+              )
+            : Promise.resolve(null);
+
+        const [albLayers, nrmLayers] = await Promise.all([albPromise, nrmPromise]);
+        if (disposed || myGen !== loadGen) return;
+
+        let changed = false;
+
+        if (albLayers) {
+          const albBuf = new Uint8Array(layerStride * depth);
+          for (let i = 0; i < depth; i++) {
+            albBuf.set(albLayers[i], i * layerStride);
+          }
+          const nextAlbedo = configureArrayTex(
+            new THREE.DataArrayTexture(albBuf, targetSize, targetSize, depth),
+            THREE.SRGBColorSpace,
+            currentAnisotropy,
           );
-          nrmBuf.set(pixels, i * layerStride);
+          const prevAlbedo = albedoArray;
+          albedoArray = nextAlbedo;
+          upgradedAlbedoSize = targetSize;
+          changed = true;
+          // Dispose previous array after notify updates uniforms
+          notify();
+          prevAlbedo.dispose();
+          changed = false;
         }
-        if (disposed) return;
-        const nextNrm = configureArrayTex(
-          new THREE.DataArrayTexture(nrmBuf, targetSize, targetSize, depth),
-          THREE.NoColorSpace,
-          engine.quality.maxAnisotropy || 4,
-        );
-        const prevNrm = nrmRoughArray;
-        nrmRoughArray = nextNrm;
-        notify();
-        prevNrm.dispose();
+
+        if (nrmLayers) {
+          const nrmBuf = new Uint8Array(layerStride * depth);
+          for (let i = 0; i < depth; i++) {
+            nrmBuf.set(nrmLayers[i], i * layerStride);
+          }
+          const nextNrm = configureArrayTex(
+            new THREE.DataArrayTexture(nrmBuf, targetSize, targetSize, depth),
+            THREE.NoColorSpace,
+            currentAnisotropy,
+          );
+          const prevNrm = nrmRoughArray;
+          nrmRoughArray = nextNrm;
+          upgradedNormalSize = targetSize;
+          notify();
+          prevNrm.dispose();
+        } else if (changed) {
+          notify();
+        }
+      } catch (err) {
+        console.warn('[terrain] detail texture upgrade skipped, keeping procedural fallback:', err);
+      } finally {
+        if (myGen === loadGen) {
+          activePromise = null;
+          activeTargetKey = '';
+        }
       }
-    } catch (err) {
-      console.warn('[terrain] detail texture upgrade skipped, keeping procedural fallback:', err);
-    }
+    })();
+
+    activePromise = promise;
+    return promise;
   }
 
   function setAnisotropy(aniso) {
+    if (aniso === currentAnisotropy) return;
+    currentAnisotropy = aniso;
     albedoArray.anisotropy = aniso;
     albedoArray.needsUpdate = true;
     nrmRoughArray.anisotropy = aniso;
@@ -183,6 +256,7 @@ export function createDetailAssets(engine) {
 
   function dispose() {
     disposed = true;
+    loadGen++;
     listeners.clear();
     albedoArray.dispose();
     nrmRoughArray.dispose();

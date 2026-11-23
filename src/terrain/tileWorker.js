@@ -1,7 +1,11 @@
 /**
  * Web Worker for off-main-thread fetching and decoding of terrain, imagery, and cover tiles.
- * Decodes Terrarium elevation into Float32Array + raw RGBA bytes, imagery into ImageBitmap,
- * and cover RGBA PNGs without alpha-premultiplication loss via DecompressionStream.
+ * - Terrain: decodes Terrarium RGB into a vertex-aligned (N+1)x(N+1) height grid (257x257),
+ *   lossless Terrarium RGBA for vertex fetch, precomputed RGBA8 Normal+CavityAO+Slope map
+ *   (replacing 16 fragment texelFetches with 1 linear texture fetch!), plus 4 raw edge strips
+ *   for exact 0.000 m neighbor tile stitching on the main thread.
+ * - Imagery: decodes into transferable ImageBitmap.
+ * - Cover: decodes 8-bit PNG without alpha-premultiplication loss via DecompressionStream.
  */
 
 const inflight = new Map();
@@ -22,7 +26,6 @@ function paethPredictor(a, b, c) {
  */
 async function decodePngLosslessRGBA(buffer) {
   const bytes = new Uint8Array(buffer);
-  // PNG signature check: 137 80 78 71 13 10 26 10
   if (
     bytes.length < 33 ||
     bytes[0] !== 0x89 ||
@@ -46,8 +49,12 @@ async function decodePngLosslessRGBA(buffer) {
 
   while (offset + 8 <= bytes.length) {
     const len = view.getUint32(offset, false);
-    const type =
-      String.fromCharCode(bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7]);
+    const type = String.fromCharCode(
+      bytes[offset + 4],
+      bytes[offset + 5],
+      bytes[offset + 6],
+      bytes[offset + 7],
+    );
     const dataStart = offset + 8;
     const dataEnd = dataStart + len;
     if (dataEnd + 4 > bytes.length) break;
@@ -74,9 +81,16 @@ async function decodePngLosslessRGBA(buffer) {
     return null;
   }
 
-  // Channels per pixel in PNG stream
   const channels =
-    colorType === 6 ? 4 : colorType === 2 ? 3 : colorType === 4 ? 2 : colorType === 0 || colorType === 3 ? 1 : 0;
+    colorType === 6
+      ? 4
+      : colorType === 2
+        ? 3
+        : colorType === 4
+          ? 2
+          : colorType === 0 || colorType === 3
+            ? 1
+            : 0;
   if (!channels) return null;
 
   const ds = new DecompressionStream('deflate');
@@ -159,6 +173,7 @@ let sharedCanvas = null;
 let sharedCtx = null;
 
 function getOffscreenPixels(bitmap) {
+  if (typeof OffscreenCanvas === 'undefined') return null;
   const w = bitmap.width;
   const h = bitmap.height;
   if (!sharedCanvas || sharedCanvas.width !== w || sharedCanvas.height !== h) {
@@ -171,7 +186,136 @@ function getOffscreenPixels(bitmap) {
   return { width: w, height: h, data: new Uint8Array(imgData.data.buffer) };
 }
 
-async function handleDecode({ id, kind, url }) {
+function encodeTerrariumPixel(out, p, elevM) {
+  const v = Math.max(0, Math.min(65535.996, elevM + 32768.0));
+  const r = Math.floor(v / 256.0);
+  const rem = v - r * 256.0;
+  const g = Math.floor(rem);
+  const b = Math.max(0, Math.min(255, Math.round((rem - g) * 256.0)));
+  out[p] = r;
+  out[p + 1] = g;
+  out[p + 2] = b;
+  out[p + 3] = 255;
+}
+
+/**
+ * Convert an area-registered (w x h) Terrarium RGBA buffer into:
+ * - Vertex-aligned (w+1) x (h+1) Float32 heights & Terrarium RGBA (0.000m interior shift,
+ *   exact shared corners/edges ready for neighbor stitching!)
+ * - Precomputed (w+1) x (h+1) RGBA8 world normal + cavity AO + slope map
+ * - Raw border strips (edgeW, edgeE, edgeN, edgeS) for exact neighbor midpoint stitching
+ */
+function buildTerrainPayload(data, w, h, tileWorldSize) {
+  const raw = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    const p = i * 4;
+    raw[i] = data[p] * 256 + data[p + 1] + data[p + 2] / 256 - 32768;
+  }
+
+  const gw = w + 1;
+  const gh = h + 1;
+  const heights = new Float32Array(gw * gh);
+  const rgba = new Uint8Array(gw * gh * 4);
+  let minH = Infinity;
+  let maxH = -Infinity;
+
+  // Vertex (gx, gy) sits at exact UV (gx / w, gy / h).
+  // Source pixel (ix, iy) sits at ((ix + 0.5) / w, (iy + 0.5) / h).
+  for (let gy = 0; gy < gh; gy++) {
+    const y0 = gy > 0 ? gy - 1 : 0;
+    const y1 = gy < h ? gy : h - 1;
+    const row0 = y0 * w;
+    const row1 = y1 * w;
+    const dstRow = gy * gw;
+    for (let gx = 0; gx < gw; gx++) {
+      const x0 = gx > 0 ? gx - 1 : 0;
+      const x1 = gx < w ? gx : w - 1;
+      const elev = 0.25 * (raw[row0 + x0] + raw[row0 + x1] + raw[row1 + x0] + raw[row1 + x1]);
+      const idx = dstRow + gx;
+      heights[idx] = elev;
+      if (elev < minH) minH = elev;
+      if (elev > maxH) maxH = elev;
+      encodeTerrariumPixel(rgba, idx * 4, elev);
+    }
+  }
+
+  // Raw outer pixel strips (length h or w) for exact cross-tile boundary midpoint stitching
+  const edgeW = new Float32Array(h);
+  const edgeE = new Float32Array(h);
+  const edgeN = new Float32Array(w);
+  const edgeS = new Float32Array(w);
+  for (let y = 0; y < h; y++) {
+    edgeW[y] = raw[y * w];
+    edgeE[y] = raw[y * w + (w - 1)];
+  }
+  for (let x = 0; x < w; x++) {
+    edgeN[x] = raw[x];
+    edgeS[x] = raw[(h - 1) * w + x];
+  }
+
+  // Precompute world-space normal (nx, nz), cavity/ridge AO, and slope into RGBA8
+  const normalAoRgba = new Uint8Array(gw * gh * 4);
+  const cellM = Math.max(0.25, (tileWorldSize || 1000) / w);
+  const inv2Cell = 0.5 / cellM;
+  const invCell = 1.0 / cellM;
+
+  for (let gy = 0; gy < gh; gy++) {
+    const ym = gy > 0 ? gy - 1 : 0;
+    const yp = gy < gh - 1 ? gy + 1 : gh - 1;
+    const invDz = gy > 0 && gy < gh - 1 ? inv2Cell : invCell;
+    const rowC = gy * gw;
+    const rowN = ym * gw;
+    const rowS = yp * gw;
+
+    for (let gx = 0; gx < gw; gx++) {
+      const xm = gx > 0 ? gx - 1 : 0;
+      const xp = gx < gw - 1 ? gx + 1 : gw - 1;
+      const invDx = gx > 0 && gx < gw - 1 ? inv2Cell : invCell;
+
+      const hC = heights[rowC + gx];
+      const hL = heights[rowC + xm];
+      const hR = heights[rowC + xp];
+      const hN = heights[rowN + gx];
+      const hS = heights[rowS + gx];
+
+      const dX = (hL - hR) * invDx;
+      const dZ = (hN - hS) * invDz;
+      const invLen = 1.0 / Math.hypot(dX, 1.0, dZ);
+      const nx = dX * invLen;
+      const ny = invLen;
+      const nz = dZ * invLen;
+
+      // Multi-tap cavity / ridge curvature AO: ravines/gullies darken gently, ridges brighten
+      const avgNbr = 0.25 * (hL + hR + hN + hS);
+      const curvature = (hC - avgNbr) * invCell;
+      const ao = Math.max(0.45, Math.min(1.0, 0.80 + curvature * 0.55));
+      const slope = Math.max(0, Math.min(1, 1.0 - ny));
+
+      const p = (rowC + gx) * 4;
+      normalAoRgba[p] = Math.max(0, Math.min(255, Math.round((nx * 0.5 + 0.5) * 255)));
+      normalAoRgba[p + 1] = Math.max(0, Math.min(255, Math.round((nz * 0.5 + 0.5) * 255)));
+      normalAoRgba[p + 2] = Math.round(ao * 255);
+      normalAoRgba[p + 3] = Math.round(slope * 255);
+    }
+  }
+
+  return {
+    width: gw,
+    height: gh,
+    srcSize: w,
+    heights,
+    rgba,
+    normalAoRgba,
+    edgeW,
+    edgeE,
+    edgeN,
+    edgeS,
+    minH,
+    maxH,
+  };
+}
+
+async function handleDecode({ id, kind, url, tileWorldSize }) {
   const ctrl = new AbortController();
   inflight.set(id, ctrl);
 
@@ -188,7 +332,10 @@ async function handleDecode({ id, kind, url }) {
         colorSpaceConversion: 'none',
         premultiplyAlpha: 'none',
       });
-      self.postMessage({ id, ok: true, kind, width: bitmap.width, height: bitmap.height, bitmap }, [bitmap]);
+      self.postMessage(
+        { id, ok: true, kind, width: bitmap.width, height: bitmap.height, bitmap },
+        [bitmap],
+      );
       return;
     }
 
@@ -202,42 +349,80 @@ async function handleDecode({ id, kind, url }) {
         );
         return;
       }
-      // Fallback if cover tile is non-PNG
       const bitmap = await createImageBitmap(new Blob([buf]), {
         colorSpaceConversion: 'none',
         premultiplyAlpha: 'none',
       });
-      const { width, height, data } = getOffscreenPixels(bitmap);
+      const px = getOffscreenPixels(bitmap);
+      if (!px) {
+        self.postMessage(
+          {
+            id,
+            ok: true,
+            kind,
+            needsMainDecode: true,
+            width: bitmap.width,
+            height: bitmap.height,
+            bitmap,
+          },
+          [bitmap],
+        );
+        return;
+      }
+      const { width, height, data } = px;
       bitmap.close();
       self.postMessage({ id, ok: true, kind, width, height, rgba: data }, [data.buffer]);
       return;
     }
 
-    // kind === 'terrain' (Terrarium RGB: h = R*256 + G + B/256 - 32768, A=255)
-    const blob = await res.blob();
-    const bitmap = await createImageBitmap(blob, {
-      colorSpaceConversion: 'none',
-      premultiplyAlpha: 'none',
-    });
-    const { width, height, data } = getOffscreenPixels(bitmap);
-    bitmap.close();
-
-    const count = width * height;
-    const heights = new Float32Array(count);
-    let minH = Infinity;
-    let maxH = -Infinity;
-
-    for (let i = 0; i < count; i++) {
-      const p = i * 4;
-      const h = data[p] * 256 + data[p + 1] + data[p + 2] / 256 - 32768;
-      heights[i] = h;
-      if (h < minH) minH = h;
-      if (h > maxH) maxH = h;
+    // kind === 'terrain'
+    const buf = await res.arrayBuffer();
+    const decodedPng = await decodePngLosslessRGBA(buf);
+    let width, height, data;
+    if (decodedPng) {
+      width = decodedPng.width;
+      height = decodedPng.height;
+      data = decodedPng.rgba;
+    } else {
+      const bitmap = await createImageBitmap(new Blob([buf]), {
+        colorSpaceConversion: 'none',
+        premultiplyAlpha: 'none',
+      });
+      const px = getOffscreenPixels(bitmap);
+      if (!px) {
+        self.postMessage(
+          {
+            id,
+            ok: true,
+            kind,
+            needsMainDecode: true,
+            width: bitmap.width,
+            height: bitmap.height,
+            tileWorldSize,
+            bitmap,
+          },
+          [bitmap],
+        );
+        return;
+      }
+      width = px.width;
+      height = px.height;
+      data = px.data;
+      bitmap.close();
     }
 
+    const payload = buildTerrainPayload(data, width, height, tileWorldSize);
     self.postMessage(
-      { id, ok: true, kind, width, height, heights, rgba: data, minH, maxH },
-      [heights.buffer, data.buffer],
+      { id, ok: true, kind, ...payload },
+      [
+        payload.heights.buffer,
+        payload.rgba.buffer,
+        payload.normalAoRgba.buffer,
+        payload.edgeW.buffer,
+        payload.edgeE.buffer,
+        payload.edgeN.buffer,
+        payload.edgeS.buffer,
+      ],
     );
   } catch (err) {
     if (err && err.name === 'AbortError') {

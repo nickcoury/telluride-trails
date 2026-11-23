@@ -1,8 +1,14 @@
 import * as THREE from 'three';
-import { lonLatToWorld, tileBoundsWorld, worldToTile } from '../core/geo.js';
+import { K, lonLatToWorld, R, tileBoundsWorld, worldToTile } from '../core/geo.js';
 import { DEFAULT_MAX_ELEV_M, DEFAULT_MIN_ELEV_M, REGION_BOUNDS } from './config.js';
 import { createPatchGeometry } from './geometry.js';
 import { getHorizonBounds } from './manifest.js';
+
+const DEG_TO_RAD = Math.PI / 180;
+const HALF_CIRC = Math.PI * R;
+const INV_TWO_HALF_CIRC = 1 / (2 * HALF_CIRC);
+const MX0 = R * -107.8123 * DEG_TO_RAD;
+const MY0 = R * Math.log(Math.tan(Math.PI / 4 + (37.9375 * DEG_TO_RAD) / 2));
 
 const _projView = new THREE.Matrix4();
 const _frustum = new THREE.Frustum();
@@ -19,6 +25,34 @@ function computeUvTransform(patchZ, patchX, patchY, tileZ, tileX, tileY) {
   return [offX, offY, scale, scale];
 }
 
+/**
+ * Bilinear sample on a vertex-aligned (N+1)x(N+1) height grid (0..N maps exactly to u,v in [0..1]).
+ */
+function sampleVertexHeightBilinear(data, width, height, u, v) {
+  const maxX = width - 1;
+  const maxY = height - 1;
+  const fx = Math.max(0, Math.min(1, u)) * maxX;
+  const fy = Math.max(0, Math.min(1, v)) * maxY;
+  const x0 = Math.min(maxX, Math.floor(fx));
+  const x1 = Math.min(maxX, x0 + 1);
+  const y0 = Math.min(maxY, Math.floor(fy));
+  const y1 = Math.min(maxY, y0 + 1);
+  const tx = fx - x0;
+  const ty = fy - y0;
+
+  const v00 = data[y0 * width + x0];
+  const v10 = data[y0 * width + x1];
+  const v01 = data[y1 * width + x0];
+  const v11 = data[y1 * width + x1];
+
+  const top = v00 + (v10 - v00) * tx;
+  const bot = v01 + (v11 - v01) * tx;
+  return top + (bot - top) * ty;
+}
+
+/**
+ * Bilinear sample on an area-registered tile (e.g., 256x256 cover RGBA PNG).
+ */
 function sampleTileBilinear(data, width, height, stride, channelOffset, u, v) {
   const fx = Math.max(0, Math.min(1, u)) * width - 0.5;
   const fy = Math.max(0, Math.min(1, v)) * height - 0.5;
@@ -41,6 +75,9 @@ function sampleTileBilinear(data, width, height, stride, channelOffset, u, v) {
 
 /**
  * Streaming CDLOD quadtree manager + synchronous height/normal/surface queries.
+ * - Leaf-only tile requests (eliminates 584-tile intermediate-zoom thrash!)
+ * - Distance-first priority queue (near-camera z15-z17 tiles ALWAYS beat 40 km horizon tiles!)
+ * - Seamless edge-stitched 257x257 heights + precomputed normal/AO maps
  */
 export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMask, tierConfig }) {
   let config = tierConfig;
@@ -70,6 +107,7 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
     }
     const slot = materialPool.createSlot(
       tileCache.fallbackHeightTex,
+      tileCache.fallbackNormalAoTex,
       tileCache.fallbackImageryTex,
       tileCache.fallbackCoverTex,
       trailMask.fallbackMaskTex,
@@ -106,11 +144,16 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
     buildRoots(getHorizonBounds(manifests));
   }
 
-  function findBestEntryAndTarget(kind, z, x, y, minZ, maxZ) {
+  /**
+   * Look up best resident ancestor (read-only during walk) and direct target zoom for a LEAF node.
+   * Only fetches a coarse fallback (<= z11) when NO ancestor is resident at all, then jumps
+   * directly to bestSourceZ — eliminating intermediate zoom staircase thrash!
+   */
+  function findLeafEntryAndTargets(kind, z, x, y, minZ, maxZ) {
     const startZ = Math.min(z, maxZ);
     let bestResident = null;
     let bestSourceZ = -1;
-    let midSourceZ = -1;
+    let coarseFallbackZ = -1;
 
     let cz = startZ;
     let cx = x >> Math.max(0, z - startZ);
@@ -119,7 +162,7 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
     while (cz >= minZ) {
       if (tileCache.hasSource(kind, cz, cx, cy)) {
         if (bestSourceZ === -1) bestSourceZ = cz;
-        if (cz <= 12) midSourceZ = Math.max(midSourceZ, cz);
+        if (cz <= 11 && coarseFallbackZ === -1) coarseFallbackZ = cz;
       }
       if (!bestResident) {
         const entry = tileCache.get(kind, cz, cx, cy);
@@ -133,44 +176,68 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
       cy >>= 1;
     }
 
-    // Coarse-first progressive step: fetch coarse parent before jumping straight to z15/z16/z17
-    let target = null;
+    let primaryTarget = null;
+    let coarseTarget = null;
+
     if (bestSourceZ !== -1 && (!bestResident || bestResident.z < bestSourceZ)) {
-      let targetZ = bestSourceZ;
-      if (!bestResident && midSourceZ !== -1 && midSourceZ < bestSourceZ) {
-        targetZ = midSourceZ;
-      } else if (bestResident && bestSourceZ - bestResident.z > 2) {
-        const stepZ = bestResident.z + 2;
-        const dzStep = z - stepZ;
-        if (dzStep >= 0 && tileCache.hasSource(kind, stepZ, x >> dzStep, y >> dzStep)) {
-          targetZ = stepZ;
-        }
+      const dz = z - bestSourceZ;
+      primaryTarget = { z: bestSourceZ, x: x >> dz, y: y >> dz };
+
+      // If nothing is resident yet for this leaf, also request ONE cheap coarse fallback (z <= 11)
+      if (!bestResident && coarseFallbackZ !== -1 && coarseFallbackZ < bestSourceZ) {
+        const dzC = z - coarseFallbackZ;
+        coarseTarget = { z: coarseFallbackZ, x: x >> dzC, y: y >> dzC };
       }
-      const dz = z - targetZ;
-      target = {
-        z: targetZ,
-        x: x >> dz,
-        y: y >> dz,
-      };
     }
 
-    return { resident: bestResident, target };
+    return { resident: bestResident, primaryTarget, coarseTarget };
+  }
+
+  function findResidentTerrainFast(z, x, y, minZ, maxZ) {
+    const startZ = Math.min(z, maxZ);
+    let cz = startZ;
+    let cx = x >> Math.max(0, z - startZ);
+    let cy = y >> Math.max(0, z - startZ);
+    while (cz >= minZ) {
+      const entry = tileCache.getFast('terrain', cz, cx, cy);
+      if (entry) return entry;
+      cz--;
+      cx >>= 1;
+      cy >>= 1;
+    }
+    return null;
   }
 
   function splitDistanceForZoom(z, bounds) {
     const size = bounds.maxX - bounds.minX;
     const bias = Math.max(0.5, engine.quality.terrainLodBias || 1.0);
-    return (size * config.lodDistanceFactor) / bias;
+    // Keep z17 splits tight around the runner (~270m) so only 4-16 immediate patches subdivide to z17
+    const zoomFactor = z >= 16 ? 0.56 : config.lodDistanceFactor;
+    return (size * zoomFactor) / bias;
+  }
+
+  /**
+   * Distance-first request priority: near-camera z15-z17 tiles ALWAYS beat distant horizon tiles!
+   */
+  function computeRequestPriority(distCam, targetZ, kindOffset) {
+    if (distCam < 2000) {
+      return distCam + targetZ * 15 + kindOffset;
+    }
+    if (distCam < 18000) {
+      return 3000 + distCam + targetZ * 80 + kindOffset;
+    }
+    return 25000 + distCam + targetZ * 120 + kindOffset;
   }
 
   const leaves = [];
   const pinnedKeys = new Set();
+  const activeTargetKeys = new Set();
 
-  function walkNode(z, x, y, bounds, camPos, focusPos) {
-    // Look up best cached terrain entry for tight Y bounds
-    const terrainInfo = findBestEntryAndTarget('terrain', z, x, y, config.minQuadZoom, config.maxTerrainZoom);
-    const minH = terrainInfo.resident ? terrainInfo.resident.minH - 12 : DEFAULT_MIN_ELEV_M;
-    const maxH = terrainInfo.resident ? terrainInfo.resident.maxH + 12 : DEFAULT_MAX_ELEV_M;
+  function walkNode(z, x, y, bounds, camPos, focusPos, isTitle) {
+    const maxTerrainZ = isTitle ? Math.min(14, config.maxTerrainZoom) : config.maxTerrainZoom;
+    const residentH = findResidentTerrainFast(z, x, y, config.minQuadZoom, maxTerrainZ);
+    const minH = residentH ? residentH.minH - 12 : DEFAULT_MIN_ELEV_M;
+    const maxH = residentH ? residentH.maxH + 12 : DEFAULT_MAX_ELEV_M;
 
     _box.min.set(bounds.minX, minH, bounds.minZ);
     _box.max.set(bounds.maxX, maxH, bounds.maxZ);
@@ -186,14 +253,11 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
 
     const splitDist = splitDistanceForZoom(z, bounds);
     const minDist = Math.min(distCam, distFocus);
-    const maxAllowedZoom =
-      distCam > config.detailDrawDistance ? Math.min(12, config.maxQuadZoom) : config.maxQuadZoom;
-
-    // Coarse-first: always prioritize fetching current node's terrain if missing
-    if (terrainInfo.target) {
-      const p = terrainInfo.target.z * 10000 + distCam * 0.1;
-      tileCache.request('terrain', terrainInfo.target.z, terrainInfo.target.x, terrainInfo.target.y, p);
-    }
+    const maxAllowedZoom = isTitle
+      ? Math.min(14, config.maxQuadZoom)
+      : distCam > config.detailDrawDistance
+        ? Math.min(12, config.maxQuadZoom)
+        : config.maxQuadZoom;
 
     if (z < maxAllowedZoom && minDist < splitDist) {
       const nz = z + 1;
@@ -202,17 +266,20 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
       const midX = (bounds.minX + bounds.maxX) * 0.5;
       const midZ = (bounds.minZ + bounds.maxZ) * 0.5;
 
-      walkNode(nz, nx0, ny0, { minX: bounds.minX, maxX: midX, minZ: bounds.minZ, maxZ: midZ }, camPos, focusPos);
-      walkNode(nz, nx0 + 1, ny0, { minX: midX, maxX: bounds.maxX, minZ: bounds.minZ, maxZ: midZ }, camPos, focusPos);
-      walkNode(nz, nx0, ny0 + 1, { minX: bounds.minX, maxX: midX, minZ: midZ, maxZ: bounds.maxZ }, camPos, focusPos);
-      walkNode(nz, nx0 + 1, ny0 + 1, { minX: midX, maxX: bounds.maxX, minZ: midZ, maxZ: bounds.maxZ }, camPos, focusPos);
+      walkNode(nz, nx0, ny0, { minX: bounds.minX, maxX: midX, minZ: bounds.minZ, maxZ: midZ }, camPos, focusPos, isTitle);
+      walkNode(nz, nx0 + 1, ny0, { minX: midX, maxX: bounds.maxX, minZ: bounds.minZ, maxZ: midZ }, camPos, focusPos, isTitle);
+      walkNode(nz, nx0, ny0 + 1, { minX: bounds.minX, maxX: midX, minZ: midZ, maxZ: bounds.maxZ }, camPos, focusPos, isTitle);
+      walkNode(nz, nx0 + 1, ny0 + 1, { minX: midX, maxX: bounds.maxX, minZ: midZ, maxZ: bounds.maxZ }, camPos, focusPos, isTitle);
       return;
     }
 
-    leaves.push({ z, x, y, bounds, distCam, splitDist, terrainInfo });
+    // Leaf node ONLY — never request tiles for internal nodes!
+    leaves.push({ z, x, y, bounds, distCam, splitDist });
   }
 
   function update(focusPos) {
+    trailMask.flushDeferred?.();
+    const isTitle = engine.getAppState?.() === 'title';
     const cam = engine.camera;
     cam.updateMatrixWorld();
     _projView.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
@@ -225,34 +292,66 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
 
     leaves.length = 0;
     pinnedKeys.clear();
+    activeTargetKeys.clear();
 
     for (let i = 0; i < roots.length; i++) {
       const r = roots[i];
-      walkNode(r.z, r.x, r.y, r.bounds, camPos, focusVec);
+      walkNode(r.z, r.x, r.y, r.bounds, camPos, focusVec, isTitle);
     }
 
-    // Sort leaves front-to-back for early-Z GPU efficiency and tile request priority
+    // Sort leaves front-to-back for early-Z GPU efficiency and near-first tile streaming!
     leaves.sort((a, b) => a.distCam - b.distCam);
 
     activeMeshCount = 0;
     const gridSegs = config.patchGridSize & ~1;
     const shadowsEnabled = Boolean(engine.quality.shadows);
+    const maxTerrainZ = isTitle ? Math.min(14, config.maxTerrainZoom) : config.maxTerrainZoom;
+    const maxImgZ = isTitle ? Math.min(15, config.maxImageryZoom) : config.maxImageryZoom;
 
     for (let i = 0; i < leaves.length; i++) {
       const leaf = leaves[i];
-      const { z, x, y, bounds, distCam, splitDist, terrainInfo } = leaf;
+      const { z, x, y, bounds, distCam, splitDist } = leaf;
       const tileSize = bounds.maxX - bounds.minX;
 
-      const imageryInfo = findBestEntryAndTarget('imagery', z, x, y, config.minQuadZoom, config.maxImageryZoom);
-      if (imageryInfo.target) {
-        const p = imageryInfo.target.z * 10000 + distCam * 0.1 + 500;
-        tileCache.request('imagery', imageryInfo.target.z, imageryInfo.target.x, imageryInfo.target.y, p);
+      // 1. Terrain elevation + normal/AO
+      const terrainInfo = findLeafEntryAndTargets('terrain', z, x, y, config.minQuadZoom, maxTerrainZ);
+      if (terrainInfo.coarseTarget) {
+        const t = terrainInfo.coarseTarget;
+        const p = computeRequestPriority(distCam, t.z, -50);
+        activeTargetKeys.add(`terrain:${t.z}/${t.x}/${t.y}`);
+        tileCache.request('terrain', t.z, t.x, t.y, p);
+      }
+      if (terrainInfo.primaryTarget) {
+        const t = terrainInfo.primaryTarget;
+        const p = computeRequestPriority(distCam, t.z, 0);
+        activeTargetKeys.add(`terrain:${t.z}/${t.x}/${t.y}`);
+        tileCache.request('terrain', t.z, t.x, t.y, p);
       }
 
-      const coverInfo = findBestEntryAndTarget('cover', z, x, y, 12, config.maxCoverZoom);
-      if (coverInfo.target) {
-        const p = coverInfo.target.z * 10000 + distCam * 0.1 + 1200;
-        tileCache.request('cover', coverInfo.target.z, coverInfo.target.x, coverInfo.target.y, p);
+      // 2. NAIP Orthoimagery (distance-first so z16/z17 under the runner loads FIRST!)
+      const imageryInfo = findLeafEntryAndTargets('imagery', z, x, y, config.minQuadZoom, maxImgZ);
+      if (imageryInfo.coarseTarget) {
+        const t = imageryInfo.coarseTarget;
+        const p = computeRequestPriority(distCam, t.z, -20);
+        activeTargetKeys.add(`imagery:${t.z}/${t.x}/${t.y}`);
+        tileCache.request('imagery', t.z, t.x, t.y, p);
+      }
+      if (imageryInfo.primaryTarget) {
+        const t = imageryInfo.primaryTarget;
+        const p = computeRequestPriority(distCam, t.z, 25);
+        activeTargetKeys.add(`imagery:${t.z}/${t.x}/${t.y}`);
+        tileCache.request('imagery', t.z, t.x, t.y, p);
+      }
+
+      // 3. Cover mask (skip on title to keep title cold payload < 1.5 MB)
+      const coverInfo = isTitle
+        ? { resident: null, primaryTarget: null, coarseTarget: null }
+        : findLeafEntryAndTargets('cover', z, x, y, 13, config.maxCoverZoom);
+      if (coverInfo.primaryTarget) {
+        const t = coverInfo.primaryTarget;
+        const p = computeRequestPriority(distCam, t.z, 60);
+        activeTargetKeys.add(`cover:${t.z}/${t.x}/${t.y}`);
+        tileCache.request('cover', t.z, t.x, t.y, p);
       }
 
       const mesh = acquireMeshSlot();
@@ -260,25 +359,21 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
 
       uniforms.uTileBounds.value.set(bounds.minX, bounds.minZ, tileSize, bounds.maxZ - bounds.minZ);
 
-      // Height texture & UV transform
+      // Height + precomputed Normal/AO textures
       const hEntry = terrainInfo.resident;
       if (hEntry) {
         pinnedKeys.add(hEntry.key);
         const hUv = computeUvTransform(z, x, y, hEntry.z, hEntry.x, hEntry.y);
         uniforms.uHeightTex.value = hEntry.texture;
+        uniforms.uNormalAoTex.value = hEntry.normalAoTex || tileCache.fallbackNormalAoTex;
         uniforms.uHeightUvTransform.value.set(hUv[0], hUv[1], hUv[2], hUv[3]);
         uniforms.uHeightTexSize.value.set(hEntry.width, hEntry.height);
-        const hTileBounds = tileBoundsWorld(hEntry.z, hEntry.x, hEntry.y);
-        uniforms.uHeightTexelWorld.value.set(
-          (hTileBounds.maxX - hTileBounds.minX) / hEntry.width,
-          (hTileBounds.maxZ - hTileBounds.minZ) / hEntry.height,
-        );
         uniforms.uFlags.value.x = 1;
       } else {
         uniforms.uHeightTex.value = tileCache.fallbackHeightTex;
+        uniforms.uNormalAoTex.value = tileCache.fallbackNormalAoTex;
         uniforms.uHeightUvTransform.value.set(0, 0, 1, 1);
         uniforms.uHeightTexSize.value.set(1, 1);
-        uniforms.uHeightTexelWorld.value.set(tileSize, tileSize);
         uniforms.uFlags.value.x = 0;
       }
 
@@ -310,14 +405,19 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
         uniforms.uFlags.value.z = 0;
       }
 
-      // Trail mask texture (only near player / high-zoom patches; z15 for crisp singletrack)
+      // Semantic RGB trail/asphalt/curb mask (z17 right under camera on high/ultra = 0.47 m/px!)
       let trailTex = null;
-      if (config.useTrailMask && z >= 14 && distCam < 4500) {
-        const maskZ = z >= 15 ? 15 : 14;
+      if (!isTitle && config.useTrailMask && z >= 14 && distCam < 3800) {
+        const desiredMaskZ =
+          distCam < 360 && z >= config.trailMaskNearZoom
+            ? config.trailMaskNearZoom
+            : Math.min(z, config.trailMaskZoom || 16);
+        const maskZ = Math.max(14, Math.min(z, desiredMaskZ));
         const dzTrail = z - maskZ;
         const mtx = x >> dzTrail;
         const mty = y >> dzTrail;
-        trailTex = trailMask.getMaskForTile(maskZ, mtx, mty);
+        const isImmediate = distCam < 260;
+        trailTex = trailMask.getMaskForTile(maskZ, mtx, mty, isImmediate);
         if (trailTex) {
           const tUv = computeUvTransform(z, x, y, maskZ, mtx, mty);
           uniforms.uTrailMaskTex.value = trailTex;
@@ -340,11 +440,13 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
         const morphEnd = parentSplit * 0.98;
         invMorphSpan = 1.0 / Math.max(1.0, morphEnd - morphStart);
       }
-      const skirtDepth = Math.max(3.0, tileSize * 0.014);
+      // Modest safety skirt (edge stitching + parent feathering already guarantee 0.000m seams!)
+      const skirtDepth = Math.max(4.0, Math.min(28.0, tileSize * 0.015));
       uniforms.uMorphParams.value.set(morphStart, invMorphSpan, gridSegs, skirtDepth);
 
       mesh.receiveShadow = shadowsEnabled && distCam < config.detailDrawDistance;
-      mesh.castShadow = shadowsEnabled && config.castShadowRadiusM > 0 && distCam < config.castShadowRadiusM;
+      mesh.castShadow =
+        shadowsEnabled && config.castShadowRadiusM > 0 && distCam < config.castShadowRadiusM;
     }
 
     // Hide unused pooled meshes
@@ -352,27 +454,58 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
       meshPool[i].visible = false;
     }
 
-    tileCache.processUploads(config.uploadsPerFrame);
-    tileCache.clearPendingFar();
+    tileCache.clearPendingFar(activeTargetKeys);
     tileCache.evict(pinnedKeys);
   }
 
+  let lastTerrainEntry = null;
+
+  function findBestTerrainEntry(x, z) {
+    const maxZ = config.maxTerrainZoom;
+    if (
+      lastTerrainEntry &&
+      !lastTerrainEntry.evicted &&
+      lastTerrainEntry.z === maxZ &&
+      x >= lastTerrainEntry.bounds.minX &&
+      x <= lastTerrainEntry.bounds.maxX &&
+      z >= lastTerrainEntry.bounds.minZ &&
+      z <= lastTerrainEntry.bounds.maxZ
+    ) {
+      return lastTerrainEntry;
+    }
+
+    const n = 1 << maxZ;
+    const mx = x / K + MX0;
+    const my = -z / K + MY0;
+    const u = (mx + HALF_CIRC) * INV_TWO_HALF_CIRC;
+    const v = (HALF_CIRC - my) * INV_TWO_HALF_CIRC;
+    let tx = Math.max(0, Math.min(n - 1, (u * n) | 0));
+    let ty = Math.max(0, Math.min(n - 1, (v * n) | 0));
+
+    const minZ = config.minQuadZoom;
+    for (let tz = maxZ; tz >= minZ; tz--) {
+      const entry = tileCache.getFast('terrain', tz, tx, ty);
+      if (entry && entry.heights) {
+        lastTerrainEntry = entry;
+        return entry;
+      }
+      tx >>= 1;
+      ty >>= 1;
+    }
+    return null;
+  }
+
   /**
-   * Synchronous height query using best resident terrain tile (bilinear). Never throws.
+   * Synchronous height query using best resident stitched 257x257 terrain tile. Never throws.
    */
   function getHeight(x, z) {
     if (!Number.isFinite(x) || !Number.isFinite(z)) return 2667;
-    for (let tz = config.maxTerrainZoom; tz >= config.minQuadZoom; tz--) {
-      const t = worldToTile(x, z, tz);
-      const entry = tileCache.get('terrain', tz, t.x, t.y);
-      if (entry && entry.heights) {
-        const b = tileBoundsWorld(tz, t.x, t.y);
-        const u = (x - b.minX) / (b.maxX - b.minX);
-        const v = (z - b.minZ) / (b.maxZ - b.minZ);
-        return sampleTileBilinear(entry.heights, entry.width, entry.height, 1, 0, u, v);
-      }
-    }
-    return 2667;
+    const entry = findBestTerrainEntry(x, z);
+    if (!entry) return 2667;
+    const b = entry.bounds;
+    const u = (x - b.minX) * entry.invW;
+    const v = (z - b.minZ) * entry.invH;
+    return sampleVertexHeightBilinear(entry.heights, entry.width, entry.height, u, v);
   }
 
   /**
@@ -409,13 +542,19 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
     let grass = 0;
     let foundCover = false;
 
-    for (let tz = config.maxCoverZoom; tz >= 12; tz--) {
-      const t = worldToTile(x, z, tz);
-      const entry = tileCache.get('cover', tz, t.x, t.y);
+    const maxCoverZ = config.maxCoverZoom;
+    const nCover = 1 << maxCoverZ;
+    const mx = x / K + MX0;
+    const my = -z / K + MY0;
+    let cx = Math.max(0, Math.min(nCover - 1, ((mx + HALF_CIRC) * INV_TWO_HALF_CIRC * nCover) | 0));
+    let cy = Math.max(0, Math.min(nCover - 1, ((HALF_CIRC - my) * INV_TWO_HALF_CIRC * nCover) | 0));
+
+    for (let tz = maxCoverZ; tz >= 13; tz--) {
+      const entry = tileCache.getFast('cover', tz, cx, cy);
       if (entry && entry.rgba) {
-        const b = tileBoundsWorld(tz, t.x, t.y);
-        const u = (x - b.minX) / (b.maxX - b.minX);
-        const v = (z - b.minZ) / (b.maxZ - b.minZ);
+        const b = entry.bounds;
+        const u = (x - b.minX) * entry.invW;
+        const v = (z - b.minZ) * entry.invH;
         forest = sampleTileBilinear(entry.rgba, entry.width, entry.height, 4, 0, u, v) / 255;
         rock = sampleTileBilinear(entry.rgba, entry.width, entry.height, 4, 1, u, v) / 255;
         water = sampleTileBilinear(entry.rgba, entry.width, entry.height, 4, 2, u, v) / 255;
@@ -423,6 +562,8 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
         foundCover = true;
         break;
       }
+      cx >>= 1;
+      cy >>= 1;
     }
 
     if (!foundCover) {
@@ -442,8 +583,9 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
     }
 
     let snow = 0;
-    if (h > 3780 && slope < 0.55) {
-      snow = Math.min(1, ((h - 3780) / 380) * (1 - slope * 0.9));
+    if (h > 4040 && slope < 0.44 && n.z < -0.1) {
+      const northAspect = Math.max(0, Math.min(1, (-0.1 - n.z) / 0.4));
+      snow = Math.min(0.65, ((h - 4040) / 320) * northAspect * (1 - slope * 1.1));
     }
 
     return {
@@ -456,13 +598,34 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
   }
 
   /**
-   * Preload terrain, imagery, and cover tiles around (x, z) within radiusM.
+   * Preload resident high-detail terrain (z15), imagery (z15-z17), and cover (z13-z14)
+   * around (x, z) before resolving. Uses negative blocking priorities so preload tiles
+   * are never dropped or starved by background horizon tiles.
    */
   function preload(x, z, radiusM = 1200) {
-    const r = Math.max(200, radiusM || 1200);
+    tileCache.processUploads(64, 16);
+
+    const isTitle = engine.getAppState?.() === 'title';
+    const r = Math.max(250, radiusM || 1200);
     const needed = new Set();
 
-    const addRect = (kind, tz, rad, blocking = true) => {
+    let done = false;
+    let timer = 0;
+    let off = null;
+
+    const finish = () => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      if (off) off();
+      // Full flush so every decoded tile is GPU-resident before loading screen drops!
+      tileCache.processUploads(999, Infinity);
+      if (!isTitle && config.useTrailMask) {
+        trailMask.warmAround(x, z, config.trailMaskNearZoom || 16);
+      }
+    };
+
+    const addRect = (kind, tz, rad, blocking = true, prioBase = -1000) => {
       const minT = worldToTile(x - rad, z - rad, tz);
       const maxT = worldToTile(x + rad, z + rad, tz);
       const x0 = Math.min(minT.x, maxT.x);
@@ -472,60 +635,93 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
 
       for (let ty = y0; ty <= y1; ty++) {
         for (let tx = x0; tx <= x1; tx++) {
-          if (!tileCache.get(kind, tz, tx, ty) && tileCache.hasSource(kind, tz, tx, ty)) {
+          if (!tileCache.getFast(kind, tz, tx, ty) && tileCache.hasSource(kind, tz, tx, ty)) {
             const key = `${kind}:${tz}/${tx}/${ty}`;
             if (blocking) needed.add(key);
-            tileCache.request(kind, tz, tx, ty, tz * 100 + (blocking ? 0 : 5000));
+            const prio = blocking ? prioBase + tz : 30000 + tz * 100;
+            tileCache.request(kind, tz, tx, ty, prio);
           }
         }
       }
     };
 
-    // Immediate playable area (blocking) + far skyline background warm-up (non-blocking)
-    addRect('terrain', 9, 4000, true);
-    addRect('terrain', 11, 8000, true);
-    addRect('terrain', 13, Math.max(r, 2200), true);
-    if (config.maxTerrainZoom >= 14) addRect('terrain', 14, r, true);
-    if (config.maxTerrainZoom >= 15) addRect('terrain', 15, Math.min(r, 900), true);
-
-    addRect('imagery', 10, 8000, true);
-    addRect('imagery', 13, Math.max(r, 1800), true);
-    if (config.maxImageryZoom >= 15) addRect('imagery', 15, Math.min(r, 800), true);
-
-    addRect('cover', 13, Math.max(r, 1800), true);
-
-    // Warm far 60km skyline asynchronously without delaying preload()
-    addRect('terrain', 9, 55000, false);
-    addRect('imagery', 9, 55000, false);
-
-    if (needed.size === 0) return Promise.resolve();
-
     return new Promise((resolve) => {
-      let done = false;
-      const finish = () => {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        off();
-        tileCache.processUploads(999);
+      let totalNeeded = 0;
+      const resolvePreload = () => {
+        finish();
+        engine.events.emit('terrain:preload-progress', { loaded: totalNeeded, total: totalNeeded });
         resolve();
       };
 
-      const off = tileCache.onTileSettled((key) => {
+      off = tileCache.onTileSettled((key) => {
         if (needed.delete(key)) {
-          tileCache.processUploads(16);
-          if (needed.size === 0) finish();
+          const loaded = Math.max(0, totalNeeded - needed.size);
+          engine.events.emit('terrain:preload-progress', { loaded, total: totalNeeded });
+          if (needed.size === 0) {
+            resolvePreload();
+          } else {
+            queueMicrotask(() => tileCache.processUploads(16, 16));
+          }
         }
       });
 
-      const timer = setTimeout(finish, 8000);
+      if (isTitle) {
+        // Lightweight title preload (stays well under 1.5 MB cold budget while delivering crisp Telluride backdrop)
+        addRect('terrain', 9, 3000, true, -2000);
+        addRect('terrain', 11, 5000, true, -1800);
+        addRect('terrain', 13, 2200, true, -1500);
+        if (config.maxTerrainZoom >= 14) addRect('terrain', 14, 900, true, -1200);
+
+        addRect('imagery', 10, 5000, true, -1900);
+        addRect('imagery', 13, 2200, true, -1400);
+        if (config.maxImageryZoom >= 14) addRect('imagery', 14, 1100, true, -1100);
+      } else {
+        // Full near-photoreal playable preload: crisp z15 DEM, z15-z17 NAIP imagery, z13-z14 cover!
+        addRect('terrain', 9, 3000, true, -3000);
+        addRect('terrain', 11, 5000, true, -2800);
+        addRect('terrain', 13, Math.max(r, 1800), true, -2400);
+        if (config.maxTerrainZoom >= 14) addRect('terrain', 14, Math.min(r, 1050), true, -2000);
+        if (config.maxTerrainZoom >= 15) addRect('terrain', 15, Math.min(r, 820), true, -1800);
+
+        addRect('imagery', 10, 5000, true, -2700);
+        addRect('imagery', 13, Math.max(r, 1600), true, -2200);
+        addRect('imagery', 14, Math.min(r, 950), true, -1900);
+        if (config.maxImageryZoom >= 15) addRect('imagery', 15, Math.min(r, 700), true, -1700);
+        if (config.maxImageryZoom >= 16) addRect('imagery', 16, Math.min(r, 420), true, -1600);
+        if (config.maxImageryZoom >= 17) addRect('imagery', 17, 200, true, -1550);
+
+        addRect('cover', 13, Math.max(r, 1500), true, -1500);
+        if (config.maxCoverZoom >= 14) addRect('cover', 14, Math.min(r, 750), true, -1400);
+
+        // Warm far skyline asynchronously without blowing low-tier 40 MB VRAM budget
+        const horizonWarmR = config.lruMaxBytes <= 48 * 1024 * 1024 ? 26000 : 50000;
+        addRect('terrain', 9, horizonWarmR, false);
+        addRect('imagery', 9, horizonWarmR, false);
+      }
+
+      totalNeeded = needed.size;
+      engine.events.emit('terrain:preload-progress', { loaded: 0, total: totalNeeded });
+
+      if (totalNeeded === 0) {
+        resolvePreload();
+        return;
+      }
+
+      timer = setTimeout(() => {
+        if (needed.size > 0) {
+          console.warn('[terrain] preload timeout remaining:', needed.size);
+        }
+        resolvePreload();
+      }, 10000);
     });
   }
 
   function setTierConfig(nextConfig) {
     config = nextConfig;
+    lastTerrainEntry = null;
     currentGeo = getGeometry(config.patchGridSize);
     tileCache.setTierConfig(nextConfig);
+    trailMask.setTierConfig(nextConfig);
   }
 
   function getStats() {

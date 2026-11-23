@@ -103,11 +103,11 @@ export function createPatchGeometry(N = 48) {
     const k0 = northSkirtStart + gx;
     const k1 = k0 + 1;
     indices[ptr++] = s0;
-    indices[ptr++] = k0;
-    indices[ptr++] = s1;
     indices[ptr++] = s1;
     indices[ptr++] = k0;
+    indices[ptr++] = s1;
     indices[ptr++] = k1;
+    indices[ptr++] = k0;
   }
 
   // South skirt (+Z outward)
@@ -117,11 +117,11 @@ export function createPatchGeometry(N = 48) {
     const k0 = southSkirtStart + gx;
     const k1 = k0 + 1;
     indices[ptr++] = s0;
-    indices[ptr++] = s1;
     indices[ptr++] = k0;
     indices[ptr++] = s1;
+    indices[ptr++] = s1;
+    indices[ptr++] = k0;
     indices[ptr++] = k1;
-    indices[ptr++] = k0;
   }
 
   // West skirt (-X outward)
