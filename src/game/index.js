@@ -23,6 +23,7 @@ import {
   applyTrailCenterPull,
   computeTargetSpeed,
   evaluateSurface,
+  findDryShore,
   isDeepLakeWater,
   resolveCliffSlide,
 } from './physics.js';
@@ -288,17 +289,14 @@ export function createGame(engine, terrain, trailData, world) {
     state.raceId = null;
     state.paused = false;
     state.timeDilated = timeScale > 1;
-    let spawnX = x;
-    let spawnZ = z;
-    if (isDeepLakeWater(spawnX, spawnZ, engine, terrain, trailData, false)) {
-      const nr = trailData?.nearest?.(spawnX, spawnZ, 300);
-      if (nr) {
-        spawnX = nr.x;
-        spawnZ = nr.z;
-      }
+    ensureVectorArea(x, z);
+    const drySpawn = findDryShore(x, z, engine, terrain, trailData);
+    const spawnX = drySpawn.x;
+    const spawnZ = drySpawn.z;
+    if (drySpawn.nudged) {
+      ensureVectorArea(spawnX, spawnZ);
     }
     resetRunMetrics(spawnX, spawnZ, heading);
-    ensureVectorArea(spawnX, spawnZ);
     runner.ensureLoaded();
     resolveFreeRunStartTime(startTime, startHour);
 
@@ -306,7 +304,7 @@ export function createGame(engine, terrain, trailData, world) {
     engine.cameraRig?.snapTo?.({ x: state.x, y: state.y, z: state.z }, state.heading);
     engine.setAppState?.('playing');
     emitHud(null, false);
-    engine.events.emit('game:started', { mode: 'freerun', pos: { x, z, y: state.y } });
+    engine.events.emit('game:started', { mode: 'freerun', pos: { x: spawnX, z: spawnZ, y: state.y } });
     persistRun();
   }
 
@@ -478,21 +476,23 @@ export function createGame(engine, terrain, trailData, world) {
   }
 
   function teleport(x, z, heading = state.heading) {
-    state.x = x;
-    state.z = z;
-    smoothY = terrain.getHeight(x, z);
+    ensureVectorArea(x, z);
+    const dry = findDryShore(x, z, engine, terrain, trailData);
+    state.x = dry.x;
+    state.z = dry.z;
+    smoothY = terrain.getHeight(state.x, state.z);
     vertRefY = smoothY;
     state.y = smoothY;
     state.heading = heading;
-    camPoseScratch.x = x;
+    camPoseScratch.x = state.x;
     camPoseScratch.y = smoothY;
-    camPoseScratch.z = z;
+    camPoseScratch.z = state.z;
     camPoseScratch.heading = heading;
     cachedReturnRoute = null;
     cachedRoutePerfMs = -Infinity;
     jumpOffset = 0;
     jumpVel = 0;
-    ensureVectorArea(x, z);
+    if (dry.nudged) ensureVectorArea(state.x, state.z);
     syncRunnerVisuals(0.016, weather.getDenverClock().isNight);
     engine.cameraRig?.snapTo?.({ x: state.x, y: state.y, z: state.z }, state.heading);
   }
@@ -698,10 +698,18 @@ export function createGame(engine, terrain, trailData, world) {
     let nextX = state.x + vx * dtSim;
     let nextZ = state.z + vz * dtSim;
 
-    if ((vx !== 0 || vz !== 0) && isDeepLakeWater(nextX, nextZ, engine, terrain, trailData, surfEval.onTrail)) {
+    const nearWaterHint = Boolean(surfEval.cover && surfEval.cover.water > 0.2);
+    // If somehow standing inside deep lake water (e.g. chunk finished streaming), nudge onto dry shore
+    if (!surfEval.onTrail && isDeepLakeWater(state.x, state.z, engine, terrain, trailData, false, nearWaterHint)) {
+      const dry = findDryShore(state.x, state.z, engine, terrain, trailData);
+      if (dry.nudged) {
+        nextX = dry.x;
+        nextZ = dry.z;
+      }
+    } else if ((vx !== 0 || vz !== 0) && isDeepLakeWater(nextX, nextZ, engine, terrain, trailData, surfEval.onTrail, nearWaterHint)) {
       // Allow sliding along whichever axis stays dry on the shoreline
-      const xDry = !isDeepLakeWater(nextX, state.z, engine, terrain, trailData, surfEval.onTrail);
-      const zDry = !isDeepLakeWater(state.x, nextZ, engine, terrain, trailData, surfEval.onTrail);
+      const xDry = !isDeepLakeWater(nextX, state.z, engine, terrain, trailData, surfEval.onTrail, nearWaterHint);
+      const zDry = !isDeepLakeWater(state.x, nextZ, engine, terrain, trailData, surfEval.onTrail, nearWaterHint);
       if (xDry) {
         nextZ = state.z;
       } else if (zDry) {

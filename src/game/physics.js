@@ -227,11 +227,14 @@ function pointInLakeRing(x, z, coords) {
 /**
  * Check whether world position (x, z) is inside deep standing lake water
  * (Ice Lake, Blue Lakes, etc.) and not on a trail/bridge.
+ * Avoids calling terrain.getSurface() on dry ground unless nearWaterHint is true.
  */
-export function isDeepLakeWater(x, z, engine, terrain, trailData, onTrail = false) {
+export function isDeepLakeWater(x, z, engine, terrain, trailData, onTrail = false, nearWaterHint = false) {
   if (onTrail) return false;
   if (engine?.worldWaterMask?.isInLake) {
-    if (engine.worldWaterMask.isInLake(x, z, -1.0)) return true;
+    if (engine.worldWaterMask.isInLake(x, z, 0)) return true;
+    // Fast path: when worldWaterMask is active and we aren't near cover water, skip DEM/cover query
+    if (!nearWaterHint) return false;
   } else if (Array.isArray(trailData?.lakes) && trailData.lakes.length > 0) {
     for (let i = 0; i < trailData.lakes.length; i++) {
       const lake = trailData.lakes[i];
@@ -239,11 +242,44 @@ export function isDeepLakeWater(x, z, engine, terrain, trailData, onTrail = fals
       if (b && (x < b[0] || x > b[2] || z < b[1] || z > b[3])) continue;
       if (lake.coords && pointInLakeRing(x, z, lake.coords)) return true;
     }
+    if (!nearWaterHint) return false;
+  } else if (!nearWaterHint) {
+    return false;
   }
+
   const cover = terrain?.getSurface ? terrain.getSurface(x, z) : null;
   if (cover && cover.water > 0.72) {
     const nearest = trailData?.nearest ? trailData.nearest(x, z, 8) : null;
     if (!nearest || nearest.dist > 5.5) return true;
   }
   return false;
+}
+
+const SHORE_RADII = [15, 35, 60, 95, 140, 210];
+const SHORE_ANGLES = 12;
+
+/**
+ * If (x, z) lies inside deep lake water, find the closest dry shoreline point
+ * via nearest trail first, then a fast concentric radial scan.
+ */
+export function findDryShore(x, z, engine, terrain, trailData) {
+  if (!isDeepLakeWater(x, z, engine, terrain, trailData, false, true)) {
+    return { x, z, nudged: false };
+  }
+  const nr = trailData?.nearest ? trailData.nearest(x, z, 260) : null;
+  if (nr && !isDeepLakeWater(nr.x, nr.z, engine, terrain, trailData, false, true)) {
+    return { x: nr.x, z: nr.z, nudged: true };
+  }
+  for (let ri = 0; ri < SHORE_RADII.length; ri++) {
+    const r = SHORE_RADII[ri];
+    for (let ai = 0; ai < SHORE_ANGLES; ai++) {
+      const a = (ai / SHORE_ANGLES) * Math.PI * 2;
+      const cx = x + Math.cos(a) * r;
+      const cz = z + Math.sin(a) * r;
+      if (!isDeepLakeWater(cx, cz, engine, terrain, trailData, false, true)) {
+        return { x: cx, z: cz, nudged: true };
+      }
+    }
+  }
+  return { x, z, nudged: false };
 }

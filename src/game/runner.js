@@ -1,11 +1,13 @@
 // Rigged, skinned CC0 human trail runner (Quaternius Universal Base Characters +
 // Universal Animation Library) with smooth AnimationMixer locomotion blending,
 // ground-speed stride matching (no foot sliding), uphill slope lean, power-hike
-// posture, bone-attached trail gear (hydration vest, soft flasks, trucker cap,
-// sunglasses, headlamp, GPS watch), and lazy loading behind a slim placeholder.
+// posture, merged vertex-colored bone-attached trail gear (hydration vest, soft
+// flasks, trucker cap, sunglasses, headlamp, GPS watch), and lazy loading behind
+// a slim placeholder.
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -19,186 +21,183 @@ const NATURAL_SPEEDS = {
   sprint: 5.05,
 };
 
+/**
+ * Bake transforms and sRGB hex colors into a single merged non-indexed BufferGeometry
+ * so multi-part gear renders in 1 draw call. Disposes temporary part geometries.
+ */
+function mergeColoredParts(parts) {
+  const prepared = [];
+  const tmpColor = new THREE.Color();
+  const mat4 = new THREE.Matrix4();
+  const pos = new THREE.Vector3();
+  const quat = new THREE.Quaternion();
+  const euler = new THREE.Euler();
+  const scale = new THREE.Vector3();
+
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i];
+    const g = p.geo.index ? p.geo.toNonIndexed() : p.geo.clone();
+    p.geo.dispose();
+    if (g.attributes.uv) g.deleteAttribute('uv');
+
+    pos.set(p.pos?.[0] ?? 0, p.pos?.[1] ?? 0, p.pos?.[2] ?? 0);
+    euler.set(p.rot?.[0] ?? 0, p.rot?.[1] ?? 0, p.rot?.[2] ?? 0);
+    quat.setFromEuler(euler);
+    scale.set(p.scale?.[0] ?? 1, p.scale?.[1] ?? 1, p.scale?.[2] ?? 1);
+    mat4.compose(pos, quat, scale);
+    g.applyMatrix4(mat4);
+    if (!g.attributes.normal) g.computeVertexNormals();
+
+    tmpColor.setHex(p.color);
+    const vCount = g.attributes.position.count;
+    const colors = new Float32Array(vCount * 3);
+    for (let v = 0; v < vCount; v++) {
+      colors[v * 3] = tmpColor.r;
+      colors[v * 3 + 1] = tmpColor.g;
+      colors[v * 3 + 2] = tmpColor.b;
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    prepared.push(g);
+  }
+
+  const merged = mergeGeometries(prepared, false);
+  for (let i = 0; i < prepared.length; i++) prepared[i].dispose();
+  return merged;
+}
+
 function buildPlaceholder() {
-  const grp = new THREE.Group();
-  grp.name = 'runner-placeholder';
-
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xdd5226, roughness: 0.78 });
-  const shortsMat = new THREE.MeshStandardMaterial({ color: 0x222a35, roughness: 0.85 });
-  const headMat = new THREE.MeshStandardMaterial({ color: 0xd8a480, roughness: 0.72 });
-  const capMat = new THREE.MeshStandardMaterial({ color: 0x1d4e6b, roughness: 0.75 });
-
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.52, 6, 10), bodyMat);
-  torso.position.y = 1.18;
-  torso.castShadow = true;
-  grp.add(torso);
-
-  const legs = new THREE.Mesh(new THREE.CapsuleGeometry(0.14, 0.56, 6, 10), shortsMat);
-  legs.position.y = 0.56;
-  legs.castShadow = true;
-  grp.add(legs);
-
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.115, 10, 8), headMat);
-  head.position.y = 1.66;
-  head.castShadow = true;
-  grp.add(head);
-
-  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.122, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.52), capMat);
-  cap.position.y = 1.68;
-  grp.add(cap);
-
-  return grp;
+  const geo = mergeColoredParts([
+    { geo: new THREE.CapsuleGeometry(0.18, 0.52, 6, 10), pos: [0, 1.18, 0], color: 0xdd5226 },
+    { geo: new THREE.CapsuleGeometry(0.14, 0.56, 6, 10), pos: [0, 0.56, 0], color: 0x222a35 },
+    { geo: new THREE.SphereGeometry(0.115, 10, 8), pos: [0, 1.66, 0], color: 0xd8a480 },
+    { geo: new THREE.SphereGeometry(0.122, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.52), pos: [0, 1.68, 0], color: 0x1d4e6b },
+  ]);
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.name = 'runner-placeholder';
+  mesh.castShadow = true;
+  return mesh;
 }
 
 function buildHydrationVest() {
-  const vest = new THREE.Group();
-  vest.name = 'gear-hydration-vest';
+  const parts = [
+    // Contoured rear hydration pack (local -Z is behind chest in UAL/UBC bone space)
+    { geo: new THREE.BoxGeometry(0.24, 0.34, 0.095), pos: [0, 0.01, -0.155], color: 0x183446 },
+    { geo: new THREE.BoxGeometry(0.20, 0.14, 0.055), pos: [0, 0.06, -0.205], color: 0xe85a2b },
+    { geo: new THREE.BoxGeometry(0.16, 0.022, 0.012), pos: [0, -0.07, -0.206], color: 0xdbeafe },
+    // Dual chest sternum straps
+    { geo: new THREE.BoxGeometry(0.15, 0.014, 0.014), pos: [0, 0.05, 0.135], color: 0xe85a2b },
+    { geo: new THREE.BoxGeometry(0.15, 0.014, 0.014), pos: [0, -0.03, 0.135], color: 0xe85a2b },
+  ];
 
-  const packMat = new THREE.MeshStandardMaterial({ color: 0x183446, roughness: 0.72, metalness: 0.05 });
-  const trimMat = new THREE.MeshStandardMaterial({ color: 0xe85a2b, roughness: 0.65 });
-  const reflectMat = new THREE.MeshStandardMaterial({ color: 0xdbeafe, roughness: 0.35, metalness: 0.4 });
-  const flaskMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.3, metalness: 0.05 });
-  const nozzleMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.5 });
-
-  // Contoured main rear pack (local -Z is behind the chest in UAL/UBC bone space)
-  const mainPack = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.34, 0.095), packMat);
-  mainPack.position.set(0, 0.01, -0.155);
-  mainPack.castShadow = true;
-  vest.add(mainPack);
-
-  const upperPod = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.14, 0.055), trimMat);
-  upperPod.position.set(0, 0.06, -0.205);
-  upperPod.castShadow = true;
-  vest.add(upperPod);
-
-  // Reflective safety strip on back of hydration pack
-  const reflectStrip = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.022, 0.012), reflectMat);
-  reflectStrip.position.set(0, -0.07, -0.206);
-  vest.add(reflectStrip);
-
-  // Side compression wings wrapping ribs
   for (const side of [-1, 1]) {
-    const wing = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.18, 0.20), packMat);
-    wing.position.set(side * 0.145, -0.03, -0.04);
-    vest.add(wing);
-
-    // Shoulder strap over clavicle to chest
-    const strapTop = new THREE.Mesh(new THREE.BoxGeometry(0.052, 0.035, 0.24), packMat);
-    strapTop.position.set(side * 0.10, 0.175, -0.02);
-    vest.add(strapTop);
-
-    const strapFront = new THREE.Mesh(new THREE.BoxGeometry(0.056, 0.28, 0.03), packMat);
-    strapFront.position.set(side * 0.095, 0.03, 0.125);
-    vest.add(strapFront);
-
-    // Front 500ml soft flask + bite valve
-    const flask = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.020, 0.145, 10), flaskMat);
-    flask.position.set(side * 0.095, 0.02, 0.148);
-    vest.add(flask);
-
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.018, 0.024, 8), nozzleMat);
-    cap.position.set(side * 0.095, 0.102, 0.148);
-    vest.add(cap);
+    parts.push(
+      { geo: new THREE.BoxGeometry(0.035, 0.18, 0.20), pos: [side * 0.145, -0.03, -0.04], color: 0x183446 },
+      { geo: new THREE.BoxGeometry(0.052, 0.035, 0.24), pos: [side * 0.10, 0.175, -0.02], color: 0x183446 },
+      { geo: new THREE.BoxGeometry(0.056, 0.28, 0.03), pos: [side * 0.095, 0.03, 0.125], color: 0x183446 },
+      // Front 500ml soft flask + bite valve
+      { geo: new THREE.CylinderGeometry(0.025, 0.020, 0.145, 10), pos: [side * 0.095, 0.02, 0.148], color: 0x38bdf8 },
+      { geo: new THREE.CylinderGeometry(0.014, 0.018, 0.024, 8), pos: [side * 0.095, 0.102, 0.148], color: 0x111827 },
+    );
   }
 
-  // Dual chest bungee sternum straps
-  for (const yOff of [0.05, -0.03]) {
-    const bungee = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.014, 0.014), trimMat);
-    bungee.position.set(0, yOff, 0.135);
-    vest.add(bungee);
-  }
-
-  return vest;
+  const mesh = new THREE.Mesh(
+    mergeColoredParts(parts),
+    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.68, metalness: 0.05 })
+  );
+  mesh.name = 'gear-hydration-vest';
+  mesh.castShadow = true;
+  return mesh;
 }
 
 function buildHeadGear() {
   const gear = new THREE.Group();
   gear.name = 'gear-head';
 
-  const capFrontMat = new THREE.MeshStandardMaterial({ color: 0x1d4e6b, roughness: 0.72 });
-  const capMeshMat = new THREE.MeshStandardMaterial({ color: 0x2a3441, roughness: 0.88 });
-  const brimMat = new THREE.MeshStandardMaterial({ color: 0xd95428, roughness: 0.75 });
-  const shadesMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.18, metalness: 0.7 });
-  const strapMat = new THREE.MeshStandardMaterial({ color: 0x1f2937, roughness: 0.8 });
-  const lampHousingMat = new THREE.MeshStandardMaterial({ color: 0x374151, roughness: 0.45, metalness: 0.25 });
+  // Merge all static cap + shades + headlamp housing parts into 1 draw call
+  const staticMesh = new THREE.Mesh(
+    mergeColoredParts([
+      // Trucker trail cap crown snugged cleanly onto skull brow
+      {
+        geo: new THREE.SphereGeometry(0.113, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.56),
+        pos: [0, 0.104, -0.008],
+        rot: [-0.08, 0, 0],
+        scale: [0.95, 1.0, 1.04],
+        color: 0x1d4e6b,
+      },
+      // Rear dark mesh panel accent
+      {
+        geo: new THREE.SphereGeometry(0.114, 12, 8, Math.PI * 0.72, Math.PI * 1.56, 0.12, Math.PI * 0.44),
+        pos: [0, 0.104, -0.008],
+        rot: [-0.08, 0, 0],
+        scale: [0.95, 1.0, 1.04],
+        color: 0x2a3441,
+      },
+      // Curved trail cap brim pointing +Z (forward in bone local space)
+      {
+        geo: new THREE.CylinderGeometry(0.098, 0.102, 0.011, 14, 1, false, -Math.PI * 0.42, Math.PI * 0.84),
+        pos: [0, 0.118, 0.055],
+        rot: [0.07, 0, 0],
+        scale: [1.02, 1, 1.42],
+        color: 0xd95428,
+      },
+      // Wraparound trail sunglasses
+      {
+        geo: new THREE.BoxGeometry(0.142, 0.032, 0.036),
+        pos: [0, 0.084, 0.095],
+        color: 0x111827,
+      },
+      // Headlamp elastic strap + compact forehead housing
+      {
+        geo: new THREE.TorusGeometry(0.108, 0.008, 6, 18),
+        pos: [0, 0.132, -0.006],
+        rot: [Math.PI / 2 - 0.08, 0, 0],
+        scale: [0.96, 1.05, 1],
+        color: 0x1f2937,
+      },
+      {
+        geo: new THREE.BoxGeometry(0.044, 0.025, 0.022),
+        pos: [0, 0.138, 0.108],
+        color: 0x374151,
+      },
+    ]),
+    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.72, metalness: 0.08 })
+  );
+  staticMesh.name = 'gear-head-cap';
+  staticMesh.castShadow = true;
+  gear.add(staticMesh);
+
+  // Separate tiny emissive lens mesh (no shadow casting)
   const lampLensMat = new THREE.MeshStandardMaterial({
     color: 0xfffbeb,
     emissive: 0xfef08a,
     emissiveIntensity: 0.0,
     roughness: 0.2,
   });
-
-  // Trucker trail cap crown snugged cleanly onto skull brow
-  const crown = new THREE.Mesh(
-    new THREE.SphereGeometry(0.113, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.56),
-    capFrontMat
-  );
-  crown.scale.set(0.95, 1.0, 1.04);
-  crown.position.set(0, 0.104, -0.008);
-  crown.rotation.x = -0.08;
-  crown.castShadow = true;
-  gear.add(crown);
-
-  // Rear dark mesh panel accent
-  const backPanel = new THREE.Mesh(
-    new THREE.SphereGeometry(0.114, 12, 8, Math.PI * 0.72, Math.PI * 1.56, 0.12, Math.PI * 0.44),
-    capMeshMat
-  );
-  backPanel.scale.set(0.95, 1.0, 1.04);
-  backPanel.position.set(0, 0.104, -0.008);
-  backPanel.rotation.x = -0.08;
-  gear.add(backPanel);
-
-  // Curved trail cap brim pointing +Z (forward in bone local space)
-  const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.098, 0.102, 0.011, 14, 1, false, -Math.PI * 0.42, Math.PI * 0.84), brimMat);
-  brim.scale.set(1.02, 1, 1.42);
-  brim.position.set(0, 0.118, 0.055);
-  brim.rotation.x = 0.07;
-  brim.castShadow = true;
-  gear.add(brim);
-
-  // Wraparound trail sunglasses
-  const shades = new THREE.Mesh(new THREE.BoxGeometry(0.142, 0.032, 0.036), shadesMat);
-  shades.position.set(0, 0.084, 0.095);
-  gear.add(shades);
-
-  // Headlamp strap + compact housing + glowing night lens on forehead above brim
-  const lampStrap = new THREE.Mesh(new THREE.TorusGeometry(0.108, 0.008, 6, 18), strapMat);
-  lampStrap.rotation.x = Math.PI / 2 - 0.08;
-  lampStrap.scale.set(0.96, 1.05, 1);
-  lampStrap.position.set(0, 0.132, -0.006);
-  gear.add(lampStrap);
-
-  const lampHousing = new THREE.Mesh(new THREE.BoxGeometry(0.044, 0.025, 0.022), lampHousingMat);
-  lampHousing.position.set(0, 0.138, 0.108);
-  gear.add(lampHousing);
-
   const lampLens = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.012, 10), lampLensMat);
+  lampLens.name = 'gear-headlamp-lens';
   lampLens.rotation.x = Math.PI / 2;
   lampLens.position.set(0, 0.138, 0.120);
+  lampLens.castShadow = false;
+  lampLens.userData.noShadow = true;
   gear.add(lampLens);
 
   return { gear, lampLensMat };
 }
 
 function buildGpsWatch() {
-  const grp = new THREE.Group();
-  grp.name = 'gear-gps-watch';
-  const bandMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.7 });
-  const faceMat = new THREE.MeshStandardMaterial({
-    color: 0x0f172a,
-    emissive: 0x10b981,
-    emissiveIntensity: 0.45,
-    roughness: 0.25,
-  });
-  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.036, 0.028, 10), bandMat);
-  grp.add(band);
-  const face = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.012, 10), faceMat);
-  face.position.set(0, 0, -0.034);
-  face.rotation.x = Math.PI / 2;
-  grp.add(face);
-  grp.position.set(0, 0.205, 0);
-  return grp;
+  const mesh = new THREE.Mesh(
+    mergeColoredParts([
+      { geo: new THREE.CylinderGeometry(0.036, 0.036, 0.028, 10), pos: [0, 0, 0], color: 0x111827 },
+      { geo: new THREE.CylinderGeometry(0.022, 0.022, 0.012, 10), pos: [0, 0, -0.034], rot: [Math.PI / 2, 0, 0], color: 0x10b981 },
+    ]),
+    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55 })
+  );
+  mesh.name = 'gear-gps-watch';
+  mesh.position.set(0, 0.205, 0);
+  mesh.castShadow = false;
+  mesh.userData.noShadow = true;
+  return mesh;
 }
 
 /**
@@ -220,9 +219,10 @@ export function createRunnerCharacter(assetsBase = './') {
   });
   const blobShadow = new THREE.Mesh(blobGeo, blobMat);
   blobShadow.position.y = 0.03;
+  blobShadow.userData.noShadow = true;
   root.add(blobShadow);
 
-  // Lightweight placeholder shown only while runner.glb streams in lazily
+  // Lightweight single-mesh placeholder shown only while runner.glb streams in lazily
   const placeholder = buildPlaceholder();
   root.add(placeholder);
 
@@ -267,11 +267,25 @@ export function createRunnerCharacter(assetsBase = './') {
   function applyShadowSetting() {
     blobShadow.visible = !shadowsEnabledState;
     root.traverse((obj) => {
-      if (obj.isMesh && obj !== blobShadow) {
+      if (obj.isMesh && !obj.userData?.noShadow) {
         obj.castShadow = Boolean(shadowsEnabledState);
         obj.receiveShadow = false;
       }
     });
+  }
+
+  function applyActionWeight(act, weight, timeScale = null) {
+    if (!act) return;
+    if (weight < 0.002) {
+      if (act.enabled || act.getEffectiveWeight() !== 0) {
+        act.setEffectiveWeight(0);
+        act.enabled = false;
+      }
+      return;
+    }
+    if (!act.enabled) act.enabled = true;
+    act.setEffectiveWeight(weight);
+    if (timeScale !== null) act.setEffectiveTimeScale(timeScale);
   }
 
   function ensureLoaded() {
@@ -305,7 +319,7 @@ export function createRunnerCharacter(assetsBase = './') {
           }
         });
 
-        // Attach trail-running gear directly to skeleton bones
+        // Attach merged trail-running gear directly to skeleton bones (4 meshes total)
         if (bones.spine_03) {
           bones.spine_03.add(buildHydrationVest());
         } else if (bones.spine_02) {
@@ -324,7 +338,7 @@ export function createRunnerCharacter(assetsBase = './') {
 
         modelPivot.add(gltfScene);
 
-        // Configure AnimationMixer and all 11 UAL1 clips
+        // Configure AnimationMixer and all 11 UAL1 clips (inactive clips start disabled)
         mixer = new THREE.AnimationMixer(gltfScene);
         const byName = new Map(gltf.animations.map((c) => [c.name, c]));
 
@@ -333,9 +347,10 @@ export function createRunnerCharacter(assetsBase = './') {
           if (!clip) return;
           const act = mixer.clipAction(clip);
           act.setLoop(THREE.LoopRepeat, Infinity);
-          act.enabled = true;
-          act.setEffectiveWeight(key === 'idle' ? 1 : 0);
           act.play();
+          const isInit = key === 'idle';
+          act.enabled = isInit;
+          act.setEffectiveWeight(isInit ? 1 : 0);
           actions[key] = act;
         };
 
@@ -345,9 +360,9 @@ export function createRunnerCharacter(assetsBase = './') {
           const act = mixer.clipAction(clip);
           act.setLoop(THREE.LoopOnce, 1);
           act.clampWhenFinished = true;
-          act.enabled = true;
-          act.setEffectiveWeight(0);
           act.play();
+          act.enabled = false;
+          act.setEffectiveWeight(0);
           actions[key] = act;
         };
 
@@ -431,6 +446,7 @@ export function createRunnerCharacter(assetsBase = './') {
     // Fall / Get-up state transitions
     if (isFallen && !wasFallen) {
       if (actions.fall) {
+        actions.fall.enabled = true;
         actions.fall.reset();
         actions.fall.setEffectiveTimeScale(1.35);
         actions.fall.play();
@@ -439,6 +455,7 @@ export function createRunnerCharacter(assetsBase = './') {
     } else if (!isFallen && wasFallen) {
       getupTimer = 0.72;
       if (actions.getup) {
+        actions.getup.enabled = true;
         actions.getup.reset();
         actions.getup.setEffectiveTimeScale(1.65);
         actions.getup.play();
@@ -450,6 +467,7 @@ export function createRunnerCharacter(assetsBase = './') {
     // Jump transitions
     if (isAirborne && !wasAirborne) {
       if (actions.jumpStart) {
+        actions.jumpStart.enabled = true;
         actions.jumpStart.reset();
         actions.jumpStart.setEffectiveTimeScale(1.4);
         actions.jumpStart.play();
@@ -458,6 +476,7 @@ export function createRunnerCharacter(assetsBase = './') {
     } else if (!isAirborne && wasAirborne) {
       jumpLandTimer = 0.22;
       if (actions.jumpLand) {
+        actions.jumpLand.enabled = true;
         actions.jumpLand.reset();
         actions.jumpLand.setEffectiveTimeScale(1.6);
         actions.jumpLand.play();
@@ -488,7 +507,6 @@ export function createRunnerCharacter(assetsBase = './') {
     } else if (speedMs < 0.12) {
       tIdle = 1;
     } else if (gait === 'power-hike') {
-      // Blend crouched power-hike with steady walk so stride looks athletic & driven
       tPowerHike = 0.62;
       tWalk = 0.38;
     } else if (gait === 'walk' || gait === 'hike' || speedMs < 1.95) {
@@ -504,7 +522,6 @@ export function createRunnerCharacter(assetsBase = './') {
       tJog = 1 - f;
       tSprint = f;
     } else {
-      // Smooth continuous blend from walk -> jog -> sprint based on actual ground speed
       if (speedMs < 2.2) {
         const f = clamp((speedMs - 1.2) / 1.0, 0, 1);
         tWalk = 1 - f;
@@ -519,56 +536,33 @@ export function createRunnerCharacter(assetsBase = './') {
     }
 
     const blend = Math.min(1, safeDt * 10);
-    weights.idle = lerp(weights.idle, tIdle, blend);
-    weights.walk = lerp(weights.walk, tWalk, blend);
-    weights.jog = lerp(weights.jog, tJog, blend);
-    weights.sprint = lerp(weights.sprint, tSprint, blend);
-    weights.powerHike = lerp(weights.powerHike, tPowerHike, blend);
-    weights.jump = lerp(weights.jump, tJump, Math.min(1, safeDt * 14));
-    weights.fall = lerp(weights.fall, tFall, Math.min(1, safeDt * 12));
-    weights.getup = lerp(weights.getup, tGetup, Math.min(1, safeDt * 12));
-    weights.ceremony = lerp(weights.ceremony, tCeremony, Math.min(1, safeDt * 6));
+    const snapZero = (cur, tgt, rate) => {
+      const v = lerp(cur, tgt, rate);
+      return tgt === 0 && v < 0.002 ? 0 : v;
+    };
+    weights.idle = snapZero(weights.idle, tIdle, blend);
+    weights.walk = snapZero(weights.walk, tWalk, blend);
+    weights.jog = snapZero(weights.jog, tJog, blend);
+    weights.sprint = snapZero(weights.sprint, tSprint, blend);
+    weights.powerHike = snapZero(weights.powerHike, tPowerHike, blend);
+    weights.jump = snapZero(weights.jump, tJump, Math.min(1, safeDt * 14));
+    weights.fall = snapZero(weights.fall, tFall, Math.min(1, safeDt * 12));
+    weights.getup = snapZero(weights.getup, tGetup, Math.min(1, safeDt * 12));
+    weights.ceremony = snapZero(weights.ceremony, tCeremony, Math.min(1, safeDt * 6));
 
-    // Match clip playback rates directly to ground speed to eliminate foot sliding
+    // Match clip playback rates directly to ground speed & disable zero-weight clips
     const effectiveSpeed = Math.max(0.4, speedMs);
-    if (actions.idle) {
-      actions.idle.setEffectiveWeight(weights.idle);
-      actions.idle.setEffectiveTimeScale(1.0);
-    }
-    if (actions.walk) {
-      actions.walk.setEffectiveWeight(weights.walk);
-      actions.walk.setEffectiveTimeScale(clamp(effectiveSpeed / NATURAL_SPEEDS.walk, 0.55, 1.55));
-    }
-    if (actions.powerHike) {
-      actions.powerHike.setEffectiveWeight(weights.powerHike);
-      actions.powerHike.setEffectiveTimeScale(clamp(effectiveSpeed / NATURAL_SPEEDS.crouch, 0.6, 1.6));
-    }
-    if (actions.jog) {
-      actions.jog.setEffectiveWeight(weights.jog);
-      actions.jog.setEffectiveTimeScale(clamp(effectiveSpeed / NATURAL_SPEEDS.jog, 0.65, 1.45));
-    }
-    if (actions.sprint) {
-      actions.sprint.setEffectiveWeight(weights.sprint);
-      actions.sprint.setEffectiveTimeScale(clamp(effectiveSpeed / NATURAL_SPEEDS.sprint, 0.72, 1.35));
-    }
-    if (actions.jumpLoop) {
-      actions.jumpLoop.setEffectiveWeight(weights.jump);
-    }
-    if (actions.jumpStart) {
-      actions.jumpStart.setEffectiveWeight(isAirborne ? weights.jump * 0.45 : 0);
-    }
-    if (actions.jumpLand) {
-      actions.jumpLand.setEffectiveWeight(jumpLandTimer > 0 ? clamp(jumpLandTimer / 0.22, 0, 0.85) : 0);
-    }
-    if (actions.fall) {
-      actions.fall.setEffectiveWeight(weights.fall);
-    }
-    if (actions.getup) {
-      actions.getup.setEffectiveWeight(weights.getup);
-    }
-    if (actions.ceremony) {
-      actions.ceremony.setEffectiveWeight(weights.ceremony);
-    }
+    applyActionWeight(actions.idle, weights.idle, 1.0);
+    applyActionWeight(actions.walk, weights.walk, clamp(effectiveSpeed / NATURAL_SPEEDS.walk, 0.55, 1.55));
+    applyActionWeight(actions.powerHike, weights.powerHike, clamp(effectiveSpeed / NATURAL_SPEEDS.crouch, 0.6, 1.6));
+    applyActionWeight(actions.jog, weights.jog, clamp(effectiveSpeed / NATURAL_SPEEDS.jog, 0.65, 1.45));
+    applyActionWeight(actions.sprint, weights.sprint, clamp(effectiveSpeed / NATURAL_SPEEDS.sprint, 0.72, 1.35));
+    applyActionWeight(actions.jumpLoop, weights.jump);
+    applyActionWeight(actions.jumpStart, isAirborne ? weights.jump * 0.45 : 0);
+    applyActionWeight(actions.jumpLand, jumpLandTimer > 0 ? clamp(jumpLandTimer / 0.22, 0, 0.85) : 0);
+    applyActionWeight(actions.fall, weights.fall);
+    applyActionWeight(actions.getup, weights.getup);
+    applyActionWeight(actions.ceremony, weights.ceremony);
 
     mixer.update(safeDt);
 
@@ -576,7 +570,6 @@ export function createRunnerCharacter(assetsBase = './') {
     const uprightMask = Math.max(0, 1 - weights.fall - weights.getup - weights.ceremony);
     if (uprightMask > 0.05) {
       const moveMask = clamp(speedMs / 0.9, 0, 1) * uprightMask;
-      // Positive X rotation pitches torso forward in UAL/UBC spine bone space
       const slopePitch = clamp(smoothGrade * 0.62, -0.18, 0.34) * moveMask;
       const phExtra = weights.powerHike * 0.22;
       const stumbleZ = isStumbling ? Math.sin(idleTime * 22) * 0.22 : 0;
@@ -590,12 +583,10 @@ export function createRunnerCharacter(assetsBase = './') {
         bones.spine_02.rotation.z += stumbleZ * 0.5;
       }
       if (bones.Head) {
-        // Counter-pitch head so runner keeps eyes on the trail ahead
         bones.Head.rotation.x -= (slopePitch + phExtra) * 0.65;
       }
     }
 
-    // Subtle ground-contact settle on steep slopes so shoes stay seated cleanly
     modelPivot.position.y = 0.01;
 
     return fpBounce;
@@ -650,7 +641,6 @@ export function createHardrockMonument() {
   rock.receiveShadow = true;
   group.add(rock);
 
-  // Ram emblem plaque on top face
   const plaqueGeo = new THREE.CylinderGeometry(0.32, 0.34, 0.08, 12);
   const plaqueMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.5, metalness: 0.3 });
   const plaque = new THREE.Mesh(plaqueGeo, plaqueMat);
