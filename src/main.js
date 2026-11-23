@@ -5,6 +5,7 @@ import { loadTrailData } from './data/index.js';
 import { createWorld } from './world/index.js';
 import { createGame } from './game/index.js';
 import { createUI } from './ui/index.js';
+import { createAudio } from './audio/index.js';
 
 async function bootstrap() {
   const canvas = document.getElementById('game-canvas');
@@ -16,6 +17,7 @@ async function bootstrap() {
   const trailData = await loadTrailData(engine);
   const world = createWorld(engine, terrain, trailData);
   const game = createGame(engine, terrain, trailData, world);
+  const audio = createAudio(engine, { game, world, trailData, terrain });
   const ui = createUI(engine, { trailData, game, terrain });
 
   performance.mark('tt:title-ready');
@@ -59,10 +61,12 @@ async function bootstrap() {
     const x = opts.x ?? 0;
     const z = opts.z ?? 0;
     const heading = opts.heading ?? 0;
+    const startTime = opts.startTime ?? 'morning';
+    const startHour = opts.startHour ?? 8;
     engine.setAppState('loading');
     await terrain.preload(x, z, 1200);
     await trailData.loadArea(x, z, 1500);
-    game.startFreeRun({ x, z, heading });
+    game.startFreeRun({ x, z, heading, startTime, startHour });
     performance.mark('tt:first-playable');
   }
 
@@ -146,6 +150,7 @@ async function bootstrap() {
       trailData,
       world,
       game,
+      audio,
       ui,
       ...perfApi,
       ...devApi,
@@ -159,7 +164,8 @@ async function bootstrap() {
     const x = params.has('x') ? Number(params.get('x')) : startPoi.x;
     const z = params.has('z') ? Number(params.get('z')) : startPoi.z;
     const heading = params.has('heading') ? Number(params.get('heading')) : (startPoi.heading || 0);
-    await startFreeRunSafe({ x, z, heading });
+    const startHour = params.has('hour') ? Number(params.get('hour')) : 8;
+    await startFreeRunSafe({ x, z, heading, startTime: 'morning', startHour });
     if (params.get('autopilot') === '1') {
       engine.events.emit('ui:autopilot', { enabled: true });
     }

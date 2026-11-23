@@ -296,6 +296,18 @@ export function createAtmosphere(engine) {
   scene.add(sunLight);
   scene.add(sunLight.target);
 
+  // Runner headlamp (SpotLight on medium/high/ultra, cheap PointLight on low tier)
+  const headlampSpot = new THREE.SpotLight(0xfff4df, 0, 65, Math.PI * 0.26, 0.58, 1.25);
+  headlampSpot.castShadow = false;
+  headlampSpot.visible = false;
+  scene.add(headlampSpot);
+  scene.add(headlampSpot.target);
+
+  const headlampCheap = new THREE.PointLight(0xfff4df, 0, 34, 1.3);
+  headlampCheap.castShadow = false;
+  headlampCheap.visible = false;
+  scene.add(headlampCheap);
+
   // Rain streaks (GPU instanced, 1 draw call)
   const rainCount = 900;
   const quadGeo = new THREE.PlaneGeometry(1, 1);
@@ -412,24 +424,43 @@ export function createAtmosphere(engine) {
   let lightningFlash = 0;
   let boltVisibleTimer = 0;
 
+  const denverFmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Denver',
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+
+  function projectToMidJulyTelluride(d) {
+    // Keep explicit July dates untouched; otherwise project Telluride local clock onto July 15 (MDT = UTC-6)
+    if (d.getUTCFullYear() === 2026 && d.getUTCMonth() === 6) return d;
+    const parts = denverFmt.formatToParts(d);
+    let hh = 12, mm = 0, ss = 0;
+    for (const p of parts) {
+      if (p.type === 'hour') hh = Number(p.value) % 24;
+      else if (p.type === 'minute') mm = Number(p.value);
+      else if (p.type === 'second') ss = Number(p.value);
+    }
+    return new Date(Date.UTC(2026, 6, 15, hh + 6, mm, ss, d.getMilliseconds()));
+  }
+
   function setTimeOfDay(date) {
     if (date instanceof Date && !Number.isNaN(date.getTime())) {
-      overrideDate = date;
-      overrideTimestampMs = date.getTime();
+      overrideDate = projectToMidJulyTelluride(date);
+      overrideTimestampMs = overrideDate.getTime();
       overrideSetAtPerf = performance.now();
-    } else if (typeof date === 'number') {
-      // Allow hour-of-day shortcut in Telluride local time (MDT/MST approx UTC-6)
-      const d = new Date();
-      const wholeH = Math.floor(date);
-      const mins = Math.round((date - wholeH) * 60);
-      d.setUTCHours((wholeH + 6) % 24, mins, 0, 0);
-      overrideDate = d;
-      overrideTimestampMs = d.getTime();
+    } else if (typeof date === 'number' && Number.isFinite(date)) {
+      const hNorm = ((date % 24) + 24) % 24;
+      const wholeH = Math.floor(hNorm);
+      const mins = Math.floor((hNorm - wholeH) * 60);
+      const secs = Math.round(((hNorm - wholeH) * 60 - mins) * 60);
+      overrideDate = new Date(Date.UTC(2026, 6, 15, wholeH + 6, mins, secs, 0));
+      overrideTimestampMs = overrideDate.getTime();
       overrideSetAtPerf = performance.now();
     } else {
       overrideDate = null;
     }
-    lastEnvSunY = -99; // trigger env refresh
   }
 
   function setWeather({ monsoon, rain, cloudCover } = {}) {
@@ -471,20 +502,21 @@ export function createAtmosphere(engine) {
   // Scratch vectors/colors (zero per-frame allocations)
   const _daySun = new THREE.Color(0xfff3de);
   const _goldSun = new THREE.Color(0xff8e47);
-  const _moonCol = new THREE.Color(0x88a2cc);
+  const _moonCol = new THREE.Color(0x9cb8e8);
   const _daySky = new THREE.Color(0x74a3dc);
   const _twilightSky = new THREE.Color(0x6c6596);
-  const _nightSky = new THREE.Color(0x1e2c4a);
+  const _nightSky = new THREE.Color(0x2e436e);
   const _stormSky = new THREE.Color(0x454f5e);
   const _dayHorizon = new THREE.Color(0xb8d0e8);
   const _goldHorizon = new THREE.Color(0xdf9570);
-  const _nightHorizon = new THREE.Color(0x1f2d47);
+  const _nightHorizon = new THREE.Color(0x26395c);
   const _stormHorizon = new THREE.Color(0x525d6d);
   const _dayFog = new THREE.Color(0xa6c1de);
   const _stormFog = new THREE.Color(0x596472);
   const _groundDay = new THREE.Color(0x444b39);
-  const _groundNight = new THREE.Color(0x161f2e);
+  const _groundNight = new THREE.Color(0x222c3f);
   const _lightDir = new THREE.Vector3();
+  const _camFwd = new THREE.Vector3();
 
   function spawnLightningBolt(anchorPos) {
     const angle = Math.random() * Math.PI * 2;
@@ -552,10 +584,10 @@ export function createAtmosphere(engine) {
     }
     uniforms.uLightningFlash.value = lightningFlash;
 
-    // Real astronomical Sun + Moon for Telluride
+    // Real astronomical Sun + Moon for mid-July Telluride
     const now = overrideDate
       ? new Date(overrideTimestampMs + (performance.now() - overrideSetAtPerf))
-      : new Date();
+      : projectToMidJulyTelluride(new Date());
     const astro = getCelestialPositions(now);
 
     uniforms.uSunDir.value.set(astro.sunDir.x, astro.sunDir.y, astro.sunDir.z).normalize();
@@ -604,19 +636,52 @@ export function createAtmosphere(engine) {
     // Update Three.js scene lights
     hemiLight.color.copy(uniforms.uSkyAmbientColor.value);
     hemiLight.groundColor.copy(uniforms.uGroundAmbientColor.value);
-    hemiLight.intensity = (0.42 + 0.56 * day + lightningFlash * 1.4) * (1 - rainAmt * 0.25);
+    hemiLight.intensity = (0.62 + 0.40 * day + lightningFlash * 1.4) * (1 - rainAmt * 0.25);
 
     const anchor = playerPos || engine.camera.position;
     if (sunY > -0.03) {
       _lightDir.copy(uniforms.uSunDir.value);
       sunLight.color.copy(uniforms.uSunColor.value);
-      sunLight.intensity = (0.2 + 2.5 * THREE.MathUtils.smoothstep(sunY, -0.03, 0.20)) * (1 - rainAmt * 0.72) + lightningFlash * 2.5;
+      sunLight.intensity = (0.28 + 2.4 * THREE.MathUtils.smoothstep(sunY, -0.03, 0.20)) * (1 - rainAmt * 0.72) + lightningFlash * 2.5;
     } else {
       _lightDir.copy(uniforms.uMoonDir.value);
-      if (_lightDir.y < 0.12) _lightDir.y = 0.12;
+      if (_lightDir.y < 0.28) _lightDir.y = 0.28;
       _lightDir.normalize();
       sunLight.color.copy(_moonCol);
-      sunLight.intensity = (0.18 + 0.35 * astro.moonPhase) * (1 - rainAmt * 0.7) + lightningFlash * 2.5;
+      sunLight.intensity = (0.48 + 0.32 * astro.moonPhase) * (1 - rainAmt * 0.55) + lightningFlash * 2.5;
+    }
+
+    // Runner headlamp (auto at dusk/night, SpotLight on medium+, cheap PointLight on low tier)
+    const headlampAmt = 1.0 - THREE.MathUtils.smoothstep(sunY, -0.04, 0.06);
+    if (headlampAmt > 0.02) {
+      engine.camera.getWorldDirection(_camFwd);
+      _camFwd.y = 0;
+      if (_camFwd.lengthSq() < 0.001) _camFwd.set(0, 0, -1);
+      _camFwd.normalize();
+
+      if (engine.quality.tier === 'low') {
+        headlampSpot.visible = false;
+        headlampCheap.visible = true;
+        headlampCheap.intensity = 2.6 * headlampAmt;
+        headlampCheap.position.set(
+          anchor.x + _camFwd.x * 3.5,
+          anchor.y + 1.8,
+          anchor.z + _camFwd.z * 3.5
+        );
+      } else {
+        headlampCheap.visible = false;
+        headlampSpot.visible = true;
+        headlampSpot.intensity = 5.5 * headlampAmt;
+        headlampSpot.position.set(anchor.x, anchor.y + 1.65, anchor.z);
+        headlampSpot.target.position.set(
+          anchor.x + _camFwd.x * 16,
+          anchor.y - 1.2,
+          anchor.z + _camFwd.z * 16
+        );
+      }
+    } else {
+      headlampSpot.visible = false;
+      headlampCheap.visible = false;
     }
 
     // Snap directional shadow target to texel grid to eliminate shadow edge shimmer
@@ -652,6 +717,9 @@ export function createAtmosphere(engine) {
     scene.remove(hemiLight);
     scene.remove(sunLight);
     scene.remove(sunLight.target);
+    scene.remove(headlampSpot);
+    scene.remove(headlampSpot.target);
+    scene.remove(headlampCheap);
     scene.remove(rainMesh);
     scene.remove(boltLine);
     skyGeo.dispose();

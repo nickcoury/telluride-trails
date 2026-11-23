@@ -204,6 +204,16 @@ export const FOOD_CATALOG = {
   bacon: { label: 'Bacon', icon: '🥓', hint: 'Ultra luxury' },
 };
 
+export const START_TIME_OPTIONS = [
+  { id: 'morning', label: 'Morning (8:00 AM)', hour: 8.0 },
+  { id: 'dawn', label: 'Dawn (5:45 AM)', hour: 5.75 },
+  { id: 'midday', label: 'Midday (12:30 PM)', hour: 12.5 },
+  { id: 'afternoon', label: 'Afternoon (Monsoon o’clock)', hour: 15.0 },
+  { id: 'golden', label: 'Golden Hour (6:45 PM)', hour: 18.75 },
+  { id: 'night', label: 'Night (Headlamp)', hour: 22.0 },
+  { id: 'realtime', label: 'Right now (Real clock)', hour: null },
+];
+
 export const AID_SNACKS = [
   { key: 'gel', ...FOOD_CATALOG.gel },
   { key: 'pbj', ...FOOD_CATALOG.pbj },

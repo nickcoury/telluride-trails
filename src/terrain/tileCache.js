@@ -203,9 +203,10 @@ export function createTileCache({ engine, manifests, tierConfig }) {
 
   function processUploads(limit = config.uploadsPerFrame) {
     const start = performance.now();
+    const timeBudgetMs = limit <= 2 ? 2.5 : 3.5;
     let count = 0;
     while (uploadQueue.length > 0 && count < limit) {
-      if (count > 0 && performance.now() - start > 4.0) break;
+      if (count > 0 && performance.now() - start > timeBudgetMs) break;
       const { job, msg } = uploadQueue.shift();
 
       if (cache.has(job.key)) {
@@ -316,7 +317,7 @@ export function createTileCache({ engine, manifests, tierConfig }) {
     if (totalBytes <= config.lruMaxBytes) return;
     for (const [key, entry] of cache) {
       if (totalBytes <= config.lruMaxBytes * 0.88) break;
-      if (entry.z <= 10 || (pinnedKeys && pinnedKeys.has(key))) continue;
+      if (entry.z <= 9 || (pinnedKeys && pinnedKeys.has(key))) continue;
       cache.delete(key);
       totalBytes -= entry.bytes;
       if (entry.texture) entry.texture.dispose();

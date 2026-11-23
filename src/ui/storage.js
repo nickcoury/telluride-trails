@@ -7,10 +7,13 @@ export const DEFAULT_SETTINGS = Object.freeze({
   renderScale: 1.0,
   audio: true,
   volume: 0.75,
+  musicVolume: 0.65,
+  sfxVolume: 0.85,
   touchControls: 'auto', // 'auto' | 'always' | 'off'
   haptics: true,
   invertY: false,
   lookSensitivity: 1.0,
+  freeRunStartTime: 'morning',
 });
 
 /**

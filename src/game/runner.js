@@ -124,14 +124,6 @@ export function createRunnerCharacter() {
   lampLens.position.set(0, 0.225, -0.13);
   headGroup.add(lampLens);
 
-  const headlampLight = new THREE.SpotLight(0xfff7dc, 0, 42, Math.PI * 0.24, 0.55, 1.4);
-  headlampLight.position.set(0, 0.225, -0.14);
-  const headlampTarget = new THREE.Object3D();
-  headlampTarget.position.set(0, -0.6, -12);
-  headGroup.add(headlampLight);
-  headGroup.add(headlampTarget);
-  headlampLight.target = headlampTarget;
-
   // Arms
   function makeArm(side) {
     const shoulder = new THREE.Group();
@@ -240,10 +232,9 @@ export function createRunnerCharacter() {
     root.visible = visible;
     idleTime += dt;
 
-    // Headlamp toggle at night
+    // Headlamp lens glow at night (world module handles the scene headlamp light)
     const lampOn = Boolean(nightMode && allowHeadlamp);
-    headlampLight.intensity = lampOn ? 3.2 : 0;
-    lampLensMat.emissiveIntensity = lampOn ? 2.5 : 0;
+    lampLensMat.emissiveIntensity = lampOn ? 3.0 : 0;
 
     if (!visible) return 0;
 

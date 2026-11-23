@@ -57,9 +57,13 @@ export async function loadManifests(assetsBase = '/') {
   return Object.fromEntries(entries);
 }
 
+export function getHorizonBounds(manifests) {
+  return manifests?.terrain?.horizon?.bounds || manifests?.imagery?.horizon?.bounds || REGION_BOUNDS;
+}
+
 /**
  * Resolve fetch URL for a tile, preferring local manifest assets and falling back
- * to remote Terrarium/USGS endpoints when local data is absent or outside local bbox.
+ * to remote Terrarium/USGS endpoints only when local manifests are absent.
  * @returns {{ url: string, source: 'local'|'remote', ext: string } | null}
  */
 export function resolveTileSource(kind, z, x, y, manifests, assetsBase = '/') {
@@ -68,7 +72,6 @@ export function resolveTileSource(kind, z, x, y, manifests, assetsBase = '/') {
 
   const base = assetsBase.endsWith('/') ? assetsBase : `${assetsBase}/`;
   const manifest = manifests?.[kind] || null;
-  const { lon, lat } = tileCenterLonLat(z, x, y);
 
   if (manifest) {
     if (manifestHasTile(manifest, z, x, y)) {
@@ -79,18 +82,13 @@ export function resolveTileSource(kind, z, x, y, manifests, assetsBase = '/') {
         ext,
       };
     }
-    // Inside local manifest bbox: do not hit remote for absent corridor/zoom tiles;
-    // quadtree will naturally use the resident parent zoom from local data.
-    if (inBounds(lon, lat, manifest.bounds) && z >= (manifest.minZoom ?? 8)) {
-      return null;
-    }
+    // Local manifest is authoritative: quadtree falls back to resident parent zoom
+    return null;
   }
 
   if (!TERRAIN_SOURCES.allowRemoteFallback) return null;
+  const { lon, lat } = tileCenterLonLat(z, x, y);
   if (!inBounds(lon, lat, REGION_BOUNDS)) return null;
-
-  // Outside local manifest bbox (distant 60km horizon ring), cap remote fetches at z <= 12
-  if (manifest && z > 12) return null;
 
   if (kind === 'terrain') {
     return { url: TERRAIN_SOURCES.remoteTerrainUrl(z, x, y), source: 'remote', ext: 'png' };

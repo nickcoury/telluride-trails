@@ -43,6 +43,7 @@ export function createTerrain(engine) {
       manifests.imagery = loaded.imagery;
       manifests.cover = loaded.cover;
       manifestsReady = true;
+      quadtree.refreshBounds(manifests);
     })
     .catch((err) => {
       console.warn('[terrain] manifest load error, using remote fallback:', err);
@@ -79,6 +80,7 @@ export function createTerrain(engine) {
 
   function update(cameraPos) {
     if (disposed || !manifestsReady) return;
+    if (engine.getAppState?.() === 'title') return;
     quadtree.update(cameraPos);
   }
 

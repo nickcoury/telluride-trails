@@ -17,28 +17,28 @@ export const TERRAIN_SOURCES = {
     `https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/${z}/${y}/${x}`,
 };
 
-// Region covering Telluride + San Juans + 60 km skyline margin
+// Region covering Telluride + San Juans + 110 km skyline ring (matches terraindata horizon bounds)
 export const REGION_BOUNDS = {
-  west: -108.55,
-  south: 37.25,
-  east: -106.75,
-  north: 38.55,
+  west: -109.05,
+  south: 36.95,
+  east: -106.55,
+  north: 38.9,
 };
 
 // Base elevation bounds (meters) used for conservative AABB before a tile loads
-export const DEFAULT_MIN_ELEV_M = 1950;
+export const DEFAULT_MIN_ELEV_M = 1800;
 export const DEFAULT_MAX_ELEV_M = 4450;
 
 export const TERRAIN_TIER_CONFIG = {
   low: {
     patchGridSize: 24,
     minQuadZoom: 9,
-    maxQuadZoom: 14,
+    maxQuadZoom: 15,
     maxTerrainZoom: 14,
     maxImageryZoom: 14,
     maxCoverZoom: 13,
-    lodDistanceFactor: 1.35,
-    detailDrawDistance: 18000,
+    lodDistanceFactor: 1.25,
+    detailDrawDistance: 16000,
     horizonDrawDistance: 62000,
     detailLayers: 1, // lightweight albedo modulation only
     useNormalMaps: false,
@@ -56,7 +56,7 @@ export const TERRAIN_TIER_CONFIG = {
     maxTerrainZoom: 14,
     maxImageryZoom: 15,
     maxCoverZoom: 14,
-    lodDistanceFactor: 1.55,
+    lodDistanceFactor: 1.5,
     detailDrawDistance: 34000,
     horizonDrawDistance: 66000,
     detailLayers: 2,
@@ -71,11 +71,11 @@ export const TERRAIN_TIER_CONFIG = {
   high: {
     patchGridSize: 48,
     minQuadZoom: 9,
-    maxQuadZoom: 15,
+    maxQuadZoom: 16,
     maxTerrainZoom: 15,
     maxImageryZoom: 16,
     maxCoverZoom: 14,
-    lodDistanceFactor: 1.75,
+    lodDistanceFactor: 1.65,
     detailDrawDistance: 52000,
     horizonDrawDistance: 72000,
     detailLayers: 3,
@@ -90,13 +90,13 @@ export const TERRAIN_TIER_CONFIG = {
   ultra: {
     patchGridSize: 48,
     minQuadZoom: 9,
-    maxQuadZoom: 16,
+    maxQuadZoom: 17,
     maxTerrainZoom: 15,
     maxImageryZoom: 17,
     maxCoverZoom: 14,
-    lodDistanceFactor: 2.05,
+    lodDistanceFactor: 1.9,
     detailDrawDistance: 68000,
-    horizonDrawDistance: 78000,
+    horizonDrawDistance: 85000,
     detailLayers: 3,
     useNormalMaps: true,
     useTriplanar: true,

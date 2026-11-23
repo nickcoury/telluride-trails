@@ -32,6 +32,12 @@ export function createUI(engine, { trailData, game, terrain } = {}) {
     }
   }
   engine.events.emit('ui:settings', { ...settings });
+  engine.events.emit('ui:audio', {
+    master: settings.volume ?? 0.75,
+    music: settings.musicVolume ?? 0.65,
+    sfx: settings.sfxVolume ?? 0.85,
+    muted: !settings.audio,
+  });
 
   const getSettings = () => settings;
 
@@ -61,6 +67,12 @@ export function createUI(engine, { trailData, game, terrain } = {}) {
     onUpdateSettings: (patch) => {
       settings = saveSettings(patch);
       engine.events.emit('ui:settings', { ...settings });
+  engine.events.emit('ui:audio', {
+    master: settings.volume ?? 0.75,
+    music: settings.musicVolume ?? 0.65,
+    sfx: settings.sfxVolume ?? 0.85,
+    muted: !settings.audio,
+  });
       touchControls.syncTouchVisibility();
       hud.refreshUnits();
       screens.refresh();
@@ -118,18 +130,23 @@ export function createUI(engine, { trailData, game, terrain } = {}) {
     game,
     pwa,
     getSettings,
+    onSaveStartTime: (freeRunStartTime) => {
+      settings = saveSettings({ freeRunStartTime });
+    },
     onStartFreeRun: (loc) => {
       lastRaceId = null;
       const x = loc.x ?? 0;
       const z = loc.z ?? 0;
       const heading = loc.heading ?? 0;
+      const startTime = loc.startTime || settings.freeRunStartTime || 'morning';
+      const startHour = loc.startHour;
       preloadAndLaunch({
         x,
         z,
         stageLabel: `Preloading ${loc.name || 'San Juan trailhead'}…`,
         launchFn: () => {
-          game.startFreeRun({ x, z, heading });
-          engine.events.emit('ui:freerun', { x, z, heading });
+          game.startFreeRun({ x, z, heading, startTime, startHour });
+          engine.events.emit('ui:freerun', { x, z, heading, startTime, startHour });
         },
       });
     },

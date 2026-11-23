@@ -164,10 +164,26 @@ export function createDialogs({ container, engine, getSettings, onUpdateSettings
 
       <div class="tt-field-group">
         <div class="tt-field-row">
-          <label class="tt-field-label" for="set-vol">Audio Volume</label>
+          <label class="tt-field-label" for="set-vol">Master Volume</label>
           <span class="tt-field-val" id="set-vol-val">75%</span>
         </div>
         <input id="set-vol" class="tt-range" type="range" min="0" max="1" step="0.05" value="0.75" />
+      </div>
+
+      <div class="tt-field-group">
+        <div class="tt-field-row">
+          <label class="tt-field-label" for="set-music">Menu Music Volume</label>
+          <span class="tt-field-val" id="set-music-val">65%</span>
+        </div>
+        <input id="set-music" class="tt-range" type="range" min="0" max="1" step="0.05" value="0.65" />
+      </div>
+
+      <div class="tt-field-group">
+        <div class="tt-field-row">
+          <label class="tt-field-label" for="set-sfx">Trail &amp; UI SFX Volume</label>
+          <span class="tt-field-val" id="set-sfx-val">85%</span>
+        </div>
+        <input id="set-sfx" class="tt-range" type="range" min="0" max="1" step="0.05" value="0.85" />
       </div>
 
       <label class="tt-toggle">
@@ -307,6 +323,10 @@ export function createDialogs({ container, engine, getSettings, onUpdateSettings
   const audioCheck = settingsDlg.querySelector('#set-audio');
   const volInput = settingsDlg.querySelector('#set-vol');
   const volVal = settingsDlg.querySelector('#set-vol-val');
+  const musicInput = settingsDlg.querySelector('#set-music');
+  const musicVal = settingsDlg.querySelector('#set-music-val');
+  const sfxInput = settingsDlg.querySelector('#set-sfx');
+  const sfxVal = settingsDlg.querySelector('#set-sfx-val');
   const hapticsCheck = settingsDlg.querySelector('#set-haptics');
   const invertCheck = settingsDlg.querySelector('#set-invert');
   const sensInput = settingsDlg.querySelector('#set-sens');
@@ -333,13 +353,40 @@ export function createDialogs({ container, engine, getSettings, onUpdateSettings
     engine.events.emit('ui:quality', { renderScale: val });
   });
 
+  function emitAudioPatch(s) {
+    engine.events.emit('ui:audio', {
+      master: s.volume ?? 0.75,
+      music: s.musicVolume ?? 0.65,
+      sfx: s.sfxVolume ?? 0.85,
+      muted: !s.audio,
+    });
+  }
+
   audioCheck.addEventListener('change', () => {
+    const next = { ...getSettings(), audio: audioCheck.checked };
     onUpdateSettings?.({ audio: audioCheck.checked });
+    emitAudioPatch(next);
   });
   volInput.addEventListener('input', () => {
     const v = Number(volInput.value);
     volVal.textContent = `${Math.round(v * 100)}%`;
+    const next = { ...getSettings(), volume: v };
     onUpdateSettings?.({ volume: v });
+    emitAudioPatch(next);
+  });
+  musicInput.addEventListener('input', () => {
+    const v = Number(musicInput.value);
+    musicVal.textContent = `${Math.round(v * 100)}%`;
+    const next = { ...getSettings(), musicVolume: v };
+    onUpdateSettings?.({ musicVolume: v });
+    emitAudioPatch(next);
+  });
+  sfxInput.addEventListener('input', () => {
+    const v = Number(sfxInput.value);
+    sfxVal.textContent = `${Math.round(v * 100)}%`;
+    const next = { ...getSettings(), sfxVolume: v };
+    onUpdateSettings?.({ sfxVolume: v });
+    emitAudioPatch(next);
   });
   hapticsCheck.addEventListener('change', () => {
     onUpdateSettings?.({ haptics: hapticsCheck.checked });
@@ -368,6 +415,10 @@ export function createDialogs({ container, engine, getSettings, onUpdateSettings
     audioCheck.checked = Boolean(s.audio);
     volInput.value = String(s.volume ?? 0.75);
     volVal.textContent = `${Math.round((s.volume ?? 0.75) * 100)}%`;
+    musicInput.value = String(s.musicVolume ?? 0.65);
+    musicVal.textContent = `${Math.round((s.musicVolume ?? 0.65) * 100)}%`;
+    sfxInput.value = String(s.sfxVolume ?? 0.85);
+    sfxVal.textContent = `${Math.round((s.sfxVolume ?? 0.85) * 100)}%`;
     hapticsCheck.checked = Boolean(s.haptics);
     invertCheck.checked = Boolean(s.invertY);
     sensInput.value = String(s.lookSensitivity ?? 1.0);

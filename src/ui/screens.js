@@ -1,5 +1,6 @@
 import { createElevationChart } from './elevChart.js';
 import {
+  START_TIME_OPTIONS,
   TRIVIA,
   fmtClock,
   fmtDist,
@@ -33,6 +34,7 @@ export function createScreens({
   game,
   pwa,
   getSettings,
+  onSaveStartTime,
   onStartFreeRun,
   onStartRace,
   onResumeSaved,
@@ -121,9 +123,17 @@ export function createScreens({
           <p class="confirm-sheet__meta" data-confirm="meta"></p>
           <p class="confirm-sheet__desc" data-confirm="desc" hidden></p>
         </div>
-        <div class="confirm-sheet__actions">
-          <button type="button" class="btn btn--ghost btn--sm" data-confirm="cancel">Cancel</button>
-          <button type="button" class="btn btn--primary" data-confirm="go">Start Run →</button>
+        <div class="confirm-sheet__controls">
+          <label class="confirm-sheet__time">
+            <span>Start time</span>
+            <select id="confirm-start-time" class="tt-select tt-select--sm">
+              ${START_TIME_OPTIONS.map((o) => `<option value="${o.id}">${o.label}</option>`).join('')}
+            </select>
+          </label>
+          <div class="confirm-sheet__actions">
+            <button type="button" class="btn btn--ghost btn--sm" data-confirm="cancel">Cancel</button>
+            <button type="button" class="btn btn--primary" data-confirm="go">Start Run →</button>
+          </div>
         </div>
       </aside>
     </section>
@@ -170,6 +180,7 @@ export function createScreens({
   const pickerMapPane = root.querySelector('.picker-map-pane');
   const pickerBody = root.querySelector('.picker-body');
   const confirmSheet = root.querySelector('.confirm-sheet');
+  const startTimeSelect = root.querySelector('#confirm-start-time');
   const racesGridEl = root.querySelector('.races-grid');
 
   const loadingStageEl = root.querySelector('[data-loading="stage"]');
@@ -237,6 +248,8 @@ export function createScreens({
       descEl.textContent = '';
       descEl.hidden = true;
     }
+    const savedTime = getSettings()?.freeRunStartTime || 'morning';
+    startTimeSelect.value = START_TIME_OPTIONS.some((o) => o.id === savedTime) ? savedTime : 'morning';
     confirmSheet.hidden = false;
   }
 
@@ -495,10 +508,21 @@ export function createScreens({
     renderPOIs();
   });
 
+  startTimeSelect.addEventListener('change', () => {
+    onSaveStartTime?.(startTimeSelect.value);
+  });
+
   confirmSheet.querySelector('[data-confirm="cancel"]').addEventListener('click', hideConfirmSheet);
   confirmSheet.querySelector('[data-confirm="go"]').addEventListener('click', () => {
     if (!pickedLocation) return;
-    const loc = { ...pickedLocation };
+    const chosenId = startTimeSelect.value || 'morning';
+    const opt = START_TIME_OPTIONS.find((o) => o.id === chosenId) || START_TIME_OPTIONS[0];
+    onSaveStartTime?.(chosenId);
+    const loc = {
+      ...pickedLocation,
+      startTime: opt.id,
+      startHour: opt.hour,
+    };
     hideConfirmSheet();
     onStartFreeRun?.(loc);
   });

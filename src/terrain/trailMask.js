@@ -6,7 +6,7 @@ import { tileBoundsWorld } from '../core/geo.js';
  * for crisp, zero-z-fighting dirt ribbons directly in the terrain shader.
  */
 export function createTrailMaskManager({ engine }) {
-  const MAX_MASKS = 20;
+  const MAX_MASKS = 28;
   const MASK_SIZE = 512;
 
   const segments = []; // { id, minX, maxX, minZ, maxZ, widthM, strength, coords }
@@ -55,9 +55,10 @@ export function createTrailMaskManager({ engine }) {
     }
 
     const kind = item.kind || 'trail';
-    const defaultW = kind === 'road' ? 6.0 : kind === 'track' ? 3.8 : 2.2;
-    const widthM = Math.max(1.8, item.widthM || defaultW);
-    const strength = kind === 'road' ? 1.0 : kind === 'track' ? 0.9 : 0.82;
+    const isPaved = kind === 'road' && /asphalt|paved|concrete/i.test(item.surface || '');
+    const defaultW = kind === 'road' ? 5.2 : kind === 'track' ? 3.5 : 2.1;
+    const widthM = Math.max(1.6, item.widthM || defaultW);
+    const strength = isPaved ? 0.36 : kind === 'road' ? 0.92 : kind === 'track' ? 0.88 : 0.84;
 
     segments.push({
       id,
@@ -128,7 +129,7 @@ export function createTrailMaskManager({ engine }) {
     for (let h = 0; h < hits.length; h++) {
       const seg = hits[h];
       const c = seg.coords;
-      const pxWidth = Math.max(1.75, seg.widthM * pxPerM);
+      const pxWidth = Math.max(1.25, seg.widthM * pxPerM);
 
       // Soft shoulder pass
       ctx.beginPath();
@@ -138,8 +139,8 @@ export function createTrailMaskManager({ engine }) {
         if (i === 0) ctx.moveTo(px, py);
         else ctx.lineTo(px, py);
       }
-      ctx.strokeStyle = `rgba(255,255,255,${(seg.strength * 0.45).toFixed(2)})`;
-      ctx.lineWidth = pxWidth * 1.8;
+      ctx.strokeStyle = `rgba(255,255,255,${(seg.strength * 0.42).toFixed(2)})`;
+      ctx.lineWidth = pxWidth * 1.65;
       ctx.stroke();
 
       // Core ribbon pass

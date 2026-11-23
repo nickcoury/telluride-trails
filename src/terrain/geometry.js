@@ -13,6 +13,7 @@ export function createPatchGeometry(N = 48) {
   const totalVerts = surfaceVertCount + skirtVertCount;
 
   const positions = new Float32Array(totalVerts * 3);
+  const normals = new Float32Array(totalVerts * 3);
   const gridCoords = new Float32Array(totalVerts * 2);
   const skirts = new Float32Array(totalVerts);
 
@@ -24,6 +25,7 @@ export function createPatchGeometry(N = 48) {
       positions[vIdx * 3] = u;
       positions[vIdx * 3 + 1] = 0;
       positions[vIdx * 3 + 2] = v;
+      normals[vIdx * 3 + 1] = 1;
       gridCoords[vIdx * 2] = gx;
       gridCoords[vIdx * 2 + 1] = gz;
       skirts[vIdx] = 0;
@@ -36,6 +38,7 @@ export function createPatchGeometry(N = 48) {
   for (let gx = 0; gx < vertsPerSide; gx++) {
     const src = gx;
     positions.set(positions.subarray(src * 3, src * 3 + 3), vIdx * 3);
+    normals[vIdx * 3 + 1] = 1;
     gridCoords.set(gridCoords.subarray(src * 2, src * 2 + 2), vIdx * 2);
     skirts[vIdx] = 1;
     vIdx++;
@@ -45,6 +48,7 @@ export function createPatchGeometry(N = 48) {
   for (let gx = 0; gx < vertsPerSide; gx++) {
     const src = gridSegs * vertsPerSide + gx;
     positions.set(positions.subarray(src * 3, src * 3 + 3), vIdx * 3);
+    normals[vIdx * 3 + 1] = 1;
     gridCoords.set(gridCoords.subarray(src * 2, src * 2 + 2), vIdx * 2);
     skirts[vIdx] = 1;
     vIdx++;
@@ -54,6 +58,7 @@ export function createPatchGeometry(N = 48) {
   for (let gz = 0; gz < vertsPerSide; gz++) {
     const src = gz * vertsPerSide;
     positions.set(positions.subarray(src * 3, src * 3 + 3), vIdx * 3);
+    normals[vIdx * 3 + 1] = 1;
     gridCoords.set(gridCoords.subarray(src * 2, src * 2 + 2), vIdx * 2);
     skirts[vIdx] = 1;
     vIdx++;
@@ -63,6 +68,7 @@ export function createPatchGeometry(N = 48) {
   for (let gz = 0; gz < vertsPerSide; gz++) {
     const src = gz * vertsPerSide + gridSegs;
     positions.set(positions.subarray(src * 3, src * 3 + 3), vIdx * 3);
+    normals[vIdx * 3 + 1] = 1;
     gridCoords.set(gridCoords.subarray(src * 2, src * 2 + 2), vIdx * 2);
     skirts[vIdx] = 1;
     vIdx++;
@@ -148,6 +154,7 @@ export function createPatchGeometry(N = 48) {
 
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
   geo.setAttribute('aGridCoord', new THREE.BufferAttribute(gridCoords, 2));
   geo.setAttribute('aSkirt', new THREE.BufferAttribute(skirts, 1));
   geo.setIndex(new THREE.BufferAttribute(indices, 1));

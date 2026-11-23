@@ -1,6 +1,7 @@
 // Main gameplay module for Telluride Trails.
 // Implements PLAN.md createGame(engine, terrain, trailData, world) contract.
 
+import { lonLatToWorld } from '../core/geo.js';
 import {
   ACHIEVEMENTS,
   ALT_PENALTY_START_FT,
@@ -165,7 +166,7 @@ export function createGame(engine, terrain, trailData, world) {
       isKissingRock: raceMgr.isCeremony(),
       nightMode: isNight,
       visible: state.mode !== 'idle' && !isFp,
-      allowHeadlamp: engine.quality?.tier !== 'low',
+      allowHeadlamp: true,
     });
 
     if (hardrockRock.visible) {
@@ -223,6 +224,7 @@ export function createGame(engine, terrain, trailData, world) {
       vertLossM: state.vertLossM,
       elapsedRunS,
       maxElevFt,
+      simEpochMs: weather.getDenverClock().epochMs,
       timeDilated: state.timeDilated,
       finished: state.finished,
       dnf: state.dnf,
@@ -231,7 +233,26 @@ export function createGame(engine, terrain, trailData, world) {
     });
   }
 
-  function startFreeRun({ x = 0, z = 0, heading = 0 } = {}) {
+  const START_TIME_KEY = 'telluride_trails.startTime.v1';
+  function resolveFreeRunStartTime(startTime, startHour) {
+    let spec = null;
+    if (typeof startHour === 'number' && Number.isFinite(startHour)) {
+      spec = startHour;
+    } else if (startTime === 'realtime') {
+      spec = 'now';
+    } else if (startTime) {
+      spec = startTime;
+    }
+    if (startTime) {
+      try { localStorage.setItem(START_TIME_KEY, String(startTime)); } catch {}
+    } else if (spec === null) {
+      try { spec = localStorage.getItem(START_TIME_KEY) || 'morning'; } catch { spec = 'morning'; }
+    }
+    weather.setStartTime(spec ?? 'morning');
+    lastLocalClock = weather.getDenverClock();
+  }
+
+  function startFreeRun({ x = 0, z = 0, heading = 0, startTime, startHour } = {}) {
     clearSavedRun();
     raceMgr.clear();
     hardrockRock.visible = false;
@@ -241,8 +262,9 @@ export function createGame(engine, terrain, trailData, world) {
     state.timeDilated = timeScale > 1;
     resetRunMetrics(x, z, heading);
     ensureVectorArea(x, z);
+    resolveFreeRunStartTime(startTime, startHour);
 
-    syncRunnerVisuals(0.016, weather.getDenverClock().isNight);
+    syncRunnerVisuals(0.016, lastLocalClock.isNight);
     engine.cameraRig?.snapTo?.({ x: state.x, y: state.y, z: state.z }, state.heading);
     engine.setAppState?.('playing');
     emitHud(null, false);
@@ -273,13 +295,15 @@ export function createGame(engine, terrain, trailData, world) {
 
     resetRunMetrics(sx, sz, heading);
     ensureVectorArea(sx, sz);
+    weather.setStartTime(race.startTimeLocal || '06:00');
+    lastLocalClock = weather.getDenverClock();
     raceMgr.initRace(race);
     if (state.timeDilated) raceMgr.markTimeDilated();
 
     const isHardrock = (race.id || '').toLowerCase().includes('hardrock');
     hardrockRock.visible = isHardrock;
 
-    syncRunnerVisuals(0.016, weather.getDenverClock().isNight);
+    syncRunnerVisuals(0.016, lastLocalClock.isNight);
     engine.cameraRig?.snapTo?.({ x: state.x, y: state.y, z: state.z }, state.heading);
     engine.setAppState?.('playing');
     emitHud(null, false);
@@ -312,6 +336,14 @@ export function createGame(engine, terrain, trailData, world) {
     state.timeDilated = Boolean(saved.timeDilated || timeScale > 1);
     elapsedRunS = (saved.elapsedRunS ?? 0) + awayS;
     maxElevFt = saved.maxElevFt ?? (smoothY * M_TO_FT);
+    if (saved.simEpochMs) {
+      weather.setSimEpochMs(saved.simEpochMs + awayS * 1000);
+    } else {
+      weather.setStartTime('morning');
+      weather.advanceSimClock(elapsedRunS);
+      weather.syncWorldClock(true);
+    }
+    lastLocalClock = weather.getDenverClock();
     phys = { ...createPhysiology(), ...(saved.phys || {}) };
 
     // Simulate resting physiology while away (real clock never stops!)
@@ -463,6 +495,7 @@ export function createGame(engine, terrain, trailData, world) {
       elevM: surfEval.elevM,
       surface: surfEval.surface,
       elapsedRunS,
+      timeScale,
     });
     lastLocalClock = weatherState.clock;
 
@@ -1024,6 +1057,9 @@ export function createGame(engine, terrain, trailData, world) {
     hasSavedRun,
     getPersonalBests: loadPersonalBests,
     getAchievements: () => ({ unlocked: loadAchievements(), catalog: ACHIEVEMENTS }),
+    getDefaultStartTime: () => {
+      try { return localStorage.getItem(START_TIME_KEY) || 'morning'; } catch { return 'morning'; }
+    },
     // Dev / Playtest hooks
     teleport,
     teleportLonLat(lon, lat, heading = state.heading) {
@@ -1032,7 +1068,10 @@ export function createGame(engine, terrain, trailData, world) {
       return { x, z };
     },
     setTimeScale,
-    setTimeOfDay: (h) => weather.setTimeOfDay(h),
+    setTimeOfDay: (h) => {
+      weather.setTimeOfDay(h);
+      lastLocalClock = weather.getDenverClock();
+    },
     skipToRaceDistance,
     advanceCheckpoint,
     triggerStormNow: (dur) => weather.triggerStormNow(dur),

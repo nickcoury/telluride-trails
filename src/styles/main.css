@@ -720,9 +720,32 @@
     }
   }
 
+  .confirm-sheet__controls {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .confirm-sheet__time {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--ink-secondary);
+  }
+
+  .confirm-sheet__time select {
+    flex: 1 1 auto;
+    padding: 0.35rem 0.55rem;
+    font-size: 0.82rem;
+  }
+
   .confirm-sheet__actions {
     display: flex;
     gap: 0.5rem;
+    justify-content: flex-end;
   }
 
   /* RACES GRID */
