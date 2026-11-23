@@ -1756,6 +1756,10 @@
     gap: 0.35rem;
   }
 
+  #results-dlg-title:focus {
+    outline: none;
+  }
+
   .results-badge {
     align-self: center;
     padding: 0.25rem 0.8rem;

@@ -490,7 +490,7 @@ export function createDialogs({ container, engine, getSettings, onUpdateSettings
         <div class="results-badge ${dnf ? 'results-badge--dnf' : 'results-badge--fin'}">
           ${dnf ? '⛰ DNF — Mountains Win Today' : kissed ? '🪨 Hardrock Finisher!' : isNewPb ? '🏆 New Personal Best!' : '🏔 Finisher!'}
         </div>
-        <h2 id="results-dlg-title">${raceName}</h2>
+        <h2 id="results-dlg-title" tabindex="-1" autofocus>${raceName}</h2>
         <div class="results-clock">${timeStr}</div>
         ${dilated ? '<p class="results-asterisk">* Completed with Time Dilation (non-purist finish).</p>' : ''}
         ${result?.dnfReason || result?.reason ? `<p class="results-dnf-reason">${result.dnfReason || result.reason}</p>` : ''}
@@ -542,6 +542,10 @@ export function createDialogs({ container, engine, getSettings, onUpdateSettings
     });
 
     if (!resultsDlg.open) resultsDlg.showModal();
+    const titleEl = body.querySelector('#results-dlg-title');
+    titleEl?.focus?.({ preventScroll: true });
+    resultsDlg.scrollTop = 0;
+    body.scrollTop = 0;
   }
 
   return {
