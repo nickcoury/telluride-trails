@@ -147,16 +147,18 @@ export function createDetailAssets(engine) {
 
   function loadTierTextures(tier) {
     if (disposed) return Promise.resolve();
-    const targetSize = tier === 'low' ? 256 : 512;
+    const targetAlbedoSize = tier === 'low' || tier === 'medium' ? 256 : 512;
     const needNormals = tier !== 'low';
-    const albedoDone = upgradedAlbedoSize >= targetSize;
-    const normalsDone = !needNormals || upgradedNormalSize >= targetSize;
+    // Medium uses 256px albedo + 256px normals (116 texels/m = <1cm texels, saving 12 MB VRAM on mid phones!)
+    const targetNormalSize = tier === 'medium' ? 256 : 512;
+    const albedoDone = upgradedAlbedoSize >= targetAlbedoSize;
+    const normalsDone = !needNormals || upgradedNormalSize >= targetNormalSize;
 
     if (albedoDone && normalsDone) {
       return Promise.resolve();
     }
 
-    const targetKey = `${targetSize}:${needNormals ? 1 : 0}`;
+    const targetKey = `${targetAlbedoSize}:${needNormals ? targetNormalSize : 0}`;
     if (activePromise && activeTargetKey === targetKey) {
       return activePromise;
     }
@@ -167,23 +169,22 @@ export function createDetailAssets(engine) {
     const promise = (async () => {
       try {
         const depth = LAYERS.length;
-        const layerStride = targetSize * targetSize * 4;
 
         // Fetch albedo and (when tier !== 'low') normal/roughness layers in parallel!
         const albPromise =
-          upgradedAlbedoSize < targetSize
+          upgradedAlbedoSize < targetAlbedoSize
             ? Promise.all(
                 LAYERS.map((name) =>
-                  fetchLayerPixels(`${base}assets/terrain/${name}_albedo.webp`, targetSize),
+                  fetchLayerPixels(`${base}assets/terrain/${name}_albedo.webp`, targetAlbedoSize),
                 ),
               )
             : Promise.resolve(null);
 
         const nrmPromise =
-          needNormals && upgradedNormalSize < targetSize
+          needNormals && upgradedNormalSize < targetNormalSize
             ? Promise.all(
                 LAYERS.map((name) =>
-                  fetchLayerPixels(`${base}assets/terrain/${name}_nrm_rough.webp`, targetSize),
+                  fetchLayerPixels(`${base}assets/terrain/${name}_nrm_rough.webp`, targetNormalSize),
                 ),
               )
             : Promise.resolve(null);
@@ -194,38 +195,39 @@ export function createDetailAssets(engine) {
         let changed = false;
 
         if (albLayers) {
-          const albBuf = new Uint8Array(layerStride * depth);
+          const albStride = targetAlbedoSize * targetAlbedoSize * 4;
+          const albBuf = new Uint8Array(albStride * depth);
           for (let i = 0; i < depth; i++) {
-            albBuf.set(albLayers[i], i * layerStride);
+            albBuf.set(albLayers[i], i * albStride);
           }
           const nextAlbedo = configureArrayTex(
-            new THREE.DataArrayTexture(albBuf, targetSize, targetSize, depth),
+            new THREE.DataArrayTexture(albBuf, targetAlbedoSize, targetAlbedoSize, depth),
             THREE.SRGBColorSpace,
             currentAnisotropy,
           );
           const prevAlbedo = albedoArray;
           albedoArray = nextAlbedo;
-          upgradedAlbedoSize = targetSize;
+          upgradedAlbedoSize = targetAlbedoSize;
           changed = true;
-          // Dispose previous array after notify updates uniforms
           notify();
           prevAlbedo.dispose();
           changed = false;
         }
 
         if (nrmLayers) {
-          const nrmBuf = new Uint8Array(layerStride * depth);
+          const nrmStride = targetNormalSize * targetNormalSize * 4;
+          const nrmBuf = new Uint8Array(nrmStride * depth);
           for (let i = 0; i < depth; i++) {
-            nrmBuf.set(nrmLayers[i], i * layerStride);
+            nrmBuf.set(nrmLayers[i], i * nrmStride);
           }
           const nextNrm = configureArrayTex(
-            new THREE.DataArrayTexture(nrmBuf, targetSize, targetSize, depth),
+            new THREE.DataArrayTexture(nrmBuf, targetNormalSize, targetNormalSize, depth),
             THREE.NoColorSpace,
             currentAnisotropy,
           );
           const prevNrm = nrmRoughArray;
           nrmRoughArray = nextNrm;
-          upgradedNormalSize = targetSize;
+          upgradedNormalSize = targetNormalSize;
           notify();
           prevNrm.dispose();
         } else if (changed) {

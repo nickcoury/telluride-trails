@@ -86,15 +86,20 @@ function classifyFeature(item, engine) {
  * Features spatial AABB invalidation on data:chunk and 2-frame deferred disposal.
  */
 export function createTrailMaskManager({ engine, tierConfig }) {
-  const MAX_MASKS = 48;
+  let maxMasks = tierConfig?.trailMaskMaxCount || 20;
   let maskSize = tierConfig?.trailMaskSize || 256;
 
   const segments = []; // { id, minX, maxX, minZ, maxZ, widthM, strength, category, hasSidewalk, coords }
   const seenIds = new Set();
   const maskCache = new Map(); // key -> { empty, minX, maxX, minZ, maxZ, size, canvas?, texture }
-  const pendingBuild = new Set();
+  const pendingQueue = []; // { z, x, y, coordKey }
+  let pendingHead = 0;
+  const pendingCoords = new Set(); // `${z}/${x}/${y}`
+  let drainScheduled = false;
+  let cancelDrainTask = null;
   const canvasPool = new Map(); // size -> HTMLCanvasElement[]
   const deferredRelease = []; // { entry, framesLeft }
+  let buildsThisFrame = 0;
   let disposed = false;
 
   const fallbackMaskTex = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1, THREE.RGBAFormat);
@@ -125,7 +130,7 @@ export function createTrailMaskManager({ engine, tierConfig }) {
         pool = [];
         canvasPool.set(entry.size, pool);
       }
-      if (pool.length < MAX_MASKS) pool.push(entry.canvas);
+      if (pool.length < maxMasks) pool.push(entry.canvas);
     }
   }
 
@@ -136,6 +141,7 @@ export function createTrailMaskManager({ engine, tierConfig }) {
   }
 
   function flushDeferred() {
+    buildsThisFrame = 0;
     for (let i = deferredRelease.length - 1; i >= 0; i--) {
       if (--deferredRelease[i].framesLeft <= 0) {
         releaseEntryNow(deferredRelease[i].entry);
@@ -235,6 +241,102 @@ export function createTrailMaskManager({ engine, tierConfig }) {
     ctx.stroke();
   }
 
+  function countActiveTextures() {
+    let count = 0;
+    for (const e of maskCache.values()) {
+      if (!e.empty) count++;
+    }
+    return count;
+  }
+
+  function evictOldestNonEmpty() {
+    for (const [k, e] of maskCache) {
+      if (!e.empty) {
+        releaseEntry(e);
+        maskCache.delete(k);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function putMaskCache(key, entry) {
+    const existing = maskCache.get(key);
+    if (existing) {
+      releaseEntry(existing);
+      maskCache.delete(key);
+    }
+    if (!entry.empty) {
+      while (countActiveTextures() >= maxMasks) {
+        if (!evictOldestNonEmpty()) break;
+      }
+    }
+    const maxTotalEntries = maxMasks * 3;
+    while (maskCache.size >= maxTotalEntries) {
+      const oldestKey = maskCache.keys().next().value;
+      const oldest = maskCache.get(oldestKey);
+      releaseEntry(oldest);
+      maskCache.delete(oldestKey);
+    }
+    maskCache.set(key, entry);
+  }
+
+  function clearPendingQueue() {
+    pendingQueue.length = 0;
+    pendingHead = 0;
+    pendingCoords.clear();
+  }
+
+  function compactPendingIfNeeded() {
+    if (pendingHead === 0) return;
+    if (pendingHead >= pendingQueue.length) {
+      pendingQueue.length = 0;
+      pendingHead = 0;
+    } else if (pendingHead >= 64) {
+      pendingQueue.splice(0, pendingHead);
+      pendingHead = 0;
+    }
+  }
+
+  function scheduleDrain() {
+    if (drainScheduled || disposed || pendingHead >= pendingQueue.length) return;
+    drainScheduled = true;
+    cancelDrainTask = engine.scheduler.enqueue(
+      () => {
+        let more = false;
+        try {
+          if (disposed || segments.length === 0) {
+            clearPendingQueue();
+            return false;
+          }
+          if (buildsThisFrame >= 1) {
+            more = pendingHead < pendingQueue.length;
+            return more;
+          }
+          while (pendingHead < pendingQueue.length) {
+            const item = pendingQueue[pendingHead++];
+            pendingCoords.delete(item.coordKey);
+            if (item.z < 14) continue;
+            const key = `${item.z}/${item.x}/${item.y}@${maskSize}`;
+            if (maskCache.has(key)) continue;
+            buildsThisFrame++;
+            buildMaskForTile(item.z, item.x, item.y, key, maskSize);
+            break;
+          }
+          compactPendingIfNeeded();
+          more = !disposed && pendingHead < pendingQueue.length;
+          return more;
+        } finally {
+          if (!more) {
+            drainScheduled = false;
+            cancelDrainTask = null;
+          }
+        }
+      },
+      { priority: 4, label: 'trail-mask-drain' },
+    );
+  }
+
   function buildMaskForTile(z, x, y, key, size = maskSize) {
     if (disposed) return null;
     const bounds = tileBoundsWorld(z, x, y);
@@ -258,7 +360,7 @@ export function createTrailMaskManager({ engine, tierConfig }) {
     }
 
     if (dirtHits.length === 0 && pavedHits.length === 0) {
-      const emptyEntry = {
+      putMaskCache(key, {
         empty: true,
         minX: bounds.minX,
         maxX: bounds.maxX,
@@ -266,8 +368,7 @@ export function createTrailMaskManager({ engine, tierConfig }) {
         maxZ: bounds.maxZ,
         size,
         texture: fallbackMaskTex,
-      };
-      maskCache.set(key, emptyEntry);
+      });
       return null;
     }
 
@@ -329,14 +430,7 @@ export function createTrailMaskManager({ engine, tierConfig }) {
     tex.wrapT = THREE.ClampToEdgeWrapping;
     tex.needsUpdate = true;
 
-    if (maskCache.size >= MAX_MASKS) {
-      const oldestKey = maskCache.keys().next().value;
-      const oldest = maskCache.get(oldestKey);
-      releaseEntry(oldest);
-      maskCache.delete(oldestKey);
-    }
-
-    maskCache.set(key, {
+    putMaskCache(key, {
       empty: false,
       minX: bounds.minX,
       maxX: bounds.maxX,
@@ -351,8 +445,7 @@ export function createTrailMaskManager({ engine, tierConfig }) {
 
   /**
    * Look up or build a semantic RGB trail/road mask for tile (z, x, y).
-   * Immediate camera tiles (syncIfImmediate = true) build synchronously (<0.8ms)
-   * so singletrack & Main St asphalt appear on frame 1; farther tiles schedule at priority 2.
+   * Strictly capped to <= 1 rasterization per frame so teleports never hitch!
    */
   function getMaskForTile(z, x, y, syncIfImmediate = false) {
     if (segments.length === 0 || z < 14) return null;
@@ -364,21 +457,22 @@ export function createTrailMaskManager({ engine, tierConfig }) {
       return entry.empty ? null : entry.texture;
     }
 
-    if (syncIfImmediate) {
-      pendingBuild.delete(key);
+    if (syncIfImmediate && buildsThisFrame < 1) {
+      buildsThisFrame++;
       return buildMaskForTile(z, x, y, key, maskSize);
     }
 
-    if (!pendingBuild.has(key)) {
-      pendingBuild.add(key);
-      engine.scheduler.enqueue(
-        () => {
-          pendingBuild.delete(key);
-          if (!disposed) buildMaskForTile(z, x, y, key, maskSize);
-          return false;
-        },
-        { priority: 2, label: `trail-mask-${key}` },
-      );
+    const coordKey = `${z}/${x}/${y}`;
+    if (!pendingCoords.has(coordKey)) {
+      const maxPending = Math.max(32, maxMasks * 2);
+      while (pendingQueue.length - pendingHead >= maxPending) {
+        const dropped = pendingQueue[pendingHead++];
+        pendingCoords.delete(dropped.coordKey);
+      }
+      compactPendingIfNeeded();
+      pendingCoords.add(coordKey);
+      pendingQueue.push({ z, x, y, coordKey });
+      scheduleDrain();
     }
     return null;
   }
@@ -386,18 +480,33 @@ export function createTrailMaskManager({ engine, tierConfig }) {
   function warmAround(x, z, zoom) {
     if (segments.length === 0 || zoom < 14) return;
     const t = worldToTile(x, z, zoom);
-    getMaskForTile(zoom, t.x, t.y, true);
+    const key = `${zoom}/${t.x}/${t.y}@${maskSize}`;
+    if (!maskCache.has(key)) {
+      buildMaskForTile(zoom, t.x, t.y, key, maskSize);
+    }
   }
 
   function setTierConfig(nextConfig) {
     const nextSize = nextConfig?.trailMaskSize || 256;
+    const nextMax = nextConfig?.trailMaskMaxCount || 20;
+    maxMasks = nextMax;
+    while (countActiveTextures() > maxMasks) {
+      if (!evictOldestNonEmpty()) break;
+    }
+    const maxTotalEntries = maxMasks * 3;
+    while (maskCache.size > maxTotalEntries) {
+      const oldestKey = maskCache.keys().next().value;
+      const oldest = maskCache.get(oldestKey);
+      releaseEntry(oldest);
+      maskCache.delete(oldestKey);
+    }
     if (nextSize === maskSize) return;
     maskSize = nextSize;
     for (const entry of maskCache.values()) {
       releaseEntry(entry);
     }
     maskCache.clear();
-    pendingBuild.clear();
+    clearPendingQueue();
   }
 
   function onContextRestored() {
@@ -411,8 +520,13 @@ export function createTrailMaskManager({ engine, tierConfig }) {
 
   function dispose() {
     disposed = true;
+    if (cancelDrainTask) {
+      cancelDrainTask();
+      cancelDrainTask = null;
+    }
+    drainScheduled = false;
     offChunk();
-    pendingBuild.clear();
+    clearPendingQueue();
     for (const entry of maskCache.values()) {
       releaseEntryNow(entry);
     }

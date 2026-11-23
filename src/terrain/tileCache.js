@@ -57,6 +57,7 @@ export function createTileCache({ engine, manifests, tierConfig }) {
   const uploadKeys = new Set();
   const failedAt = new Map(); // key -> timestamp ms
   const waiters = new Set(); // callbacks notified whenever a tile settles
+  const stitchDirty = new Map(); // entry -> { h: boolean, n: boolean } (coalesced & rate-limited GPU re-uploads)
 
   let totalBytes = 0;
   let nextReqId = 1;
@@ -122,6 +123,31 @@ export function createTileCache({ engine, manifests, tierConfig }) {
     workers.push(w);
   }
 
+  function markStitchDirty(tile, heightDirty, normalDirty) {
+    if (!tile || tile.evicted || tile.pendingFirstUpload) return;
+    let flags = stitchDirty.get(tile);
+    if (!flags) {
+      flags = { h: false, n: false };
+      stitchDirty.set(tile, flags);
+    }
+    if (heightDirty) flags.h = true;
+    if (normalDirty) flags.n = true;
+  }
+
+  function flushStitchDirty(maxEntries = 2) {
+    if (stitchDirty.size === 0) return;
+    let flushed = 0;
+    for (const [tile, flags] of stitchDirty) {
+      if (flushed >= maxEntries) break;
+      stitchDirty.delete(tile);
+      if (tile.evicted) continue;
+      if (flags.h && tile.texture) tile.texture.needsUpdate = true;
+      if (flags.n && tile.normalAoTex) tile.normalAoTex.needsUpdate = true;
+      flushed++;
+    }
+    if (stitchDirty.size > 0) scheduleUploadSlice();
+  }
+
   function notifyWaiters(key) {
     for (const fn of waiters) fn(key);
   }
@@ -176,7 +202,7 @@ export function createTileCache({ engine, manifests, tierConfig }) {
         out[p + 3] = Math.round(slope * 255);
       }
     }
-    entry.normalAoTex.needsUpdate = true;
+    markStitchDirty(entry, false, true);
   }
 
   /**
@@ -211,8 +237,8 @@ export function createTileCache({ engine, manifests, tierConfig }) {
         }
       }
     }
-    a.normalAoTex.needsUpdate = true;
-    b.normalAoTex.needsUpdate = true;
+    markStitchDirty(a, false, true);
+    markStitchDirty(b, false, true);
   }
 
   /**
@@ -249,8 +275,8 @@ export function createTileCache({ engine, manifests, tierConfig }) {
       }
       left.stitchedE = true;
       right.stitchedW = true;
-      left.texture.needsUpdate = true;
-      right.texture.needsUpdate = true;
+      markStitchDirty(left, true, false);
+      markStitchDirty(right, true, false);
       refreshBorderNormals(left, maxG - 2, maxG, 0, maxG);
       refreshBorderNormals(right, 0, 2, 0, maxG);
       averageSeamNormals(left, right, true);
@@ -278,8 +304,8 @@ export function createTileCache({ engine, manifests, tierConfig }) {
       }
       north.stitchedS = true;
       south.stitchedN = true;
-      north.texture.needsUpdate = true;
-      south.texture.needsUpdate = true;
+      markStitchDirty(north, true, false);
+      markStitchDirty(south, true, false);
       refreshBorderNormals(north, 0, maxG, maxG - 2, maxG);
       refreshBorderNormals(south, 0, maxG, 0, 2);
       averageSeamNormals(north, south, false);
@@ -350,7 +376,7 @@ export function createTileCache({ engine, manifests, tierConfig }) {
         refreshBorderNormals(tile, 0, maxG, maxG - FEATHER_PX - 1, maxG);
       }
       delete tile.savedMargins[side];
-      tile.texture.needsUpdate = true;
+      markStitchDirty(tile, true, false);
     }
 
     function featherEdgeToParent(tile, side, parent) {
@@ -402,7 +428,7 @@ export function createTileCache({ engine, manifests, tierConfig }) {
           side === 'N' ? FEATHER_PX + 1 : maxG,
         );
       }
-      tile.texture.needsUpdate = true;
+      markStitchDirty(tile, true, false);
     }
 
     const parent = z > config.minQuadZoom ? terrainFast.get(numKey(z - 1, x >> 1, y >> 1)) : null;
@@ -437,7 +463,7 @@ export function createTileCache({ engine, manifests, tierConfig }) {
         const [t, idx] = targets[i];
         t.heights[idx] = h;
         encodeTerrariumPixel(t.rgba, idx * 4, h);
-        t.texture.needsUpdate = true;
+        markStitchDirty(t, true, false);
       }
     };
     const nbrNW = terrainFast.get(numKey(z, x - 1, y - 1));
@@ -492,18 +518,24 @@ export function createTileCache({ engine, manifests, tierConfig }) {
   }
 
   let uploadScheduled = false;
+  let cancelUploadTask = null;
   function scheduleUploadSlice() {
-    if (uploadScheduled || disposed || uploadQueue.length === 0) return;
+    if (uploadScheduled || disposed || (uploadQueue.length === 0 && stitchDirty.size === 0)) return;
     uploadScheduled = true;
-    engine.scheduler.enqueue(
+    cancelUploadTask = engine.scheduler.enqueue(
       () => {
-        uploadScheduled = false;
-        if (disposed) return false;
-        processUploads(config.uploadsPerFrame);
-        if (uploadQueue.length > 0) {
-          scheduleUploadSlice();
+        let more = false;
+        try {
+          if (disposed) return false;
+          processUploads(config.uploadsPerFrame);
+          more = !disposed && (uploadQueue.length > 0 || stitchDirty.size > 0);
+          return more;
+        } finally {
+          if (!more) {
+            uploadScheduled = false;
+            cancelUploadTask = null;
+          }
         }
-        return false;
       },
       { priority: 5, label: 'terrain-gpu-upload' },
     );
@@ -642,8 +674,8 @@ export function createTileCache({ engine, manifests, tierConfig }) {
       normalAoTex.wrapT = THREE.ClampToEdgeWrapping;
       normalAoTex.needsUpdate = true;
 
-      const bytes =
-        msg.heights.byteLength + msg.rgba.byteLength + msg.normalAoRgba.byteLength;
+      // Exact GPU VRAM footprint: 2x 257x257 RGBA8 DataTextures (height + normalAo, no mipmaps = ~528 KB)
+      const bytes = msg.rgba.byteLength + msg.normalAoRgba.byteLength;
       const bounds = tileBoundsWorld(z, x, y);
       return {
         key,
@@ -668,6 +700,7 @@ export function createTileCache({ engine, manifests, tierConfig }) {
         maxH: msg.maxH,
         texture,
         normalAoTex,
+        pendingFirstUpload: true,
         bytes,
         loadedAt: now,
       };
@@ -710,7 +743,8 @@ export function createTileCache({ engine, manifests, tierConfig }) {
     texture.wrapS = THREE.ClampToEdgeWrapping;
     texture.wrapT = THREE.ClampToEdgeWrapping;
     texture.needsUpdate = true;
-    const bytes = msg.rgba.byteLength * 2;
+    // Exact GPU VRAM footprint: 256x256 RGBA8 DataTexture (no mipmaps = 262 KB)
+    const bytes = msg.rgba.byteLength;
     const bounds = tileBoundsWorld(z, x, y);
     return {
       key,
@@ -753,6 +787,7 @@ export function createTileCache({ engine, manifests, tierConfig }) {
         if (entry.kind === 'terrain') {
           terrainFast.set(numKey(entry.z, entry.x, entry.y), entry);
           stitchTerrainTile(entry);
+          entry.pendingFirstUpload = false;
         } else if (entry.kind === 'cover') {
           coverFast.set(numKey(entry.z, entry.x, entry.y), entry);
         }
@@ -760,7 +795,9 @@ export function createTileCache({ engine, manifests, tierConfig }) {
         count++;
         notifyWaiters(job.key);
       }
-      if (totalBytes > config.lruMaxBytes * 1.12) {
+      // Coalesced, rate-limited stitch neighbor re-uploads (<=2/frame during play, full flush on preload!)
+      flushStitchDirty(limit >= 100 ? Infinity : 2);
+      if (totalBytes > config.lruMaxBytes * 1.05) {
         evict(lastPinnedKeys);
       }
     } finally {
@@ -906,7 +943,9 @@ export function createTileCache({ engine, manifests, tierConfig }) {
     if (totalBytes <= config.lruMaxBytes) return;
     const now = performance.now();
     const targetBytes = config.lruMaxBytes * 0.85;
-    const graceMs = totalBytes > config.lruMaxBytes * 1.15 ? 0 : 1500;
+    // Keep a >=250ms grace window so a tile just uploaded by processUploads() has at least one
+    // quadtree.update() tick to be bound & pinned before LRU can evict it (prevents fetch thrash!).
+    const graceMs = totalBytes > config.lruMaxBytes * 1.15 ? 250 : 1500;
 
     for (const [key, entry] of cache) {
       if (totalBytes <= targetBytes) break;
@@ -918,6 +957,7 @@ export function createTileCache({ engine, manifests, tierConfig }) {
       if (graceMs > 0 && now - entry.loadedAt < graceMs) continue;
 
       cache.delete(key);
+      stitchDirty.delete(entry);
       entry.evicted = true;
       if (entry.kind === 'terrain') {
         terrainFast.delete(numKey(entry.z, entry.x, entry.y));
@@ -983,8 +1023,14 @@ export function createTileCache({ engine, manifests, tierConfig }) {
 
   function dispose() {
     disposed = true;
+    if (cancelUploadTask) {
+      cancelUploadTask();
+      cancelUploadTask = null;
+    }
+    uploadScheduled = false;
     waiters.clear();
     pendingQueue.clear();
+    stitchDirty.clear();
     uploadQueue.forEach((u) => u.msg?.bitmap?.close?.());
     uploadQueue.length = 0;
     uploadKeys.clear();

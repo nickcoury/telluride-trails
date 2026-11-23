@@ -211,8 +211,9 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
   function splitDistanceForZoom(z, bounds) {
     const size = bounds.maxX - bounds.minX;
     const bias = Math.max(0.5, engine.quality.terrainLodBias || 1.0);
-    // Keep z17 splits tight around the runner (~270m) so only 4-16 immediate patches subdivide to z17
-    const zoomFactor = z >= 16 ? 0.56 : config.lodDistanceFactor;
+    // Keep z16/z17 splits tight around the runner so only immediate patches subdivide to ultra-fine cells
+    const zoomFactor =
+      z >= 16 ? 0.50 : z === 15 ? Math.min(config.lodDistanceFactor, 0.90) : config.lodDistanceFactor;
     return (size * zoomFactor) / bias;
   }
 
@@ -245,9 +246,10 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
     const distCam = _box.distanceToPoint(camPos);
     if (distCam > config.horizonDrawDistance) return;
 
-    // Keep nearby patches un-culled so fast camera rotation never reveals a missing tile
+    // Keep immediate runner surroundings un-culled so 180-deg whip-pans never expose a gap,
+    // while culling unseen patches >190m behind the camera to save ~35% draws & VRAM!
     const distFocus = _box.distanceToPoint(focusPos);
-    if (distCam > 900 && distFocus > 700 && !_frustum.intersectsBox(_box)) {
+    if (distCam > 190 && distFocus > 150 && !_frustum.intersectsBox(_box)) {
       return;
     }
 
@@ -343,10 +345,12 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
         tileCache.request('imagery', t.z, t.x, t.y, p);
       }
 
-      // 3. Cover mask (skip on title to keep title cold payload < 1.5 MB)
-      const coverInfo = isTitle
-        ? { resident: null, primaryTarget: null, coarseTarget: null }
-        : findLeafEntryAndTargets('cover', z, x, y, 13, config.maxCoverZoom);
+      // 3. Cover mask (skip on title and beyond cover/flora detail range to save VRAM)
+      const coverDistCap = config.lruMaxBytes <= 32 * 1024 * 1024 ? 2600 : 6000;
+      const coverInfo =
+        isTitle || distCam > coverDistCap
+          ? { resident: null, primaryTarget: null, coarseTarget: null }
+          : findLeafEntryAndTargets('cover', z, x, y, 13, config.maxCoverZoom);
       if (coverInfo.primaryTarget) {
         const t = coverInfo.primaryTarget;
         const p = computeRequestPriority(distCam, t.z, 60);
@@ -417,7 +421,7 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
         const dzTrail = z - maskZ;
         const mtx = x >> dzTrail;
         const mty = y >> dzTrail;
-        const isImmediate = distCam < 260;
+        const isImmediate = distCam < 80;
         trailTex = trailMask.getMaskForTile(maskZ, mtx, mty, isImmediate);
         if (trailTex) {
           const tUv = computeUvTransform(z, x, y, maskZ, mtx, mty);
@@ -450,9 +454,20 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
         shadowsEnabled && config.castShadowRadiusM > 0 && distCam < config.castShadowRadiusM;
     }
 
-    // Hide unused pooled meshes
+    // Hide unused pooled meshes and release references to evicted tile textures
     for (let i = activeMeshCount; i < meshPool.length; i++) {
-      meshPool[i].visible = false;
+      const m = meshPool[i];
+      if (m.visible) {
+        m.visible = false;
+        const u = m.userData?.slot?.uniforms;
+        if (u) {
+          u.uHeightTex.value = tileCache.fallbackHeightTex;
+          u.uNormalAoTex.value = tileCache.fallbackNormalAoTex;
+          u.uImageryTex.value = tileCache.fallbackImageryTex;
+          u.uCoverTex.value = tileCache.fallbackCoverTex;
+          u.uTrailMaskTex.value = trailMask.fallbackMaskTex;
+        }
+      }
     }
 
     tileCache.clearPendingFar(activeTargetKeys);
@@ -684,27 +699,39 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
         addRect('imagery', 13, 2200, true, -1400);
         if (config.maxImageryZoom >= 14) addRect('imagery', 14, 1100, true, -1100);
       } else {
-        // Full near-photoreal playable preload: crisp z15 DEM, z15-z17 NAIP imagery, z13-z14 cover!
-        addRect('terrain', 9, 3000, true, -3000);
-        addRect('terrain', 11, 5000, true, -2800);
-        addRect('terrain', 13, Math.max(r, 1800), true, -2400);
-        if (config.maxTerrainZoom >= 14) addRect('terrain', 14, Math.min(r, 1050), true, -2000);
-        if (config.maxTerrainZoom >= 15) addRect('terrain', 15, Math.min(r, 820), true, -1800);
+        // Full near-photoreal playable preload, scaled cleanly to tier VRAM budget
+        const compactVram = config.lruMaxBytes <= 32 * 1024 * 1024;
+        addRect('terrain', 9, 2500, true, -3000);
+        addRect('terrain', 11, compactVram ? 3200 : 5000, true, -2800);
+        addRect('terrain', 13, compactVram ? Math.min(r, 1100) : Math.max(r, 1800), true, -2400);
+        if (config.maxTerrainZoom >= 14) {
+          addRect('terrain', 14, Math.min(r, compactVram ? 600 : 1050), true, -2000);
+        }
+        if (config.maxTerrainZoom >= 15) {
+          addRect('terrain', 15, Math.min(r, compactVram ? 420 : 820), true, -1800);
+        }
 
-        addRect('imagery', 10, 5000, true, -2700);
-        addRect('imagery', 13, Math.max(r, 1600), true, -2200);
-        addRect('imagery', 14, Math.min(r, 950), true, -1900);
-        if (config.maxImageryZoom >= 15) addRect('imagery', 15, Math.min(r, 700), true, -1700);
-        if (config.maxImageryZoom >= 16) addRect('imagery', 16, Math.min(r, 420), true, -1600);
+        addRect('imagery', 10, compactVram ? 3200 : 5000, true, -2700);
+        addRect('imagery', 13, compactVram ? Math.min(r, 1100) : Math.max(r, 1600), true, -2200);
+        addRect('imagery', 14, Math.min(r, compactVram ? 600 : 950), true, -1900);
+        if (config.maxImageryZoom >= 15) {
+          addRect('imagery', 15, Math.min(r, compactVram ? 380 : 700), true, -1700);
+        }
+        if (config.maxImageryZoom >= 16) {
+          addRect('imagery', 16, Math.min(r, compactVram ? 260 : 420), true, -1600);
+        }
         if (config.maxImageryZoom >= 17) addRect('imagery', 17, 200, true, -1550);
 
-        addRect('cover', 13, Math.max(r, 1500), true, -1500);
-        if (config.maxCoverZoom >= 14) addRect('cover', 14, Math.min(r, 750), true, -1400);
+        addRect('cover', 13, compactVram ? Math.min(r, 1000) : Math.max(r, 1500), true, -1500);
+        if (config.maxCoverZoom >= 14) {
+          addRect('cover', 14, Math.min(r, compactVram ? 500 : 750), true, -1400);
+        }
 
-        // Warm far skyline asynchronously without blowing low-tier 40 MB VRAM budget
-        const horizonWarmR = config.lruMaxBytes <= 48 * 1024 * 1024 ? 26000 : 50000;
-        addRect('terrain', 9, horizonWarmR, false);
-        addRect('imagery', 9, horizonWarmR, false);
+        // Warm far skyline asynchronously only on high/ultra (low/medium load visible z9 on demand to stay under 40/64 MB VRAM)
+        if (config.lruMaxBytes >= 80 * 1024 * 1024) {
+          addRect('terrain', 9, 48000, false);
+          addRect('imagery', 9, 48000, false);
+        }
       }
 
       totalNeeded = needed.size;
