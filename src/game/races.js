@@ -45,6 +45,16 @@ export function createRaceManager() {
       passed: false,
     })).sort((a, b) => a.d - b.d);
 
+    // Defensive fix if intermediate checkpoint cutoffs were authored as remaining-hours (decreasing)
+    const interCuts = checkpoints.slice(0, -1).map((c) => c.cutoffH).filter((v) => v != null);
+    if (interCuts.length >= 2 && interCuts[0] > interCuts[interCuts.length - 1] && raceObj.cutoffH) {
+      for (let i = 0; i < checkpoints.length - 1; i++) {
+        if (checkpoints[i].cutoffH != null) {
+          checkpoints[i].cutoffH = Math.max(0.5, raceObj.cutoffH - checkpoints[i].cutoffH);
+        }
+      }
+    }
+
     if (restored) {
       lastSegIdx = restored.lastSegIdx || 0;
       courseDistM = restored.courseDistM || 0;
@@ -178,7 +188,7 @@ export function createRaceManager() {
     const isNight = localHour >= 19 || localHour < 6.5;
     return Object.entries(FOODS)
       .filter(([, f]) => !f.night || isNight)
-      .map(([key, f]) => ({ key, name: f.name, kcal: f.kcal, ml: f.ml }));
+      .map(([key]) => key);
   }
 
   /**

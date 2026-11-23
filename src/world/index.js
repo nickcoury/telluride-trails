@@ -1,22 +1,75 @@
-import * as THREE from 'three';
+import { createWorldTextures } from './textures.js';
+import { createAtmosphere } from './atmosphere.js';
+import { createVegetation } from './vegetation.js';
+import { createRocks } from './rocks.js';
+import { createWater } from './water.js';
+import { createStructures } from './structures.js';
 
 /**
- * STUB world module (owned by @world).
- * Implements PLAN.md createWorld(engine, terrain, trailData) contract.
+ * Create the living San Juan world:
+ * - Physically-based atmosphere, real Telluride sun/moon/stars, clouds, height/aerial fog, monsoon weather
+ * - Streaming deterministic vegetation (Engelmann spruce, subalpine fir, aspen groves, krummholz, willows, tundra/columbines)
+ * - Streaming rocks/talus/boulders & near-player ground clutter
+ * - Rivers, streams, glacial turquoise lakes, animated waterfalls + mist
+ * - Extruded OSM buildings, Telluride gondola & ski lifts, Bridal Veil power plant, historic mining ruins
+ *
+ * @param {ReturnType<import('../core/engine.js').createEngine>} engine
+ * @param {ReturnType<import('../terrain/index.js').createTerrain>} terrain
+ * @param {Awaited<ReturnType<import('../data/index.js').loadTrailData>>} trailData
  */
-export function createWorld(engine) {
-  const hemi = new THREE.HemisphereLight(0xdbeafe, 0x3b4d36, 0.9);
-  const sun = new THREE.DirectionalLight(0xfff4df, 1.8);
-  sun.position.set(300, 500, 200);
-  engine.scene.add(hemi);
-  engine.scene.add(sun);
+export function createWorld(engine, terrain, trailData) {
+  const worldTextures = createWorldTextures(engine.quality.maxAnisotropy || 4);
+  engine.worldTextures = worldTextures;
 
-  function update() {}
-  function setTimeOfDay() {}
-  function dispose() {
-    engine.scene.remove(hemi);
-    engine.scene.remove(sun);
+  const atmosphere = createAtmosphere(engine);
+  const vegetation = createVegetation(engine, terrain, trailData, atmosphere);
+  const rocks = createRocks(engine, terrain, trailData, atmosphere);
+  const water = createWater(engine, terrain, trailData, atmosphere);
+  const structures = createStructures(engine, terrain, trailData, atmosphere);
+
+  const unsubQuality = engine.events.on('quality:changed', (q) => {
+    worldTextures.setAnisotropy(q.maxAnisotropy || 4);
+  });
+
+  function update(dt, playerPos) {
+    atmosphere.update(dt, playerPos);
+    vegetation.update(dt, playerPos);
+    rocks.update(dt, playerPos);
+    water.update(dt, playerPos);
+    structures.update(dt, playerPos);
   }
 
-  return { update, setTimeOfDay, dispose };
+  function setTimeOfDay(date) {
+    atmosphere.setTimeOfDay(date);
+  }
+
+  function setWeather(opts) {
+    atmosphere.setWeather(opts);
+  }
+
+  function triggerMonsoon(durationSec, intensity) {
+    atmosphere.triggerMonsoon(durationSec, intensity);
+  }
+
+  function dispose() {
+    unsubQuality();
+    structures.dispose();
+    water.dispose();
+    rocks.dispose();
+    vegetation.dispose();
+    atmosphere.dispose();
+    worldTextures.dispose();
+    if (engine.worldTextures === worldTextures) {
+      delete engine.worldTextures;
+    }
+  }
+
+  return {
+    update,
+    setTimeOfDay,
+    setWeather,
+    triggerMonsoon,
+    uniforms: atmosphere.uniforms,
+    dispose,
+  };
 }

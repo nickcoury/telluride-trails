@@ -78,6 +78,17 @@ export function createGame(engine, terrain, trailData, world) {
   let lastNightToastS = -999;
   let nextWildlifeS = 65 + Math.random() * 65;
   let saveAccumS = 0;
+  let lastStreamX = NaN;
+  let lastStreamZ = NaN;
+
+  function ensureVectorArea(x, z) {
+    if (!trailData?.loadArea) return;
+    if (!Number.isFinite(lastStreamX) || Math.hypot(x - lastStreamX, z - lastStreamZ) > 450) {
+      lastStreamX = x;
+      lastStreamZ = z;
+      Promise.resolve(trailData.loadArea(x, z, 1500)).catch(() => {});
+    }
+  }
 
   // Vertical ground-follow smoothing + small trail hop
   let smoothY = terrain.getHeight(0, 0);
@@ -229,6 +240,7 @@ export function createGame(engine, terrain, trailData, world) {
     state.paused = false;
     state.timeDilated = timeScale > 1;
     resetRunMetrics(x, z, heading);
+    ensureVectorArea(x, z);
 
     syncRunnerVisuals(0.016, weather.getDenverClock().isNight);
     engine.cameraRig?.snapTo?.({ x: state.x, y: state.y, z: state.z }, state.heading);
@@ -260,6 +272,7 @@ export function createGame(engine, terrain, trailData, world) {
     }
 
     resetRunMetrics(sx, sz, heading);
+    ensureVectorArea(sx, sz);
     raceMgr.initRace(race);
     if (state.timeDilated) raceMgr.markTimeDilated();
 
@@ -289,6 +302,7 @@ export function createGame(engine, terrain, trailData, world) {
     state.dnf = Boolean(saved.dnf);
     state.x = saved.pos?.x ?? 0;
     state.z = saved.pos?.z ?? 0;
+    ensureVectorArea(state.x, state.z);
     smoothY = terrain.getHeight(state.x, state.z);
     state.y = smoothY;
     state.heading = saved.heading ?? 0;
@@ -389,6 +403,7 @@ export function createGame(engine, terrain, trailData, world) {
     state.heading = heading;
     jumpOffset = 0;
     jumpVel = 0;
+    ensureVectorArea(x, z);
     syncRunnerVisuals(0.016, weather.getDenverClock().isNight);
     engine.cameraRig?.snapTo?.({ x: state.x, y: state.y, z: state.z }, state.heading);
   }
@@ -440,6 +455,7 @@ export function createGame(engine, terrain, trailData, world) {
   }
 
   function stepSimulation(dtSim, input) {
+    ensureVectorArea(state.x, state.z);
     const surfEval = evaluateSurface(state.x, state.z, terrain, trailData);
     lastSurfaceInfo = surfEval;
 
@@ -941,10 +957,6 @@ export function createGame(engine, terrain, trailData, world) {
     raceMgr.triggerKissFinish();
   });
 
-  engine.events.on('ui:resumeSaved', () => {
-    resumeSaved();
-  });
-
   engine.events.on('dev:skipRace', (e) => {
     skipToRaceDistance(e?.meters ?? 0);
   });
@@ -955,6 +967,16 @@ export function createGame(engine, terrain, trailData, world) {
 
   engine.events.on('engine:visibility', ({ hidden }) => {
     if (hidden) persistRun();
+  });
+
+  engine.events.on('app:state', ({ state: appState }) => {
+    if (appState === 'title' && state.mode !== 'idle') {
+      persistRun();
+      state.mode = 'idle';
+      state.paused = false;
+      hardrockRock.visible = false;
+      runner.root.visible = false;
+    }
   });
 
   window.addEventListener('beforeunload', () => {
@@ -978,7 +1000,15 @@ export function createGame(engine, terrain, trailData, world) {
   }
 
   function getSavedRunSummary() {
-    return hasSavedRun() ? loadSavedRun() : null;
+    if (!hasSavedRun()) return null;
+    const saved = loadSavedRun();
+    if (!saved) return null;
+    return {
+      ...saved,
+      x: saved.pos?.x ?? 0,
+      y: saved.pos?.y ?? 0,
+      z: saved.pos?.z ?? 0,
+    };
   }
 
   return {

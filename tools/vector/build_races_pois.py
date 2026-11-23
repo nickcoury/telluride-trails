@@ -1,6 +1,7 @@
 """
 Build curated pois.json (35+ free-run spots + OSM peaks/passes/waterfalls/lakes/towns)
-and races.json (10 real San Juan races reconstructed via A* over the OSM trail graph).
+and races.json (11 real San Juan races using official CalTopo/OSM geometries,
+15m z14 Terrarium elevation resampling, and graph.json connector injection for route()).
 """
 
 import heapq
@@ -17,6 +18,7 @@ from elevation import TerrariumSampler
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CACHE_DIR = Path(os.path.expanduser("~/.cache/telluride-trails"))
+CALTOPO_DIR = CACHE_DIR / "caltopo"
 DEFAULT_PROJ = CACHE_DIR / "projected_bundle.json"
 OUT_DIR = REPO_ROOT / "public" / "data" / "vector"
 
@@ -31,22 +33,16 @@ def compute_heading(tx: float, tz: float) -> float:
 
 
 def smooth_gain_loss(ys: list[float], threshold_m: float = 6.0) -> tuple[float, float]:
-    """Compute vertical gain and loss with moving-average smoothing + hysteresis threshold."""
+    """Compute vertical gain and loss with 3-pt binomial smooth + hysteresis threshold."""
     if len(ys) < 2:
         return 0.0, 0.0
-    # 5-point moving average to suppress DEM staircase jitter
-    smoothed = []
-    n = len(ys)
-    for i in range(n):
-        lo = max(0, i - 2)
-        hi = min(n, i + 3)
-        smoothed.append(sum(ys[lo:hi]) / (hi - lo))
-    ys = smoothed
+    if len(ys) >= 3:
+        ys = [ys[0]] + [0.25 * ys[i - 1] + 0.5 * ys[i] + 0.25 * ys[i + 1] for i in range(1, len(ys) - 1)] + [ys[-1]]
     gain = 0.0
     loss = 0.0
     anchor = ys[0]
     extreme = ys[0]
-    trend = 0  # 1 up, -1 down, 0 init
+    trend = 0
     for y in ys[1:]:
         if trend == 0:
             if y - anchor >= threshold_m:
@@ -78,7 +74,7 @@ def smooth_gain_loss(ys: list[float], threshold_m: float = 6.0) -> tuple[float, 
     return gain, loss
 
 
-def simplify_polyline(pts: list[tuple[float, float, float, float]], tol_m: float = 1.8) -> list[tuple[float, float, float, float]]:
+def simplify_polyline(pts: list[tuple[float, float, float, float]], tol_m: float = 2.0) -> list[tuple[float, float, float, float]]:
     """Douglas-Peucker 2D simplification preserving cumulative distance & endpoints."""
     if len(pts) <= 2:
         return pts
@@ -126,7 +122,7 @@ class TrailNetwork:
             self.adj[e["u"]].append((e["v"], ei, False))
             self.adj[e["v"]].append((e["u"], ei, True))
 
-        # Identify largest connected component so waypoints never snap to isolated stubs
+        # Largest connected component
         seen = set()
         best_comp = set()
         for nid in range(len(self.nodes)):
@@ -146,7 +142,6 @@ class TrailNetwork:
                 best_comp = comp
         self.main_comp = best_comp
 
-        # Spatial hash for edges (150m cells) for snapping
         self.cell_size = 150.0
         self.edge_grid = defaultdict(list)
         for ei, e in enumerate(self.edges):
@@ -193,8 +188,13 @@ class TrailNetwork:
                         best = (px, py, pz, dx / l, dz / l, ei)
         return best
 
+    def dist_to_trail(self, x: float, z: float, max_dist: float = 200.0) -> float:
+        s = self.snap_to_trail(x, z, max_dist=max_dist, main_only=True)
+        if not s:
+            return max_dist + 1.0
+        return dist2d(x, z, s[0], s[2])
+
     def nearest_node(self, x: float, z: float, max_dist: float = 2500.0, main_only: bool = True) -> int | None:
-        # First snap to nearest edge in main_comp, then choose closer endpoint of that edge
         snapped = self.snap_to_trail(x, z, max_dist=max_dist, main_only=main_only)
         if snapped:
             ei = snapped[5]
@@ -259,7 +259,7 @@ class TrailNetwork:
                 w = e["lengthM"] * kind_weights.get(e["kind"], 1.2)
                 name_l = (e.get("name", "") + " " + " ".join(e.get("routes", []))).lower()
                 if avoid_name_substrs and any(s in name_l for s in avoid_name_substrs):
-                    w *= 3.0
+                    w *= 4.0
                 if prefer_name_substrs and any(s in name_l for s in prefer_name_substrs):
                     w *= 0.8
                 ng = cur_g + w
@@ -293,8 +293,6 @@ def build_curated_pois(proj: dict, net: TrailNetwork, sampler: TerrariumSampler)
                 best = p
         return best
 
-    # 40 curated free-run spots & iconic San Juan destinations
-    # Format: (id, name, kind, area, (lon, lat), look_toward_ll, snap_to_trail, description)
     CURATED = [
         # Telluride
         ("telluride-town", "Telluride Gondola Plaza", "town", "Telluride", (-107.8123, 37.9362), (-107.8080, 37.9340), True, "Historic box-canyon base at 8,750 ft — step off Oak St right onto San Juan singletrack."),
@@ -319,17 +317,18 @@ def build_curated_pois(proj: dict, net: TrailNetwork, sampler: TerrariumSampler)
         # Ophir & Lizard Head
         ("ophir-town", "Ophir Town", "town", "Ophir & Lizard Head", (-107.8328, 37.8569), (-107.8100, 37.8540), True, "Tiny 9,695 ft valley hamlet guarding the western approach to Ophir Pass."),
         ("ophir-pass", "Ophir Pass", "pass", "Ophir & Lizard Head", (-107.7810, 37.8531), (-107.8050, 37.8540), True, "11,789 ft rocky divide linking Ophir and Red Mountain Highway."),
-        ("lizard-head-pass", "Lizard Head Pass", "pass", "Ophir & Lizard Head", (-107.9084, 37.8096), (-107.9350, 37.8250), True, "10,222 ft Continental-style pass staring straight at Lizard Head spire."),
+        ("lizard-head-pass", "Lizard Head Pass", "pass", "Ophir & Lizard Head", (-107.9084, 37.8096), (-107.9350, 37.8250), True, "10,222 ft pass staring straight at the Lizard Head spire."),
         ("trout-lake", "Trout Lake", "lake", "Ophir & Lizard Head", (-107.8842, 37.8235), (-107.8650, 37.8150), True, "High mountain reservoir below Sheep Mountain and Yellow Mountain."),
         ("hope-lake-th", "Hope Lake Trailhead", "trailhead", "Ophir & Lizard Head", (-107.8490, 37.8015), (-107.8320, 37.7950), True, "Steep subalpine climb to 11,880 ft Hope Lake in the Lizard Head Wilderness."),
-        ("grant-swamp-pass", "Grant Swamp Pass", "pass", "Ophir & Lizard Head", (-107.7755, 37.8070), (-107.7950, 37.8250), True, "Infamous 12,920 ft Hardrock scree couloir between KT and Chapman Gulch."),
+        ("grant-swamp-pass", "Grant Swamp Pass", "pass", "Ophir & Lizard Head", (-107.7995, 37.8230), (-107.8078, 37.8448), True, "Infamous 12,920 ft Hardrock scree couloir between KT and Chapman Gulch."),
 
         # Sneffels & Blue Lakes
-        ("blue-lakes-th", "Blue Lakes Trailhead", "trailhead", "Sneffels & Blue Lakes", (-107.7945, 38.0170), (-107.8100, 37.9960), True, "Gateway to the glowing turquoise glacial tarns beneath Mt. Sneffels."),
-        ("lower-blue-lake", "Lower Blue Lake", "lake", "Sneffels & Blue Lakes", (-107.8130, 37.9940), (-107.8050, 37.9830), True, "Turquoise alpine jewel at 10,970 ft below Dallas Peak and Sneffels."),
+        ("blue-lakes-th", "Blue Lakes Trailhead", "trailhead", "Sneffels & Blue Lakes", (-107.8077, 38.0340), (-107.8168, 38.0027), True, "Gateway to the glowing turquoise glacial tarns beneath Mt. Sneffels."),
+        ("lower-blue-lake", "Lower Blue Lake", "lake", "Sneffels & Blue Lakes", (-107.7989, 37.9978), (-107.7939, 37.9964), True, "Turquoise alpine jewel at 10,970 ft below Dallas Peak and Sneffels."),
+        ("blue-lakes-pass", "Blue Lakes Pass", "pass", "Sneffels & Blue Lakes", (-107.7847, 37.9948), (-107.7653, 37.9883), True, "13,000 ft divide linking Blue Lakes basin and Yankee Boy Basin."),
         ("yankee-boy-basin", "Yankee Boy Basin / Mt. Sneffels TH", "trailhead", "Sneffels & Blue Lakes", (-107.7830, 37.9890), (-107.7920, 38.0030), True, "Wildflower-choked high cirque under 14,150 ft Mt. Sneffels."),
-        ("virginius-pass", "Virginius Pass (Kroger's Canteen)", "pass", "Sneffels & Blue Lakes", (-107.7685, 37.9585), (-107.7520, 37.9630), True, "13,100 ft knife-edge notch hosting Hardrock's highest aid station."),
-        ("governor-basin", "Governor Basin", "viewpoint", "Sneffels & Blue Lakes", (-107.7495, 37.9640), (-107.7300, 37.9750), True, "High mining cirque on the Camp Bird / Virginius approach."),
+        ("virginius-pass", "Virginius Pass (Kroger's Canteen)", "pass", "Sneffels & Blue Lakes", (-107.7786, 37.9555), (-107.7590, 37.9710), True, "13,100 ft knife-edge notch hosting Hardrock's highest aid station."),
+        ("governor-basin", "Governor Basin", "viewpoint", "Sneffels & Blue Lakes", (-107.7590, 37.9710), (-107.7300, 37.9750), True, "High mining cirque on the Camp Bird / Virginius approach."),
 
         # Ouray
         ("ouray-perimeter", "Ouray Perimeter Trail / Fellin Park", "trailhead", "Ouray", (-107.6714, 38.0228), (-107.6650, 38.0190), True, "7,792 ft 'Switzerland of America' — start of Imogene Pass Run & Perimeter loop."),
@@ -338,9 +337,9 @@ def build_curated_pois(proj: dict, net: TrailNetwork, sampler: TerrariumSampler)
         ("red-mountain-pass", "Red Mountain Pass", "pass", "Ouray", (-107.7118, 37.8992), (-107.7050, 37.9150), True, "11,018 ft iron-oxide pass on the Million Dollar Highway."),
 
         # Silverton
-        ("silverton-town", "Silverton (Hardrock Start / Finish)", "town", "Silverton", (-107.6645, 37.8119), (-107.6500, 37.8150), True, "9,318 ft mining town — home of the painted ram rock and Hardrock 100."),
-        ("kendall-mountain-th", "Kendall Mountain Trailhead", "trailhead", "Silverton", (-107.6590, 37.8095), (-107.6350, 37.7980), True, "Memorial Park start for the 12.3-mile climb up Kendall Mountain."),
-        ("kendall-summit", "Kendall Mountain Summit", "peak", "Silverton", (-107.6195, 37.7885), (-107.6400, 37.8000), True, "13,066 ft summit overlooking Silverton and the Animas River canyon."),
+        ("silverton-town", "Silverton (Hardrock Start / Finish)", "town", "Silverton", (-107.6657, 37.8124), (-107.6500, 37.8150), True, "9,318 ft mining town — home of the painted ram rock and Hardrock 100."),
+        ("kendall-mountain-th", "Kendall Mountain Trailhead", "trailhead", "Silverton", (-107.6636, 37.8125), (-107.6419, 37.7938), True, "Memorial Park start for the 12.3-mile climb up Kendall Mountain."),
+        ("kendall-summit", "Kendall Mountain Summit", "peak", "Silverton", (-107.6419, 37.7938), (-107.6606, 37.8165), True, "13,066 ft summit overlooking Silverton and the Animas River canyon."),
         ("ice-lake-th", "Ice Lake Trailhead (South Mineral)", "trailhead", "Silverton", (-107.7755, 37.8130), (-107.7950, 37.8140), True, "Steep switchbacks climbing into the legendary Ice Lakes Basin."),
         ("ice-lake-basin", "Ice Lake Basin", "lake", "Silverton", (-107.8095, 37.8138), (-107.8058, 37.8220), True, "Surreal electric-blue alpine basin at 12,270 ft below Fuller Peak."),
         ("molas-pass", "Molas Pass (Colorado Trail)", "pass", "Silverton", (-107.6975, 37.7365), (-107.6850, 37.7550), True, "10,910 ft Colorado Trail crossing with panoramic Grenadier Range views."),
@@ -350,15 +349,14 @@ def build_curated_pois(proj: dict, net: TrailNetwork, sampler: TerrariumSampler)
         ("handies-peak", "Handies Peak", "peak", "Lake City & Handies", (-107.5045, 37.9130), (-107.4850, 37.9250), True, "14,048 ft highest point of the Hardrock 100 — 360° San Juan crown."),
         ("american-basin", "American Basin Trailhead", "trailhead", "Lake City & Handies", (-107.5230, 37.9080), (-107.5045, 37.9130), True, "Lush 11,500 ft wildflower bowl on the west flank of Handies Peak."),
         ("cinnamon-pass", "Cinnamon Pass", "pass", "Lake City & Handies", (-107.5390, 37.9365), (-107.5050, 37.9350), True, "12,640 ft divide linking Animas Forks to Lake City's Burrows Park."),
-        ("sherman-th", "Sherman / Cataract Gulch Trailhead", "trailhead", "Lake City & Handies", (-107.3920, 37.9410), (-107.4150, 37.9100), True, "9,638 ft Hardrock aid station at the mouth of Cataract Gulch."),
-        ("lake-city-town", "Lake City Town Park", "town", "Lake City & Handies", (-107.3153, 38.0297), (-107.3350, 38.0150), True, "8,671 ft start/finish hub for the San Juan Solstice 50."),
+        ("sherman-th", "Sherman / Cataract Gulch Trailhead", "trailhead", "Lake City & Handies", (-107.4345, 37.9025), (-107.4450, 37.8750), True, "Hardrock aid station at the mouth of Cataract Gulch."),
+        ("lake-city-town", "Lake City Town Park", "town", "Lake City & Handies", (-107.3173, 38.0287), (-107.3350, 38.0150), True, "8,671 ft start/finish hub for the San Juan Solstice 50."),
     ]
 
     result = []
     used_keys = set()
 
     for pid, name, kind, area, ll, look_ll, snap_flag, desc in CURATED:
-        # Check if OSM has an exact peak/pass/town/waterfall match near ll
         matched = None
         if kind in ("peak", "pass", "town"):
             matched = match_osm(name.split("(")[0].strip(), ll, kind_filter={kind}, max_m=1500.0)
@@ -378,7 +376,6 @@ def build_curated_pois(proj: dict, net: TrailNetwork, sampler: TerrariumSampler)
                 wx, wz = sx, sz
                 if kind not in ("peak", "pass"):
                     wy = sy
-                # Orient tangent toward look_ll
                 if tx * (look_x - wx) + tz * (look_z - wz) < 0:
                     tx, tz = -tx, -tz
                 heading = compute_heading(tx, tz)
@@ -397,9 +394,7 @@ def build_curated_pois(proj: dict, net: TrailNetwork, sampler: TerrariumSampler)
             "description": desc,
         })
 
-    # Add notable OSM peaks (> 12,500 ft / 3810 m), passes, waterfalls, named lakes not already represented
     def area_from_xz(x: float, z: float) -> str:
-        # Simple regional buckets by nearest hub
         hubs = [
             ("Telluride", 0.0, 0.0),
             ("Ouray", 12300.0, -9500.0),
@@ -488,130 +483,391 @@ def build_curated_pois(proj: dict, net: TrailNetwork, sampler: TerrariumSampler)
     return result
 
 
-def build_races(net: TrailNetwork, sampler: TerrariumSampler) -> list[dict]:
-    """Reconstruct real San Juan races by routing ordered waypoints over the OSM graph."""
+def load_caltopo_line(fname: str, ordered_titles: list[str] | None = None) -> list[tuple[float, float]]:
+    d = json.loads((CALTOPO_DIR / fname).read_text()).get("result", {}).get("state", {}).get("features", [])
+    lines = {}
+    for feat in d:
+        g = feat.get("geometry", {})
+        if g.get("type") == "LineString":
+            t = feat.get("properties", {}).get("title", "")
+            lines[t] = [(c[0], c[1]) for c in g["coordinates"]]
+    if ordered_titles:
+        pts = []
+        for t in ordered_titles:
+            pts.extend(lines[t])
+        return pts
+    return max(lines.values(), key=len)
 
-    def make_race(
-        rid: str,
-        name: str,
-        blurb: str,
-        official_dist_mi: float,
-        official_gain_ft: int,
-        cutoff_h: float,
-        start_time_local: str,
-        waypoints: list[dict],
-        kind_weights: dict[str, float] | None = None,
-        prefer_names: tuple[str, ...] = (),
-        avoid_names: tuple[str, ...] = (),
-        tol_m: float = 2.0,
-        max_detour_ratio: float = 3.1,
-    ) -> dict:
-        # Snap each waypoint to nearest graph node (or interpolated off-trail fallback)
-        pts_xyz = []  # [(x, y, z)]
-        wp_cum_indices = []  # index into pts_xyz for each waypoint
-        fallback_count = 0
-        fallback_dist_m = 0.0
 
-        def append_pt(x: float, y: float, z: float):
-            if not pts_xyz or dist2d(pts_xyz[-1][0], pts_xyz[-1][2], x, z) > 0.5:
-                pts_xyz.append((x, y, z))
+def resample_and_eval(
+    xz_pts: list[tuple[float, float]],
+    sampler: TerrariumSampler,
+    step_m: float = 15.0,
+    gain_threshold_m: float = 6.0,
+) -> tuple[list[tuple[float, float, float, float]], float, float]:
+    """Resample XZ polyline every step_m, sample z14 Terrarium elevation, compute cumDist & gain."""
+    dense_xz = [xz_pts[0]]
+    for i in range(1, len(xz_pts)):
+        ax, az = xz_pts[i - 1]
+        bx, bz = xz_pts[i]
+        seg = math.hypot(bx - ax, bz - az)
+        if seg < 0.2:
+            continue
+        if seg > step_m:
+            n = int(seg // step_m)
+            for k in range(1, n + 1):
+                f = k / (n + 1)
+                dense_xz.append((ax + (bx - ax) * f, az + (bz - az) * f))
+        dense_xz.append((bx, bz))
 
-        prev_nid = None
-        prev_xyz = None
+    ys = [sampler.sample_world(x, z) for x, z in dense_xz]
+    gain_m, loss_m = smooth_gain_loss(ys, threshold_m=gain_threshold_m)
 
-        for idx, wp in enumerate(waypoints):
-            wx, wz = lon_lat_to_world(wp["lon"], wp["lat"])
-            wy = sampler.sample_lon_lat(wp["lon"], wp["lat"])
-            nid = net.nearest_node(wx, wz, max_dist=wp.get("snapMaxM", 2500.0), main_only=True)
+    dense_full = []
+    cum = 0.0
+    for i, (x, z) in enumerate(dense_xz):
+        if i > 0:
+            cum += dist2d(dense_xz[i - 1][0], dense_xz[i - 1][1], x, z)
+        dense_full.append((x, ys[i], z, cum))
+    return dense_full, cum, gain_m
 
-            if idx == 0:
-                if nid is not None:
-                    nx, ny, nz = net.nodes[nid]
-                    append_pt(nx, ny, nz)
-                    prev_nid = nid
-                    prev_xyz = (nx, ny, nz)
-                else:
-                    append_pt(wx, wy, wz)
-                    prev_xyz = (wx, wy, wz)
-                wp_cum_indices.append(0)
-                continue
 
-            routed_ok = False
-            if prev_nid is not None and nid is not None:
-                chain = net.astar(
-                    prev_nid,
-                    nid,
-                    kind_weights=kind_weights,
-                    prefer_name_substrs=prefer_names,
-                    avoid_name_substrs=avoid_names,
-                )
-                if chain is not None:
-                    straight = dist2d(prev_xyz[0], prev_xyz[2], net.nodes[nid][0], net.nodes[nid][2])
-                    path_len = sum(net.edges[ei]["lengthM"] for ei, _ in chain)
-                    # Allow trail switchbacks up to max_detour_ratio * straight-line
-                    if path_len <= max(5500.0, straight * max_detour_ratio):
-                        for ei, rev in chain:
-                            c = net.edges[ei]["coords"]
-                            n_pts = len(c) // 3
-                            rng = range(n_pts - 1, -1, -1) if rev else range(n_pts)
-                            for j in rng:
-                                append_pt(c[j * 3], c[j * 3 + 1], c[j * 3 + 2])
-                        routed_ok = True
-                        prev_nid = nid
-                        prev_xyz = tuple(net.nodes[nid])
-
-            if not routed_ok:
-                # Off-trail alpine scramble / connector sampled from Terrarium DEM
-                tx, ty, tz = (tuple(net.nodes[nid]) if nid is not None else (wx, wy, wz))
-                seg_d = dist2d(prev_xyz[0], prev_xyz[2], tx, tz)
-                fallback_count += 1
-                fallback_dist_m += seg_d
-                steps = max(2, int(math.ceil(seg_d / 60.0)))
-                for s in range(1, steps + 1):
-                    f = s / steps
-                    ix = prev_xyz[0] + (tx - prev_xyz[0]) * f
-                    iz = prev_xyz[2] + (tz - prev_xyz[2]) * f
-                    iy = sampler.sample_world(ix, iz)
-                    append_pt(ix, iy, iz)
+def route_osm_xz(net: TrailNetwork, waypoints_ll: list[tuple[float, float]], kind_weights=None, avoid_names=(), prefer_names=(), max_detour_ratio=4.0) -> list[tuple[float, float]]:
+    pts = []
+    prev_nid = None
+    prev_xz = None
+    for idx, (lon, lat) in enumerate(waypoints_ll):
+        wx, wz = lon_lat_to_world(lon, lat)
+        nid = net.nearest_node(wx, wz, max_dist=2500.0, main_only=True)
+        if idx == 0:
+            nx, _, nz = net.nodes[nid]
+            pts.append((nx, nz))
+            prev_nid = nid
+            prev_xz = (nx, nz)
+            continue
+        chain = net.astar(prev_nid, nid, kind_weights=kind_weights, avoid_name_substrs=avoid_names, prefer_name_substrs=prefer_names)
+        if chain is not None:
+            straight = dist2d(prev_xz[0], prev_xz[1], net.nodes[nid][0], net.nodes[nid][2])
+            path_len = sum(net.edges[ei]["lengthM"] for ei, _ in chain)
+            if path_len <= max(5000.0, straight * max_detour_ratio):
+                for ei, rev in chain:
+                    c = net.edges[ei]["coords"]
+                    n_pts = len(c) // 3
+                    rng = range(n_pts - 1, -1, -1) if rev else range(n_pts)
+                    for j in rng:
+                        px, pz = c[j * 3], c[j * 3 + 2]
+                        if dist2d(pts[-1][0], pts[-1][1], px, pz) > 0.5:
+                            pts.append((px, pz))
                 prev_nid = nid
-                prev_xyz = (tx, ty, tz)
-
-            wp_cum_indices.append(len(pts_xyz) - 1)
-
-        # Compute cumulative distance along dense polyline
-        dense = []
-        cum = 0.0
-        for i, (x, y, z) in enumerate(pts_xyz):
-            if i > 0:
-                cum += dist2d(pts_xyz[i - 1][0], pts_xyz[i - 1][2], x, z)
-            dense.append((x, y, z, cum))
-
-        ys = [p[1] for p in dense]
-        gain_m, loss_m = smooth_gain_loss(ys, threshold_m=2.0)
-
-        # Extract checkpoints strictly from waypoint indices
-        checkpoints = []
-        for idx, wp in enumerate(waypoints):
-            if not wp.get("cp"):
+                prev_xz = (net.nodes[nid][0], net.nodes[nid][2])
                 continue
-            pi = wp_cum_indices[idx]
-            px, _, pz, pd = dense[pi]
-            cp_obj = {
-                "name": wp["name"],
-                "d": round(pd, 1),
-                "x": round(px, 1),
-                "z": round(pz, 1),
-            }
-            if wp.get("cutoffH") is not None:
-                cp_obj["cutoffH"] = wp["cutoffH"]
-            checkpoints.append(cp_obj)
+        tx, _, tz = net.nodes[nid]
+        pts.append((tx, tz))
+        prev_nid = nid
+        prev_xz = (tx, tz)
+    return pts
 
-        simplified = simplify_polyline(dense, tol_m=tol_m)
+
+def project_checkpoints(dense_full: list[tuple[float, float, float, float]], cp_defs: list[dict]) -> list[dict]:
+    """Project checkpoints onto the race polyline in strictly monotonic progression order."""
+    n = len(dense_full)
+    min_idx = 0
+    out = []
+    for cp in cp_defs:
+        cx, cz = lon_lat_to_world(cp["lon"], cp["lat"])
+        # Search forward from min_idx (except final finish which is at n-1)
+        if cp.get("isFinish"):
+            bi = n - 1
+        else:
+            # Find local best within reasonable forward window (or global forward)
+            bi = min_idx
+            best_d2 = float("inf")
+            for i in range(min_idx, n):
+                d2 = (dense_full[i][0] - cx) ** 2 + (dense_full[i][2] - cz) ** 2
+                if d2 < best_d2:
+                    best_d2 = d2
+                    bi = i
+                # Stop early if we found a <80m hit and started moving far away (>2km)
+                elif best_d2 < 80 * 80 and d2 > 2000 * 2000:
+                    break
+            min_idx = bi + 1
+        px, _, pz, pd = dense_full[bi]
+        obj = {"name": cp["name"], "d": round(pd, 1), "x": round(px, 1), "z": round(pz, 1)}
+        if cp.get("cutoffH") is not None:
+            obj["cutoffH"] = cp["cutoffH"]
+        out.append(obj)
+    return out
+
+
+def inject_graph_connectors(net: TrailNetwork, race_tracks_xz: list[list[tuple[float, float]]], graph_path: Path):
+    """
+    Find off-trail / pass stretches along race tracks >120m from any OSM trail edge
+    and add them as traversable trail edges to graph.json so route() / autopilot works everywhere.
+    """
+    graph = json.loads(graph_path.read_text())
+    nodes_flat = graph["nodes"]  # [x0, z0, x1, z1, ...]
+    edges = graph["edges"]       # [u, v, len, kindIdx, nameIdx, xzFlat]
+    names = graph["names"]
+
+    route_name = "Alpine Race Route Connector"
+    if route_name not in names:
+        name_idx = len(names)
+        names.append(route_name)
+    else:
+        name_idx = names.index(route_name)
+
+    added_edges = 0
+    for track_xz in race_tracks_xz:
+        # Subsample every ~100m to detect gaps > 140m from OSM graph
+        samples = [track_xz[0]]
+        acc = 0.0
+        for i in range(1, len(track_xz)):
+            d = dist2d(track_xz[i - 1][0], track_xz[i - 1][1], track_xz[i][0], track_xz[i][1])
+            acc += d
+            if acc >= 80.0:
+                samples.append(track_xz[i])
+                acc = 0.0
+        samples.append(track_xz[-1])
+
+        in_gap = False
+        gap_pts = []
+        gap_start_nid = None
+
+        for i, (px, pz) in enumerate(samples):
+            d_osm = net.dist_to_trail(px, pz, max_dist=140.0)
+            if d_osm > 120.0:
+                if not in_gap:
+                    in_gap = True
+                    prev_pt = samples[max(0, i - 1)]
+                    gap_start_nid = net.nearest_node(prev_pt[0], prev_pt[1], max_dist=1500.0, main_only=True)
+                    gap_pts = [prev_pt, (px, pz)]
+                else:
+                    gap_pts.append((px, pz))
+            else:
+                if in_gap:
+                    gap_pts.append((px, pz))
+                    gap_end_nid = net.nearest_node(px, pz, max_dist=1500.0, main_only=True)
+                    if gap_start_nid is not None and gap_end_nid is not None and gap_start_nid != gap_end_nid:
+                        # Build traversable edge connecting gap_start_nid -> gap_pts -> gap_end_nid
+                        su = (nodes_flat[gap_start_nid * 2], nodes_flat[gap_start_nid * 2 + 1])
+                        ev = (nodes_flat[gap_end_nid * 2], nodes_flat[gap_end_nid * 2 + 1])
+                        full_pts = [su] + gap_pts + [ev]
+                        xz_flat = []
+                        elen = 0.0
+                        for k, (gx, gz) in enumerate(full_pts):
+                            xz_flat.extend([round(gx, 1), round(gz, 1)])
+                            if k > 0:
+                                elen += dist2d(full_pts[k - 1][0], full_pts[k - 1][1], gx, gz)
+                        edges.append([gap_start_nid, gap_end_nid, round(elen, 1), 0, name_idx, xz_flat])
+                        added_edges += 1
+                    in_gap = False
+                    gap_pts = []
+
+    graph_path.write_text(json.dumps(graph, separators=(",", ":")))
+    print(f"Injected {added_edges} traversable alpine connector edges into graph.json (total edges: {len(edges)})")
+
+
+def build_races(net: TrailNetwork, sampler: TerrariumSampler) -> tuple[list[dict], list[list[tuple[float, float]]]]:
+    # Prefetch all z14 tiles for CalTopo tracks
+    caltopo_files = [
+        "hr2_1VNEK.json", "hr1_V6D04DL.json", "tmr_BQN0.json", "sjs50_6R6DT.json",
+        "kendall_VLGH.json", "silverton50k_70HS.json", "deepcreek_2GVNS.json",
+        "ouray50_5SLT69H.json", "imogene_U4NNM.json",
+    ]
+    prefetch_ll = []
+    for cf in caltopo_files:
+        d = json.loads((CALTOPO_DIR / cf).read_text()).get("result", {}).get("state", {}).get("features", [])
+        for feat in d:
+            g = feat.get("geometry", {})
+            if g.get("type") == "LineString":
+                for c in g["coordinates"]:
+                    prefetch_ll.append((c[0], c[1]))
+    sampler.prefetch_lon_lats(prefetch_ll)
+
+    # 1. Hardrock CW & CCW
+    hr_cw_ll = load_caltopo_line("hr2_1VNEK.json")
+    hr_ccw_ll = load_caltopo_line("hr1_V6D04DL.json")
+
+    hr_cw_cps = [
+        {"name": "KT Aid Station", "lon": -107.7975, "lat": 37.7888, "cutoffH": 7.5},
+        {"name": "Chapman Gulch", "lon": -107.8101, "lat": 37.8587, "cutoffH": 11.5},
+        {"name": "Telluride", "lon": -107.8077, "lat": 37.9351, "cutoffH": 16.5},
+        {"name": "Kroger's Canteen (Virginius Pass)", "lon": -107.7786, "lat": 37.9555, "cutoffH": 20.5},
+        {"name": "Governor Basin", "lon": -107.7590, "lat": 37.9710, "cutoffH": 22.5},
+        {"name": "Ouray", "lon": -107.6730, "lat": 38.0220, "cutoffH": 26.0},
+        {"name": "Engineer Pass", "lon": -107.5903, "lat": 37.9698, "cutoffH": 30.5},
+        {"name": "Grouse Gulch", "lon": -107.5583, "lat": 37.9177, "cutoffH": 33.0},
+        {"name": "Handies Peak (14,048 ft)", "lon": -107.5045, "lat": 37.9137},
+        {"name": "Burrows Park", "lon": -107.4609, "lat": 37.9371, "cutoffH": 36.5},
+        {"name": "Sherman", "lon": -107.4345, "lat": 37.9025, "cutoffH": 38.0},
+        {"name": "Pole Creek", "lon": -107.4650, "lat": 37.8090, "cutoffH": 41.5},
+        {"name": "Maggie Gulch", "lon": -107.5359, "lat": 37.8133, "cutoffH": 43.0},
+        {"name": "Cunningham Gulch", "lon": -107.5775, "lat": 37.7928, "cutoffH": 45.0},
+        {"name": "Silverton (Kiss the Rock)", "lon": -107.6657, "lat": 37.8124, "cutoffH": 48.0, "isFinish": True},
+    ]
+
+    hr_ccw_cps = [
+        {"name": "Cunningham Gulch", "lon": -107.5775, "lat": 37.7928, "cutoffH": 5.5},
+        {"name": "Maggie Gulch", "lon": -107.5359, "lat": 37.8133, "cutoffH": 8.5},
+        {"name": "Pole Creek", "lon": -107.4650, "lat": 37.8090, "cutoffH": 11.5},
+        {"name": "Sherman", "lon": -107.4345, "lat": 37.9025, "cutoffH": 15.5},
+        {"name": "Burrows Park", "lon": -107.4609, "lat": 37.9371, "cutoffH": 17.5},
+        {"name": "Handies Peak (14,048 ft)", "lon": -107.5045, "lat": 37.9137},
+        {"name": "Grouse Gulch", "lon": -107.5583, "lat": 37.9177, "cutoffH": 22.0},
+        {"name": "Engineer Pass", "lon": -107.5903, "lat": 37.9698, "cutoffH": 25.0},
+        {"name": "Ouray", "lon": -107.6730, "lat": 38.0220, "cutoffH": 29.0},
+        {"name": "Governor Basin", "lon": -107.7590, "lat": 37.9710, "cutoffH": 32.5},
+        {"name": "Kroger's Canteen (Virginius Pass)", "lon": -107.7786, "lat": 37.9555, "cutoffH": 34.5},
+        {"name": "Telluride", "lon": -107.8077, "lat": 37.9351, "cutoffH": 37.0},
+        {"name": "Chapman Gulch", "lon": -107.8101, "lat": 37.8587, "cutoffH": 41.0},
+        {"name": "KT Aid Station", "lon": -107.7975, "lat": 37.7888, "cutoffH": 44.0},
+        {"name": "Silverton (Kiss the Rock)", "lon": -107.6657, "lat": 37.8124, "cutoffH": 48.0, "isFinish": True},
+    ]
+
+    # 2. Imogene Pass Run: Ouray Main St -> Canyon Creek (CalTopo U4NNM) -> Telluride Oak St
+    imo_core = load_caltopo_line("imogene_U4NNM.json")
+    imo_start_ll = route_osm_xz(net, [(-107.6714, 38.0228), imo_core[0]])
+    imo_end_ll = route_osm_xz(net, [imo_core[-1], (-107.8120, 37.9368)])
+    imo_xz = imo_start_ll + [lon_lat_to_world(lon, lat) for lon, lat in imo_core] + imo_end_ll
+    imo_cps = [
+        {"name": "Canyon Creek Bridge", "lon": -107.6920, "lat": 38.0050},
+        {"name": "Lower Camp Bird", "lon": -107.7235, "lat": 37.9750},
+        {"name": "Upper Camp Bird", "lon": -107.7375, "lat": 37.9560, "cutoffH": 2.5},
+        {"name": "Imogene Pass (13,114 ft)", "lon": -107.7372, "lat": 37.9325},
+        {"name": "Tomboy Townsite", "lon": -107.7535, "lat": 37.9332},
+        {"name": "Social Tunnel", "lon": -107.7810, "lat": 37.9355},
+        {"name": "Telluride Oak St (Finish)", "lon": -107.8120, "lat": 37.9368, "cutoffH": 7.0, "isFinish": True},
+    ]
+
+    # 3. Telluride Mountain Run 40M
+    tmr_ll = load_caltopo_line("tmr_BQN0.json", [
+        "1 Start to Bridal Veil", "2 Bridal Veil to Imogene", "3 Imogene to Liberty Bell",
+        "4 Liberty Bell to Carhenge", "5 Carhenge to Gold Hill", "6 Gold Hill to finish",
+    ])
+    tmr_cps = [
+        {"name": "Bridal Veil Aid", "lon": -107.7677, "lat": 37.9194, "cutoffH": 5.5},
+        {"name": "Imogene Pass Aid", "lon": -107.7327, "lat": 37.9299, "cutoffH": 8.0},
+        {"name": "Liberty Bell Aid", "lon": -107.8065, "lat": 37.9451, "cutoffH": 11.5},
+        {"name": "Carhenge / Oak St Aid", "lon": -107.8169, "lat": 37.9361, "cutoffH": 13.5},
+        {"name": "Gold Hill Aid", "lon": -107.8225, "lat": 37.9038, "cutoffH": 15.5},
+        {"name": "Telluride Town Park (Finish)", "lon": -107.8078, "lat": 37.9349, "cutoffH": 17.0, "isFinish": True},
+    ]
+
+    # 4. Rundola (Oak St & Colorado Ave -> Telluride Trail switchbacks -> Ridge -> St. Sophia Ridge)
+    rundola_xz = route_osm_xz(
+        net,
+        [
+            (-107.8118, 37.9372),
+            (-107.8145, 37.9357),
+            (-107.8244, 37.9328),
+            (-107.8241, 37.9290),
+            (-107.8275, 37.9270),
+        ],
+        avoid_names=("rundola",),
+        prefer_names=("telluride trail",),
+        max_detour_ratio=5.0,
+    )
+    rundola_cps = [
+        {"name": "Telluride Trail Mid-Station", "lon": -107.8244, "lat": 37.9328},
+        {"name": "San Sophia Ridge / St. Sophia (10,540 ft)", "lon": -107.8275, "lat": 37.9270, "cutoffH": 3.0, "isFinish": True},
+    ]
+
+    # 5. Deep Creek Half Marathon
+    dc_ll = load_caltopo_line("deepcreek_2GVNS.json")
+    dc_cps = [
+        {"name": "Deep Creek Aid 1", "lon": -107.8790, "lat": 37.9733},
+        {"name": "Mill Creek Aid 2", "lon": -107.8252, "lat": 37.9618},
+        {"name": "Courthouse / Oak St (Finish)", "lon": -107.8126, "lat": 37.9381, "cutoffH": 5.5, "isFinish": True},
+    ]
+
+    # 6. Kendall Mountain Run
+    kendall_ll = load_caltopo_line("kendall_VLGH.json")
+    kendall_cps = [
+        {"name": "Deer Park Aid", "lon": -107.6509, "lat": 37.7834},
+        {"name": "The Notch Aid", "lon": -107.6397, "lat": 37.7928},
+        {"name": "Kendall Mountain Summit (13,066 ft)", "lon": -107.6419, "lat": 37.7938},
+        {"name": "Silverton Memorial Park (Finish)", "lon": -107.6606, "lat": 37.8165, "cutoffH": 5.0, "isFinish": True},
+    ]
+
+    # 7. San Juan Solstice 50
+    sjs_ll = load_caltopo_line("sjs50_6R6DT.json")
+    sjs_cps = [
+        {"name": "Alpine Gulch", "lon": -107.3222, "lat": 37.9952},
+        {"name": "Williams Creek", "lon": -107.3328, "lat": 37.9216},
+        {"name": "Carson", "lon": -107.3630, "lat": 37.8708},
+        {"name": "Continental Divide", "lon": -107.3436, "lat": 37.9089},
+        {"name": "Slumgullion", "lon": -107.2743, "lat": 37.9827},
+        {"name": "Vickers", "lon": -107.2989, "lat": 38.0030},
+        {"name": "Lake City Town Park (Finish)", "lon": -107.3171, "lat": 38.0285, "cutoffH": 16.0, "isFinish": True},
+    ]
+
+    # 8. Silverton Alpine 50K
+    sil_ll = load_caltopo_line("silverton50k_70HS.json")
+    sil_cps = [
+        {"name": "Howardsville", "lon": -107.5943, "lat": 37.8362},
+        {"name": "Eureka Aid", "lon": -107.5647, "lat": 37.8794},
+        {"name": "Animas Forks Aid", "lon": -107.5722, "lat": 37.9325},
+        {"name": "California Pass Aid (12,930 ft)", "lon": -107.6177, "lat": 37.9175},
+        {"name": "Gladstone Aid", "lon": -107.6500, "lat": 37.8909},
+        {"name": "Silverton Memorial Park (Finish)", "lon": -107.6609, "lat": 37.8165, "cutoffH": 11.0, "isFinish": True},
+    ]
+
+    # 9. Ouray 50
+    o50_ll = load_caltopo_line("ouray50_5SLT69H.json", [
+        "01. Fellin Park -> Weehawken AS",
+        "02. Weehawken AS -> Alpine Mine Overlook -> Weehawken AS",
+        "03. Weehawken AS -> Hayden Pass -> Crystal Lake AS",
+        "04. Crystal Lake AS -> Hayden Pass -> Fellin Park",
+        "05. Fellin Park AS -> Twin Peaks -> Silvershield AS",
+        "06. Silvershield AS -> Fellin Park AS",
+        "07. Fellin Park AS -> Chief Ouray Mine -> Fellin Park AS",
+        "08. Fellin Park AS -> Bridge of Heaven -> Fellin Park (Finish)",
+    ])
+    o50_cps = [
+        {"name": "Weehawken Aid", "lon": -107.7050, "lat": 38.0150},
+        {"name": "Crystal Lake Aid", "lon": -107.6840, "lat": 37.9680},
+        {"name": "Fellin Park (Lap 1)", "lon": -107.6714, "lat": 38.0228},
+        {"name": "Silvershield Aid", "lon": -107.6650, "lat": 38.0320},
+        {"name": "Bridge of Heaven", "lon": -107.6480, "lat": 38.0180},
+        {"name": "Fellin Park (Finish)", "lon": -107.6714, "lat": 38.0228, "cutoffH": 24.0, "isFinish": True},
+    ]
+
+    # 10. Blue Lakes & Yankee Boy Traverse (Blue Lakes TH -> Lower/Upper Blue Lakes -> Blue Lakes Pass -> Yankee Boy -> Camp Bird)
+    bl_part1_xz = route_osm_xz(net, [(-107.8077, 38.0340), (-107.8218, 38.0127), (-107.7989, 37.9978), (-107.7847, 37.9948)], prefer_names=("blue lakes",), max_detour_ratio=5.0)
+    bl_part2_xz = route_osm_xz(net, [(-107.7847, 37.9948), (-107.7653, 37.9883), (-107.7240, 37.9740)], prefer_names=("yankee boy", "camp bird"), max_detour_ratio=5.0)
+    bl_xz = bl_part1_xz + bl_part2_xz
+    bl_cps = [
+        {"name": "Lower Blue Lake", "lon": -107.7989, "lat": 37.9978},
+        {"name": "Blue Lakes Pass (13,000 ft)", "lon": -107.7847, "lat": 37.9948},
+        {"name": "Yankee Boy Basin", "lon": -107.7653, "lat": 37.9883},
+        {"name": "Camp Bird Finish", "lon": -107.7240, "lat": 37.9740, "cutoffH": 9.0, "isFinish": True},
+    ]
+
+    specs = [
+        ("hardrock-100-cw", "Hardrock 100 (Clockwise)", "100+ miles, 33,000+ ft of vert, 13 passes above 12,000 ft, and a painted rock waiting in Silverton. Estimated finish: Thursday.", 102.0, 33441, 48.0, "06:00", [lon_lat_to_world(a, b) for a, b in hr_cw_ll], hr_cw_cps, 2.5),
+        ("hardrock-100-ccw", "Hardrock 100 (Counter-Clockwise)", "The exact same 33,000+ ft of San Juan suffering, starting with Cunningham Gulch instead of KT so your quads are surprised differently.", 102.5, 33441, 48.0, "06:00", [lon_lat_to_world(a, b) for a, b in hr_ccw_ll], hr_ccw_cps, 2.5),
+        ("imogene-pass-run", "Imogene Pass Run", "17.1 miles from Ouray (7,811 ft) up and over 13,114 ft Imogene Pass to Telluride. At least the second half is downhill — until your quads explode.", 17.1, 5300, 7.0, "07:30", imo_xz, imo_cps, 2.0),
+        ("telluride-mountain-run", "Telluride Mountain Run (40M)", "40 rugged miles circling the box canyon, highlighted by the 'Mile and a Half of Sky' ridge above 13,000 ft where gravity becomes optional.", 40.0, 15000, 17.0, "05:00", [lon_lat_to_world(a, b) for a, b in tmr_ll], tmr_cps, 2.0),
+        ("rundola", "Rundola", "Up the Telluride Trail and gondola corridor to St. Sophia Station (10,540 ft). You get to ride the gondola back down, which is the only civilized part.", 2.4, 1810, 3.0, "08:00", rundola_xz, rundola_cps, 1.5),
+        ("deep-creek-half", "Deep Creek Trail Half Marathon", "13.1 miles of golden-aspen singletrack from Last Dollar Road across Deep Creek, Mill Creek, Waterline, and Jud Wiebe down to Oak Street.", 13.1, 3100, 5.5, "08:00", [lon_lat_to_world(a, b) for a, b in dc_ll], dc_cps, 2.0),
+        ("kendall-mountain-run", "Kendall Mountain Run", "Born from a 1908 Silverton bar bet: climb nearly 4,000 ft up Kendall Mountain to 13,066 ft and sprint back to Memorial Park.", 12.3, 3960, 5.0, "08:00", [lon_lat_to_world(a, b) for a, b in kendall_ll], kendall_cps, 2.0),
+        ("san-juan-solstice-50", "San Juan Solstice 50", "50-mile counter-clockwise high-alpine tour out of Lake City touching the Continental Divide above 13,300 ft. Bring a rain shell.", 50.0, 12500, 16.0, "05:00", [lon_lat_to_world(a, b) for a, b in sjs_ll], sjs_cps, 2.0),
+        ("silverton-alpine-50k", "Silverton Alpine 50K", "High-altitude Alpine Loop tour linking Howardsville, Eureka, Animas Forks, and 12,930 ft California Pass.", 31.1, 4569, 11.0, "06:30", [lon_lat_to_world(a, b) for a, b in sil_ll], sil_cps, 2.0),
+        ("ouray-50", "Ouray 50", "52 miles and ~24,000 ft of vertical around the Ouray amphitheater, featuring Chief Ouray Mine and the Bridge of Heaven.", 52.0, 23600, 24.0, "06:00", [lon_lat_to_world(a, b) for a, b in o50_ll], o50_cps, 2.5),
+        ("blue-lakes-alpine-classic", "Blue Lakes & Yankee Boy Classic", "Sneffels Wilderness showcase: climb past turquoise Blue Lakes over 13,000 ft Blue Lakes Pass into Yankee Boy Basin.", 11.0, 3800, 9.0, "07:00", bl_xz, bl_cps, 2.0),
+    ]
+
+    races = []
+    raw_tracks_xz = []
+    print("Evaluating resampled race courses (15m z14 Terrarium):")
+    for rid, name, blurb, off_d, off_g, cutoff_h, start_time, xz_pts, cp_defs, tol_m in specs:
+        dense_full, total_m, gain_m = resample_and_eval(xz_pts, sampler, step_m=15.0, gain_threshold_m=6.0)
+        checkpoints = project_checkpoints(dense_full, cp_defs)
+        simplified = simplify_polyline(dense_full, tol_m=tol_m)
         line_flat = []
         for x, _, z, d in simplified:
             line_flat.extend([round(x, 1), round(z, 1), round(d, 1)])
 
-        # Start & finish headings
         s0 = simplified[0]
         s1 = simplified[min(1, len(simplified) - 1)]
         start_h = compute_heading(s1[0] - s0[0], s1[2] - s0[2])
@@ -619,269 +875,33 @@ def build_races(net: TrailNetwork, sampler: TerrariumSampler) -> list[dict]:
         e1 = simplified[-1]
         fin_h = compute_heading(e1[0] - e0[0], e1[2] - e0[2])
 
-        dist_mi = round(cum * M_TO_MI, 1)
+        dist_mi = round(total_m * M_TO_MI, 1)
         gain_ft = int(round(gain_m * M_TO_FT))
+        d_pct = (dist_mi - off_d) / off_d * 100.0
+        g_pct = (gain_ft - off_g) / off_g * 100.0
         print(
-            f"  {rid:24s}: {dist_mi:5.1f} mi (official {official_dist_mi:5.1f}), "
-            f"{gain_ft:6d} ft (official {official_gain_ft:6d}), "
-            f"pts={len(simplified):4d}, fb={fallback_count} ({fallback_dist_m/1000:.2f} km)"
+            f"  {rid:26s}: {dist_mi:5.1f} mi (off {off_d:5.1f}, {d_pct:+5.1f}%), "
+            f"{gain_ft:6d} ft (off {off_g:6d}, {g_pct:+5.1f}%), pts={len(simplified):4d}"
         )
 
-        return {
+        raw_tracks_xz.append([(p[0], p[2]) for p in simplified])
+        races.append({
             "id": rid,
             "name": name,
             "blurb": blurb,
             "distanceMi": dist_mi,
-            "officialDistanceMi": official_dist_mi,
+            "officialDistanceMi": off_d,
             "gainFt": gain_ft,
-            "officialGainFt": official_gain_ft,
+            "officialGainFt": off_g,
             "cutoffH": cutoff_h,
-            "startTimeLocal": start_time_local,
+            "startTimeLocal": start_time,
             "start": {"x": round(s0[0], 1), "z": round(s0[2], 1), "heading": start_h},
             "finish": {"x": round(e1[0], 1), "z": round(e1[2], 1), "heading": fin_h},
             "checkpoints": checkpoints,
             "line": line_flat,
-        }
+        })
 
-    print("Reconstructing races over OSM trail graph:")
-
-    # 1. Hardrock 100 CW waypoints (Silverton -> KT -> Chapman -> Telluride -> Krogers -> Gov -> Ouray -> Engineer -> Grouse -> Handies -> Burrows -> Sherman -> Pole -> Maggie -> Cunningham -> Silverton)
-    hr_cw_wps = [
-        {"name": "Silverton (Start)", "lon": -107.6645, "lat": 37.8119, "cp": False},
-        {"name": "Mineral Creek", "lon": -107.6940, "lat": 37.8160},
-        {"name": "South Mineral / Swamp Canyon", "lon": -107.7280, "lat": 37.8260},
-        {"name": "KT Aid Station", "lon": -107.7544, "lat": 37.8076, "cp": True, "cutoffH": 7.5},
-        {"name": "Clear Lake", "lon": -107.7823, "lat": 37.8261},
-        {"name": "Grant Swamp Pass", "lon": -107.7945, "lat": 37.8295},
-        {"name": "Island Lake / Swamp Canyon", "lon": -107.7992, "lat": 37.8247},
-        {"name": "Chapman Gulch", "lon": -107.8078, "lat": 37.8448, "cp": True, "cutoffH": 11.5},
-        {"name": "Ophir / Blixt Trail", "lon": -107.8051, "lat": 37.8605},
-        {"name": "Oscar's Pass", "lon": -107.7912, "lat": 37.8772},
-        {"name": "Wasatch / Bear Creek", "lon": -107.8093, "lat": 37.9110},
-        {"name": "Telluride", "lon": -107.8075, "lat": 37.9355, "cp": True, "cutoffH": 16.5},
-        {"name": "Tomboy Road", "lon": -107.7672, "lat": 37.9434},
-        {"name": "Kroger's Canteen (Virginius Pass)", "lon": -107.7864, "lat": 37.9580, "cp": True, "cutoffH": 20.5},
-        {"name": "Governor Basin", "lon": -107.7672, "lat": 37.9787, "cp": True, "cutoffH": 22.5},
-        {"name": "Camp Bird", "lon": -107.7240, "lat": 37.9740},
-        {"name": "Ouray", "lon": -107.6714, "lat": 38.0228, "cp": True, "cutoffH": 26.0},
-        {"name": "Bear Creek Trail (Ouray)", "lon": -107.6480, "lat": 38.0010},
-        {"name": "Engineer Pass", "lon": -107.5844, "lat": 37.9752, "cp": True, "cutoffH": 30.5},
-        {"name": "Animas Forks", "lon": -107.5714, "lat": 37.9311},
-        {"name": "Grouse Gulch", "lon": -107.5515, "lat": 37.9210, "cp": True, "cutoffH": 33.0},
-        {"name": "American Basin", "lon": -107.5170, "lat": 37.9076},
-        {"name": "Handies Peak (14,048 ft)", "lon": -107.5044, "lat": 37.9130, "cp": True},
-        {"name": "Grizzly Gulch", "lon": -107.4840, "lat": 37.9340},
-        {"name": "Burrows Park", "lon": -107.4750, "lat": 37.9430, "cp": True, "cutoffH": 36.5},
-        {"name": "Cinnamon Pass Rd / Henson", "lon": -107.4200, "lat": 37.9470},
-        {"name": "Sherman", "lon": -107.3740, "lat": 37.9392, "cp": True, "cutoffH": 38.0},
-        {"name": "Cataract Gulch Trail", "lon": -107.4150, "lat": 37.9120},
-        {"name": "Cataract Lake", "lon": -107.4402, "lat": 37.8729},
-        {"name": "Pole Creek", "lon": -107.4678, "lat": 37.8090, "cp": True, "cutoffH": 41.5},
-        {"name": "Maggie Gulch", "lon": -107.5365, "lat": 37.8126, "cp": True, "cutoffH": 43.0},
-        {"name": "Buffalo Boy Ridge", "lon": -107.5505, "lat": 37.8076},
-        {"name": "Cunningham Gulch", "lon": -107.5793, "lat": 37.7823, "cp": True, "cutoffH": 45.0},
-        {"name": "Dives-Little Giant Pass", "lon": -107.6120, "lat": 37.7960},
-        {"name": "Silverton (Kiss the Rock)", "lon": -107.6645, "lat": 37.8119, "cp": True, "cutoffH": 48.0},
-    ]
-
-    # CCW is the reverse loop plus Putnam Basin
-    hr_ccw_wps = list(reversed(hr_cw_wps))
-    hr_ccw_wps[0] = {"name": "Silverton (Start)", "lon": -107.6645, "lat": 37.8119, "cp": False}
-    hr_ccw_wps[-1] = {"name": "Silverton (Kiss the Rock)", "lon": -107.6645, "lat": 37.8119, "cp": True, "cutoffH": 48.0}
-    # Update CCW cutoffs roughly proportional to CCW miles
-    ccw_cutoffs = {
-        "Cunningham Gulch": 5.5,
-        "Maggie Gulch": 8.5,
-        "Pole Creek": 11.5,
-        "Sherman": 15.5,
-        "Burrows Park": 17.5,
-        "Grouse Gulch": 22.0,
-        "Engineer Pass": 25.0,
-        "Ouray": 29.0,
-        "Governor Basin": 32.5,
-        "Kroger's Canteen (Virginius Pass)": 34.5,
-        "Telluride": 37.0,
-        "Chapman Gulch": 41.0,
-        "KT Aid Station": 44.0,
-        "Silverton (Kiss the Rock)": 48.0,
-    }
-    for wp in hr_ccw_wps:
-        if wp["name"] in ccw_cutoffs:
-            wp["cutoffH"] = ccw_cutoffs[wp["name"]]
-
-    # 3. Imogene Pass Run (Ouray -> Telluride, 17.1 mi)
-    imogene_wps = [
-        {"name": "Ouray Main St (Start)", "lon": -107.6714, "lat": 38.0228, "cp": False},
-        {"name": "Canyon Creek Bridge", "lon": -107.6920, "lat": 38.0050, "cp": True},
-        {"name": "Lower Camp Bird", "lon": -107.7235, "lat": 37.9750, "cp": True},
-        {"name": "Upper Camp Bird", "lon": -107.7375, "lat": 37.9560, "cp": True, "cutoffH": 2.5},
-        {"name": "Imogene Pass (13,114 ft)", "lon": -107.7372, "lat": 37.9325, "cp": True},
-        {"name": "Tomboy Townsite", "lon": -107.7535, "lat": 37.9332, "cp": True},
-        {"name": "Social Tunnel", "lon": -107.7810, "lat": 37.9355, "cp": True},
-        {"name": "Telluride Oak St (Finish)", "lon": -107.8120, "lat": 37.9368, "cp": True, "cutoffH": 7.0},
-    ]
-
-    # 4. Telluride Mountain Run 40M
-    tmr_wps = [
-        {"name": "Telluride Town Park", "lon": -107.8058, "lat": 37.9356, "cp": False},
-        {"name": "Bear Creek Falls", "lon": -107.8018, "lat": 37.9068},
-        {"name": "Wasatch Pass", "lon": -107.7830, "lat": 37.8935, "cp": True},
-        {"name": "Bridal Veil Aid", "lon": -107.7680, "lat": 37.9165, "cp": True, "cutoffH": 5.5},
-        {"name": "Ajax Peak", "lon": -107.7592, "lat": 37.9308},
-        {"name": "Telluride Peak (Mile & a Half of Sky)", "lon": -107.7490, "lat": 37.9312, "cp": True},
-        {"name": "Imogene Pass", "lon": -107.7372, "lat": 37.9325},
-        {"name": "Tomboy", "lon": -107.7535, "lat": 37.9332},
-        {"name": "Oak Street Aid", "lon": -107.8120, "lat": 37.9368, "cp": True, "cutoffH": 10.5},
-        {"name": "Jud Wiebe Trail", "lon": -107.8152, "lat": 37.9435},
-        {"name": "Mill Creek / Waterline", "lon": -107.8350, "lat": 37.9510, "cp": True},
-        {"name": "Deep Creek High Point", "lon": -107.8650, "lat": 37.9720, "cp": True},
-        {"name": "Deep Creek Corral", "lon": -107.8825, "lat": 37.9688},
-        {"name": "Telluride Town Park (Finish)", "lon": -107.8058, "lat": 37.9356, "cp": True, "cutoffH": 17.0},
-    ]
-
-    # 5. Rundola (Telluride Base -> St. Sophia Station)
-    rundola_wps = [
-        {"name": "Telluride Gondola Plaza", "lon": -107.8123, "lat": 37.9362, "cp": False},
-        {"name": "Telluride Trail Mid-Station", "lon": -107.8244, "lat": 37.9328, "cp": True},
-        {"name": "Coonskin Ridge Turn", "lon": -107.8322, "lat": 37.9301},
-        {"name": "St. Sophia Station (10,540 ft)", "lon": -107.8260, "lat": 37.9277, "cp": True, "cutoffH": 3.0},
-    ]
-
-    # 6. Deep Creek Trail Half Marathon
-    deep_creek_wps = [
-        {"name": "Telluride Airport / Last Dollar Rd", "lon": -107.9016, "lat": 37.9543, "cp": False},
-        {"name": "Deep Creek Trailhead", "lon": -107.9025, "lat": 37.9640},
-        {"name": "Deep Creek Aid 1", "lon": -107.8406, "lat": 37.9677, "cp": True},
-        {"name": "Deep Creek / Mill Creek", "lon": -107.8253, "lat": 37.9619, "cp": True},
-        {"name": "Waterline / Jud Wiebe", "lon": -107.8183, "lat": 37.9474, "cp": True},
-        {"name": "Liberty Bell / Tomboy Rd", "lon": -107.8064, "lat": 37.9451},
-        {"name": "Oak St / Courthouse (Finish)", "lon": -107.8123, "lat": 37.9368, "cp": True, "cutoffH": 5.5},
-    ]
-
-    # 7. Kendall Mountain Run (Silverton -> Kendall Summit -> Silverton)
-    kendall_wps = [
-        {"name": "Silverton Memorial Park", "lon": -107.6610, "lat": 37.8105, "cp": False},
-        {"name": "Deer Park Aid", "lon": -107.6380, "lat": 37.7980, "cp": True},
-        {"name": "Kendall Mountain Road (The Notch)", "lon": -107.6214, "lat": 37.7863, "cp": True},
-        {"name": "Kendall Mountain Summit (13,066 ft)", "lon": -107.6195, "lat": 37.7885, "cp": True},
-        {"name": "The Notch (Return)", "lon": -107.6214, "lat": 37.7863},
-        {"name": "Silverton Memorial Park (Finish)", "lon": -107.6610, "lat": 37.8105, "cp": True, "cutoffH": 5.0},
-    ]
-
-    # 8. San Juan Solstice 50 (Lake City)
-    sjs_wps = [
-        {"name": "Lake City Town Park", "lon": -107.3153, "lat": 38.0297, "cp": False},
-        {"name": "Alpine Gulch / CR 14", "lon": -107.3222, "lat": 37.9952, "cp": True},
-        {"name": "Williams Creek", "lon": -107.3328, "lat": 37.9216, "cp": True},
-        {"name": "Carson", "lon": -107.3630, "lat": 37.8708, "cp": True},
-        {"name": "Cascade / Bent Creek", "lon": -107.3436, "lat": 37.9089, "cp": True},
-        {"name": "Slumgullion / Sawmill Park", "lon": -107.2743, "lat": 37.9827, "cp": True},
-        {"name": "Vickers", "lon": -107.2989, "lat": 38.0030, "cp": True},
-        {"name": "Lake City Town Park (Finish)", "lon": -107.3153, "lat": 38.0297, "cp": True, "cutoffH": 16.0},
-    ]
-
-    # 9. Silverton Alpine 50K
-    sil_alpine_wps = [
-        {"name": "Silverton Memorial Park", "lon": -107.6610, "lat": 37.8105, "cp": False},
-        {"name": "Howardsville", "lon": -107.5950, "lat": 37.8350, "cp": True},
-        {"name": "Eureka", "lon": -107.5650, "lat": 37.8780, "cp": True},
-        {"name": "Animas Forks", "lon": -107.5714, "lat": 37.9311, "cp": True},
-        {"name": "California Pass (12,930 ft)", "lon": -107.6000, "lat": 37.9260, "cp": True},
-        {"name": "Gladstone", "lon": -107.6510, "lat": 37.8910, "cp": True},
-        {"name": "Silverton (Finish)", "lon": -107.6610, "lat": 37.8105, "cp": True, "cutoffH": 11.0},
-    ]
-
-    # 10. Blue Lakes & Sneffels Highline Classic (Ouray/Ridgway side -> Blue Lakes Pass -> Yankee Boy -> Camp Bird)
-    blue_lakes_wps = [
-        {"name": "Blue Lakes Trailhead", "lon": -107.7847, "lat": 37.9948, "cp": False},
-        {"name": "Lower Blue Lake", "lon": -107.8075, "lat": 37.9915, "cp": True},
-        {"name": "Blue Lakes Pass (13,000 ft)", "lon": -107.8008, "lat": 37.9787, "cp": True},
-        {"name": "Yankee Boy Basin", "lon": -107.7830, "lat": 37.9890, "cp": True},
-        {"name": "Camp Bird Road", "lon": -107.7240, "lat": 37.9740, "cp": True, "cutoffH": 9.0},
-    ]
-
-    races = [
-        make_race(
-            "hardrock-100-cw",
-            "Hardrock 100 (Clockwise)",
-            "102 miles, 33,000+ ft of vert, 13 passes above 12,000 ft, and a painted rock waiting in Silverton. Estimated finish: sometime next week.",
-            102.0, 33441, 48.0, "06:00", hr_cw_wps,
-            kind_weights={"trail": 1.0, "path": 1.05, "track": 1.15, "road": 2.2},
-            prefer_names=("hardrock", "bear creek", "wasatch", "colorado trail", "continental divide"),
-        ),
-        make_race(
-            "hardrock-100-ccw",
-            "Hardrock 100 (Counter-Clockwise)",
-            "The exact same 33,000 ft of suffering, just starting with Cunningham Gulch instead of KT so your quads are surprised differently.",
-            102.5, 33441, 48.0, "06:00", hr_ccw_wps,
-            kind_weights={"trail": 1.0, "path": 1.05, "track": 1.15, "road": 2.2},
-            prefer_names=("hardrock", "bear creek", "wasatch", "colorado trail", "continental divide"),
-        ),
-        make_race(
-            "imogene-pass-run",
-            "Imogene Pass Run",
-            "17.1 miles from Ouray (7,811 ft) up and over 13,114 ft Imogene Pass to Telluride. At least the second half is mostly downhill — until your quads explode.",
-            17.1, 5300, 7.0, "07:30", imogene_wps,
-            kind_weights={"trail": 1.0, "path": 1.05, "track": 1.0, "road": 1.6},
-            prefer_names=("imogene", "camp bird", "tomboy"),
-        ),
-        make_race(
-            "telluride-mountain-run",
-            "Telluride Mountain Run (40M)",
-            "40 rugged miles circling the box canyon, highlighted by the 'Mile and a Half of Sky' ridge above 13,000 ft where gravity becomes optional.",
-            40.0, 15000, 17.0, "05:00", tmr_wps,
-            kind_weights={"trail": 1.0, "path": 1.05, "track": 1.25, "road": 2.2},
-            prefer_names=("bear creek", "wasatch", "jud wiebe", "deep creek", "waterline"),
-        ),
-        make_race(
-            "rundola",
-            "Rundola",
-            "2.4 miles straight up the Telluride gondola corridor to St. Sophia Station. You get to ride the gondola back down, which is the only civilized part.",
-            2.4, 1810, 3.0, "08:00", rundola_wps,
-            kind_weights={"trail": 1.0, "path": 1.0, "track": 1.2, "road": 2.0},
-            prefer_names=("telluride trail", "gondola", "st. sophia"),
-        ),
-        make_race(
-            "deep-creek-half",
-            "Deep Creek Trail Half Marathon",
-            "13.1 miles of golden-aspen singletrack from Last Dollar Road across Deep Creek, Mill Creek, Waterline, and Jud Wiebe down to Oak Street.",
-            13.1, 3100, 5.5, "08:00", deep_creek_wps,
-            kind_weights={"trail": 1.0, "path": 1.0, "track": 1.25, "road": 2.2},
-            prefer_names=("deep creek", "mill creek", "waterline", "jud wiebe", "liberty bell"),
-        ),
-        make_race(
-            "kendall-mountain-run",
-            "Kendall Mountain Run",
-            "Born from a 1908 Silverton bar bet: climb 3,960 ft straight up Kendall Mountain to 13,066 ft and sprint back to Memorial Park.",
-            12.3, 3960, 5.0, "08:00", kendall_wps,
-            kind_weights={"trail": 1.0, "path": 1.05, "track": 1.05, "road": 1.6},
-            prefer_names=("kendall",),
-            max_detour_ratio=6.0,
-        ),
-        make_race(
-            "san-juan-solstice-50",
-            "San Juan Solstice 50",
-            "50-mile counter-clockwise high-alpine tour out of Lake City touching the Continental Divide above 13,300 ft. Bring a rain shell.",
-            50.0, 12500, 16.0, "05:00", sjs_wps,
-            kind_weights={"trail": 1.0, "path": 1.05, "track": 1.1, "road": 1.7},
-        ),
-        make_race(
-            "silverton-alpine-50k",
-            "Silverton Alpine 50K",
-            "High-altitude Alpine Loop tour linking Howardsville, Eureka, Animas Forks, and 12,930 ft California Pass.",
-            31.1, 7800, 11.0, "06:30", sil_alpine_wps,
-            kind_weights={"trail": 1.0, "path": 1.05, "track": 1.05, "road": 1.5},
-        ),
-        make_race(
-            "blue-lakes-alpine-classic",
-            "Blue Lakes & Yankee Boy Classic",
-            "Point-to-point Sneffels Wilderness showcase: climb past turquoise Lower and Upper Blue Lakes over 13,000 ft Blue Lakes Pass into Yankee Boy Basin.",
-            12.5, 4200, 9.0, "07:00", blue_lakes_wps,
-            kind_weights={"trail": 1.0, "path": 1.05, "track": 1.15, "road": 1.8},
-            prefer_names=("blue lakes", "yankee boy"),
-        ),
-    ]
-    return races
+    return races, raw_tracks_xz
 
 
 def main():
@@ -889,16 +909,21 @@ def main():
     proj_path = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_PROJ
     proj = json.loads(proj_path.read_text())
     net = TrailNetwork(proj)
-    sampler = TerrariumSampler(zoom=14, max_workers=8)
+    sampler = TerrariumSampler(zoom=14, max_workers=12)
 
     pois = build_curated_pois(proj, net, sampler)
-    races = build_races(net, sampler)
+    races, raw_tracks_xz = build_races(net, sampler)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     pois_path = OUT_DIR / "pois.json"
     races_path = OUT_DIR / "races.json"
     pois_path.write_text(json.dumps(pois, separators=(",", ":")))
     races_path.write_text(json.dumps(races, separators=(",", ":")))
+
+    graph_path = OUT_DIR / "graph.json"
+    if graph_path.exists():
+        inject_graph_connectors(net, raw_tracks_xz, graph_path)
+
     print(
         f"Wrote pois.json ({pois_path.stat().st_size / 1024:.1f} KB) and "
         f"races.json ({races_path.stat().st_size / 1024:.1f} KB) in {time.time()-t0:.1f}s"
