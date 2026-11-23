@@ -172,16 +172,16 @@ export function computeTargetSpeed({ effort, grade, surface = 'trail', surfaceIn
  * Cliff collision & slide-back.
  * Given terrain normal (nx, ny, nz) with ny = cos(slopeAngle):
  * Slope grade = sqrt(1 - ny*ny) / max(0.05, ny).
- * If slope > CLIFF_GRADE and runner tries to go uphill (dot(dir, horizNormal) < 0),
+ * If slope > cliffGradeLimit and runner tries to go uphill (dot(dir, horizNormal) < 0),
  * project out the uphill component and apply downhill slide!
  */
-export function resolveCliffSlide(vx, vz, normal, dt) {
+export function resolveCliffSlide(vx, vz, normal, dt, cliffGradeLimit = CLIFF_GRADE) {
   if (!normal) return { vx, vz, onCliff: false };
   const ny = clamp(normal.y, 0.05, 1.0);
   const horizMag = Math.hypot(normal.x, normal.z);
   const slopeGrade = horizMag / ny;
 
-  if (slopeGrade <= CLIFF_GRADE || horizMag < 1e-4) {
+  if (slopeGrade <= cliffGradeLimit || horizMag < 1e-4) {
     return { vx, vz, onCliff: false };
   }
 
@@ -198,8 +198,8 @@ export function resolveCliffSlide(vx, vz, normal, dt) {
     outVz -= dot * dz;
   }
 
-  // Add gravity slide downhill proportional to steepness beyond CLIFF_GRADE
-  const slideSpeed = clamp((slopeGrade - CLIFF_GRADE) * 3.8, 0.6, 5.5);
+  // Add gravity slide downhill proportional to steepness beyond cliffGradeLimit
+  const slideSpeed = clamp((slopeGrade - cliffGradeLimit) * 3.8, 0.6, 5.5);
   outVx += dx * slideSpeed * Math.min(1, dt * 6 + 0.35);
   outVz += dz * slideSpeed * Math.min(1, dt * 6 + 0.35);
 

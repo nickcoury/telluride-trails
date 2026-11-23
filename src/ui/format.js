@@ -173,6 +173,7 @@ export function fmtRealTimeFinishEta(remainingSec) {
 export function getRaceDisclaimer(race) {
   const id = (race?.id || '').toLowerCase();
   const dist = race?.distanceMi || 0;
+  const gainStr = Math.round(race?.gainFt || 1810).toLocaleString();
   if (id.includes('hardrock') || dist >= 90) {
     return 'This race takes ~36 real hours. Yes, really. Your clock runs even when you close the tab.';
   }
@@ -182,9 +183,14 @@ export function getRaceDisclaimer(race) {
   if (id.includes('imogene') || dist >= 15) {
     return 'Real-time climb over a 13,114 ft pass. Roughly 2.5–4 real hours of joyful suffering.';
   }
+  if (id.includes('rundola') && (id.includes('original') || id.includes('gondola') || (dist > 0 && dist < 1.8))) {
+    return `${gainStr} ft straight up the ~31% gondola cut in real time — 1.1 miles of hands-on-knees vertical grind while tourists wave down from the cabins.`;
+  }
   if (id.includes('rundola')) {
-    const gainStr = Math.round(race?.gainFt || 1810).toLocaleString();
-    return `${gainStr} ft straight up the gondola line in real time. (~30–60 min; locals race it before coffee.)`;
+    return `${gainStr} ft of relentless real-time climbing from Oak St Gondola Plaza up the Telluride Trail switchbacks (~35–65 real min; locals race it before coffee).`;
+  }
+  if (dist > 0 && dist < 3.5) {
+    return `${gainStr} ft of lung-searing San Juan vertical in ${dist.toFixed(1)} real-time miles. Short on distance, long on calf regret.`;
   }
   return '100% real-time mountain clock. Save & resume anytime, or sit at an aid station too long.';
 }

@@ -16,9 +16,9 @@
   "attribution": "Map data \u00a9 OpenStreetMap contributors (ODbL); Elevation USGS 3DEP / Mapzen Terrarium",
   "stats": {
     "chunks": 266,
-    "chunksBytes": 21561632,
-    "graphBytes": 1857130,
-    "trailEdges": 9175,
+    "chunksBytes": 21564406,
+    "graphBytes": 1858156,
+    "trailEdges": 9181,
     "waterways": 3218,
     "lakes": 1203,
     "waterfalls": 37,
@@ -1539,7 +1539,7 @@
         1183.5
       ],
       "counts": {
-        "trails": 643,
+        "trails": 649,
         "waterways": 32,
         "lakes": 5,
         "waterfalls": 0,

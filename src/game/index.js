@@ -5,10 +5,12 @@ import { lonLatToWorld } from '../core/geo.js';
 import {
   ACHIEVEMENTS,
   ALT_PENALTY_START_FT,
+  CLIFF_GRADE,
   FOODS,
   KM_M,
   M_TO_FT,
   MILE_M,
+  TRAIL_CLIFF_GRADE,
 } from './constants.js';
 import {
   createPhysiology,
@@ -681,9 +683,11 @@ export function createGame(engine, terrain, trailData, world) {
     let vx = dirX * state.speedMs;
     let vz = dirZ * state.speedMs;
 
-    // Unclimbable cliff slide-back
+    // Unclimbable cliff slide-back (relaxed on mapped trails/paths or within 10m of official race course)
+    const onRaceCourse = state.mode === 'race' && raceMgr.isActive() && raceMgr.getOffCourseM() <= 10;
+    const cliffLimit = (surfEval.onTrail || onRaceCourse) ? TRAIL_CLIFF_GRADE : CLIFF_GRADE;
     const normal = terrain.getNormal ? terrain.getNormal(state.x, state.z) : null;
-    const cliffRes = resolveCliffSlide(vx, vz, normal, dtSim);
+    const cliffRes = resolveCliffSlide(vx, vz, normal, dtSim, cliffLimit);
     vx = cliffRes.vx;
     vz = cliffRes.vz;
     if (cliffRes.onCliff && elapsedRunS - lastCliffToastS > 12) {
@@ -772,8 +776,8 @@ export function createGame(engine, terrain, trailData, world) {
     smoothY += (newGroundY - smoothY) * Math.min(1, dtSim * 22);
     state.y = smoothY + jumpOffset;
 
-    // Trail-keeping & Leave No Trace warnings
-    const offTrail = !surfEval.onTrail && surfEval.surfaceInfo.offTrail;
+    // Trail-keeping & Leave No Trace warnings (never warn when legitimately on active race course)
+    const offTrail = !surfEval.onTrail && !onRaceCourse && surfEval.surfaceInfo.offTrail;
     if (offTrail && stepDist > 0.05) {
       offTrailSeconds += dtSim;
       if (offTrailSeconds > 6 && elapsedRunS - lastLntToastS > 32) {
@@ -782,7 +786,7 @@ export function createGame(engine, terrain, trailData, world) {
         toast(pickLntWarning(), 'warn', 4.5);
         if (lntWarningsCount >= 3) unlockAchievement('lnt_scold');
       }
-    } else if (surfEval.onTrail) {
+    } else if (surfEval.onTrail || onRaceCourse) {
       offTrailSeconds = Math.max(0, offTrailSeconds - dtSim * 0.5);
     }
 
@@ -956,10 +960,12 @@ export function createGame(engine, terrain, trailData, world) {
     const surfEval = lastSurfaceInfo || evaluateSurface(state.x, state.z, terrain, trailData);
     const hydr01 = hydrationPct(phys) / 100;
     const stam01 = phys.stamina / 100;
+    const onRaceLineHud = state.mode === 'race' && raceMgr.isActive() && raceMgr.getOffCourseM() <= 10;
+    const onTrailEffective = surfEval.onTrail || onRaceLineHud;
     state.stamina = stam01;
     state.hydration = hydr01;
     state.surface = surfEval.surface;
-    state.trailName = surfEval.nearest?.name || (surfEval.onTrail ? 'San Juan Trail' : 'Off-Trail');
+    state.trailName = surfEval.nearest?.name || (onRaceLineHud ? (raceMgr.getRace()?.name || 'Race Course') : (surfEval.onTrail ? 'San Juan Trail' : 'Off-Trail'));
     state.autopilot = autopilot;
 
     const paceSecPerMi = state.speedMs > 0.25 ? MILE_M / state.speedMs : 0;
@@ -1013,7 +1019,7 @@ export function createGame(engine, terrain, trailData, world) {
       surfaceLabel: surfEval.surfaceInfo.label,
       trailName: state.trailName,
       trailDistM: surfEval.trailDistM,
-      onTrail: surfEval.onTrail,
+      onTrail: onTrailEffective,
       offTrailSeconds,
       x: state.x,
       z: state.z,

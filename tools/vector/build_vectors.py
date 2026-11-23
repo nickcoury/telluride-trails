@@ -328,6 +328,188 @@ def main():
                 })
                 seg_start = i
 
+    # 3b. Inject traversable Gondola Base Plaza + Footbridge + Original Rundola (Gondola Cut) + San Sophia connectors
+    # All vertices verified clear of OSM building footprints (b223628430..b223628435 at base, b231107849/b231107919 at San Sophia).
+    def find_or_create_world_node(wx: float, wz: float, snap_m: float = 1.5) -> int:
+        best_nid = None
+        best_d2 = snap_m * snap_m
+        for nid, (nx, _, nz) in enumerate(graph_node_list):
+            d2 = (nx - wx) ** 2 + (nz - wz) ** 2
+            if d2 < best_d2:
+                best_d2 = d2
+                best_nid = nid
+        if best_nid is not None:
+            return best_nid
+        wy = sampler.sample_world(wx, wz)
+        nid = len(graph_node_list)
+        graph_node_list.append([round(wx, 1), round(wy, 1), round(wz, 1)])
+        return nid
+
+    def densify_xz(pts: list[tuple[float, float]], max_step_m: float = 30.0) -> list[tuple[float, float]]:
+        out = [pts[0]]
+        for i in range(1, len(pts)):
+            ax, az = pts[i - 1]
+            bx, bz = pts[i]
+            seg = math.hypot(bx - ax, bz - az)
+            if seg > max_step_m:
+                n = int(seg // max_step_m)
+                for k in range(1, n + 1):
+                    f = k / (n + 1)
+                    out.append((ax + (bx - ax) * f, az + (bz - az) * f))
+            out.append((bx, bz))
+        return out
+
+    def add_synthetic_edge(
+        pts_xz: list[tuple[float, float]],
+        name: str,
+        kind: str = "path",
+        width_m: float = 1.8,
+        diff: str = "easy",
+        sac_scale: str = "",
+        surface: str = "dirt",
+        highway: str = "path",
+        max_step_m: float = 0.0,
+    ):
+        nonlocal edge_id_counter
+        u = find_or_create_world_node(pts_xz[0][0], pts_xz[0][1])
+        v = find_or_create_world_node(pts_xz[-1][0], pts_xz[-1][1])
+        pts = [(graph_node_list[u][0], graph_node_list[u][2])] + list(pts_xz[1:-1]) + [(graph_node_list[v][0], graph_node_list[v][2])]
+        if max_step_m > 0.0:
+            pts = densify_xz(pts, max_step_m=max_step_m)
+        coords_flat = []
+        xz_pts = []
+        length_m = 0.0
+        gain_m = 0.0
+        loss_m = 0.0
+        prev_xyz = None
+        for idx_p, (px, pz) in enumerate(pts):
+            if idx_p == 0:
+                rx, ry, rz = graph_node_list[u]
+            elif idx_p == len(pts) - 1:
+                rx, ry, rz = graph_node_list[v]
+            else:
+                rx, rz = round(px, 1), round(pz, 1)
+                ry = round(sampler.sample_world(rx, rz), 1)
+            coords_flat.extend([rx, ry, rz])
+            xz_pts.append((rx, rz))
+            if prev_xyz is not None:
+                length_m += math.hypot(rx - prev_xyz[0], rz - prev_xyz[2])
+                dy = ry - prev_xyz[1]
+                if dy > 0:
+                    gain_m += dy
+                else:
+                    loss_m += -dy
+            prev_xyz = (rx, ry, rz)
+        eid = f"e{edge_id_counter}"
+        edge_id_counter += 1
+        trail_edges.append({
+            "id": eid,
+            "u": u,
+            "v": v,
+            "name": name,
+            "routes": [],
+            "kind": kind,
+            "highway": highway,
+            "surface": surface,
+            "sacScale": sac_scale,
+            "widthM": width_m,
+            "difficulty": diff,
+            "lengthM": round(length_m, 1),
+            "gainM": round(gain_m, 1),
+            "lossM": round(loss_m, 1),
+            "coords": coords_flat,
+            "_xz": xz_pts,
+        })
+        graph_edges.append({
+            "id": eid,
+            "u": u,
+            "v": v,
+            "len": round(length_m, 1),
+            "gain": round(gain_m, 1),
+            "loss": round(loss_m, 1),
+            "kind": kind,
+            "name": name,
+            "coords": coords_flat,
+        })
+
+    # Gondola Base Plaza (S Oak St -> Oak St Gondola Plaza -> South Apron -> Gondola Base West Apron)
+    # and Gondola Base Footbridge (West Apron -> San Miguel Footbridge -> Telluride Trail Base).
+    # West Apron (-165.4, 176.1) is offset 6.5m SSE of Gondola Tower #1 (-167.3, 169.9) so spawns & cut clear all pylons >= 5m and buildings >= 9m.
+    gondola_west_apron = (-165.4, 176.1)
+    san_sophia_apron = (-1782.0, 677.0)
+    add_synthetic_edge(
+        [(-98.5, 162.0), (-118.0, 162.0), (-126.0, 183.0), (-162.0, 183.0), gondola_west_apron],
+        name="Gondola Base Plaza",
+        kind="path",
+        width_m=2.6,
+        diff="easy",
+        surface="paved",
+        highway="footway",
+    )
+    add_synthetic_edge(
+        [gondola_west_apron, (-174.7, 194.8)],
+        name="Gondola Base Footbridge",
+        kind="path",
+        width_m=2.2,
+        diff="easy",
+        surface="dirt",
+        highway="footway",
+    )
+
+    # Original Rundola (Gondola Cut): direct bootpack running 6.5m SSE parallel to Gondola Line 1 (aw17145067 pts 1..21)
+    # so the runner climbs directly beneath the gondola corridor while clearing every pylon mast by >= 5.0m.
+    gondola_aw = next((a for a in raw["aerialways"] if a["id"] == 17145067), None)
+    if gondola_aw and len(gondola_aw["coords"]) >= 22:
+        raw_line_pts = [lon_lat_to_world(lon, lat) for lon, lat in gondola_aw["coords"][1:22]]
+        g_dx = raw_line_pts[-1][0] - raw_line_pts[0][0]
+        g_dz = raw_line_pts[-1][1] - raw_line_pts[0][1]
+        g_len = math.hypot(g_dx, g_dz)
+        # Right-hand perpendicular pointing SSE (+X, +Z) off the pylon centerline
+        off_x = (g_dz / g_len) * 6.5
+        off_z = (-g_dx / g_len) * 6.5
+        gondola_line_pts = [(round(px + off_x, 1), round(pz + off_z, 1)) for px, pz in raw_line_pts]
+        gondola_cut_pts = [gondola_west_apron] + gondola_line_pts[1:] + [san_sophia_apron]
+        add_synthetic_edge(
+            gondola_cut_pts,
+            name="Original Rundola (Gondola Cut)",
+            kind="path",
+            width_m=1.4,
+            diff="demanding_hard",
+            sac_scale="demanding_mountain_hiking",
+            surface="dirt",
+            highway="path",
+            max_step_m=30.0,
+        )
+
+    # San Sophia Station East Apron tie-ins to Telluride Trail top, Ridge Trail, and Village trail junction
+    add_synthetic_edge(
+        [san_sophia_apron, (-1776.0, 725.0), (-1789.6, 777.1)],
+        name="San Sophia Station Connector",
+        kind="path",
+        width_m=2.2,
+        diff="easy",
+        surface="dirt",
+        highway="footway",
+    )
+    add_synthetic_edge(
+        [san_sophia_apron, (-1781.8, 658.8)],
+        name="San Sophia Station Connector",
+        kind="path",
+        width_m=2.2,
+        diff="easy",
+        surface="dirt",
+        highway="footway",
+    )
+    add_synthetic_edge(
+        [san_sophia_apron, (-1779.4, 682.3)],
+        name="San Sophia Station Connector",
+        kind="path",
+        width_m=2.2,
+        diff="easy",
+        surface="dirt",
+        highway="footway",
+    )
+
     print(f"Trail graph: {len(graph_node_list)} nodes, {len(trail_edges)} edges")
 
     # 4. Project waterways, lakes, waterfalls, buildings, aerialways, ski runs

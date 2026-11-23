@@ -12,8 +12,10 @@ export const ALT_PENALTY_START_M = ALT_PENALTY_START_FT * FT_TO_M; // ~3352.8 m
 export const ALT_SEVERE_FT = 13200;
 
 // Slope / cliff limits
-// ~42 deg slope = tan(42 deg) ~ 0.90 grade (unclimbable rock cliff / scree wall)
+// ~42 deg slope = tan(42 deg) ~ 0.90 grade (unclimbable off-trail rock cliff / scree wall)
 export const CLIFF_GRADE = 0.90;
+// ~53.5 deg slope = 1.35 grade allowed on mapped trails/paths or official race lines (e.g. Original Rundola)
+export const TRAIL_CLIFF_GRADE = 1.35;
 export const POWER_HIKE_GRADE = 0.13; // >13% uphill -> hands-on-knees power hike
 
 // Trail keeping radii (meters)

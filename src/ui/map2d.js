@@ -47,13 +47,16 @@ export function createMap2D({ container, trailData, terrain, engine, getUnits, o
   wrap.innerHTML = `
     <canvas class="map2d__canvas" tabindex="0" aria-label="Interactive 2D map of Telluride and the San Juan Mountains. Drag to pan, scroll or pinch to zoom, click or tap any trail or point to start."></canvas>
     <div class="map2d__hud">
-      <div class="map2d__legend" aria-hidden="true">
-        <span><i style="background:#3ddc84"></i>Trailhead</span>
-        <span><i style="background:#f4b942"></i>Town</span>
-        <span><i style="background:#e65c2e"></i>Pass</span>
-        <span><i style="background:#ff8a80"></i>Peak</span>
-        <span><i style="background:#67c8ff"></i>Water</span>
-        <span><i style="background:#c792ea"></i>Viewpoint</span>
+      <div class="map2d__legend-wrap">
+        <button type="button" class="map2d__legend-toggle" aria-expanded="false">Legend ▾</button>
+        <div class="map2d__legend" aria-hidden="true">
+          <span><i style="background:#3ddc84"></i>Trailhead</span>
+          <span><i style="background:#f4b942"></i>Town</span>
+          <span><i style="background:#e65c2e"></i>Pass</span>
+          <span><i style="background:#ff8a80"></i>Peak</span>
+          <span><i style="background:#67c8ff"></i>Water</span>
+          <span><i style="background:#c792ea"></i>Viewpoint</span>
+        </div>
       </div>
       <div class="map2d__controls">
         <button type="button" class="map2d__btn" data-action="zoom-in" aria-label="Zoom in">+</button>
@@ -67,6 +70,16 @@ export function createMap2D({ container, trailData, terrain, engine, getUnits, o
 
   const canvas = wrap.querySelector('.map2d__canvas');
   const ctx = canvas.getContext('2d');
+  const legendWrap = wrap.querySelector('.map2d__legend-wrap');
+  const legendToggleBtn = wrap.querySelector('.map2d__legend-toggle');
+  let legendOpen = false;
+  legendToggleBtn?.addEventListener('click', () => {
+    legendOpen = !legendOpen;
+    legendWrap.classList.toggle('is-open', legendOpen);
+    legendToggleBtn.setAttribute('aria-expanded', String(legendOpen));
+    legendToggleBtn.textContent = legendOpen ? 'Legend ▴' : 'Legend ▾';
+    scheduleDraw();
+  });
 
   // World bounds of playable bbox
   const sw = lonLatToWorld(BBOX.west, BBOX.south);
@@ -458,8 +471,11 @@ export function createMap2D({ container, trailData, terrain, engine, getUnits, o
     }
 
     // Reserve UI overlay exclusion boxes (legend top-left, zoom buttons top-right, hint/scale bottom-left)
+    const isMobileCompact = w < 680;
+    const legendBoxW = isMobileCompact && !legendOpen ? 98 : Math.min(w - 60, 410);
+    const legendBoxH = isMobileCompact && legendOpen ? 92 : 48;
     const placedBoxes = [
-      { x0: 0, y0: 0, x1: Math.min(w - 60, 410), y1: 48 },
+      { x0: 0, y0: 0, x1: legendBoxW, y1: legendBoxH },
       { x0: w - 62, y0: 0, x1: w, y1: 162 },
       { x0: 0, y0: h - 76, x1: Math.min(w, 410), y1: h },
     ];

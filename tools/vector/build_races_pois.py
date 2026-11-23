@@ -1,6 +1,6 @@
 """
 Build curated pois.json (35+ free-run spots + OSM peaks/passes/waterfalls/lakes/towns)
-and races.json (11 real San Juan races using official CalTopo/OSM geometries,
+and races.json (12 real San Juan races using official CalTopo/OSM geometries,
 15m z14 Terrarium elevation resampling, and graph.json connector injection for route()).
 """
 
@@ -13,7 +13,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-from geo import BBOX, M_TO_FT, M_TO_MI, lon_lat_to_world
+from geo import BBOX, M_TO_FT, M_TO_MI, lon_lat_to_world, world_to_lon_lat
 from elevation import TerrariumSampler
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -74,8 +74,8 @@ def smooth_gain_loss(ys: list[float], threshold_m: float = 6.0) -> tuple[float, 
     return gain, loss
 
 
-def simplify_polyline(pts: list[tuple[float, float, float, float]], tol_m: float = 2.0) -> list[tuple[float, float, float, float]]:
-    """Douglas-Peucker 2D simplification preserving cumulative distance & endpoints."""
+def simplify_polyline(pts: list[tuple[float, float, float, float]], tol_m: float = 2.0, max_seg_m: float = 120.0) -> list[tuple[float, float, float, float]]:
+    """Douglas-Peucker 2D simplification preserving cumulative distance, endpoints, and max segment length."""
     if len(pts) <= 2:
         return pts
 
@@ -105,6 +105,11 @@ def simplify_polyline(pts: list[tuple[float, float, float, float]], tol_m: float
             keep[best_i] = True
             dp(start, best_i, keep)
             dp(best_i, end, keep)
+        elif max_seg_m > 0.0 and len_sq > max_seg_m * max_seg_m:
+            mid = (start + end) // 2
+            keep[mid] = True
+            dp(start, mid, keep)
+            dp(mid, end, keep)
 
     keep = [False] * len(pts)
     keep[0] = True
@@ -325,7 +330,7 @@ def build_curated_pois(proj: dict, net: TrailNetwork, sampler: TerrariumSampler)
 
     CURATED = [
         # Telluride
-        ("telluride-town", "Telluride Gondola Plaza", "town", "Telluride", (-107.8123, 37.9368), (-107.7850, 37.9355), True, "Historic box-canyon hub at 8,750 ft — head east toward Ajax Peak & Bridal Veil."),
+        ("telluride-town", "Telluride Gondola Plaza (Oak St Base)", "town", "Telluride", (-107.813644, 37.936045), (-107.7850, 37.9355), False, "Historic box-canyon hub at 8,755 ft right outside Telluride Gondola Plaza — head east toward Ajax Peak & Bridal Veil or west up the gondola corridor."),
         ("telluride-town-park", "Telluride Town Park", "trailhead", "Telluride", (-107.8058, 37.9356), (-107.7950, 37.9260), True, "East end of town where Bear Creek, Bridal Veil, and TMR kick off."),
         ("bear-creek-th", "Bear Creek Trailhead", "trailhead", "Telluride", (-107.8085, 37.9325), (-107.8020, 37.9100), True, "Iconic box-canyon singletrack climbing toward Bear Creek Falls & Wasatch."),
         ("jud-wiebe-th", "Jud Wiebe Trailhead", "trailhead", "Telluride", (-107.8152, 37.9403), (-107.8180, 37.9450), True, "Beloved 3-mile sunny aspen loop perched directly above downtown Telluride."),
@@ -334,7 +339,7 @@ def build_curated_pois(proj: dict, net: TrailNetwork, sampler: TerrariumSampler)
         ("ingram-falls", "Ingram Falls", "waterfall", "Telluride", (-107.7722, 37.9262), (-107.7550, 37.9330), True, "Roaring cascade along the Black Bear / Tomboy switchbacks above Pandora."),
         ("cornet-creek-falls", "Cornet Creek Falls", "waterfall", "Telluride", (-107.8108, 37.9422), (-107.8105, 37.9400), True, "Dramatic red-sandstone waterfall tucked right behind town off Jud Wiebe."),
         ("bear-creek-falls", "Bear Creek Falls", "waterfall", "Telluride", (-107.8125, 37.9060), (-107.8050, 37.8960), True, "2.5 miles up Bear Creek Preserve at 9,980 ft — turn around or push for Wasatch Pass."),
-        ("san-sophia-gondola", "Telluride Gondola — San Sophia Station", "viewpoint", "Telluride", (-107.8260, 37.9277), (-107.8200, 37.9320), True, "10,540 ft ridge crest between Telluride and Mountain Village (finish of Rundola)."),
+        ("san-sophia-gondola", "Telluride Gondola — San Sophia Station", "viewpoint", "Telluride", (-107.832597, 37.931418), (-107.813644, 37.936045), False, "10,540 ft ridge crest station directly atop Gondola Line 1 (finish of both Rundola courses)."),
         ("mountain-village", "Mountain Village Heritage Plaza", "town", "Telluride", (-107.8473, 37.9319), (-107.8350, 37.9280), True, "9,545 ft ski village linked by free gondola and singletrack loops."),
         ("deep-creek-th", "Deep Creek Trailhead", "trailhead", "Telluride", (-107.8825, 37.9688), (-107.8550, 37.9720), True, "Aspen-lined singletrack bench linking Last Dollar Rd to Mill Creek and town."),
         ("mill-creek-th", "Mill Creek / Waterline Trailhead", "trailhead", "Telluride", (-107.8350, 37.9510), (-107.8250, 37.9470), True, "Shaded north-side singletrack traversing Eider Creek and Waterline."),
@@ -813,23 +818,56 @@ def build_races(net: TrailNetwork, sampler: TerrariumSampler) -> tuple[list[dict
         {"name": "Telluride Town Park (Finish)", "lon": -107.8078, "lat": 37.9349, "cutoffH": 17.0, "isFinish": True},
     ]
 
-    # 4. Rundola (Oak St & Colorado Ave -> Telluride Trail switchbacks -> Ridge -> St. Sophia Ridge)
+    # 4a. Rundola (Telluride Trail) — modern USFS-permitted 4th of July course:
+    # Starts at Gondola Base West Apron (-165.4, 176.1) (6.5m SSE of Tower #1, 9.6m clear of terminal),
+    # crosses San Miguel Footbridge onto Telluride Trail, climbs all Telluride Trail switchbacks, finishes at San Sophia Apron (-1782.0, 677.0).
+    gondola_base_xz = (-165.4, 176.1)
+    san_sophia_xz = (-1782.0, 677.0)
+    san_sophia_ll = world_to_lon_lat(*san_sophia_xz)
+    tt_waypoints_xz = [
+        gondola_base_xz,
+        (-174.7, 194.8),
+        (-189.4, 197.9),
+        (-823.7, 371.1),
+        (-1308.6, 673.1),
+        (-1405.0, 950.7),
+        (-1036.0, 946.1),
+        (-1789.6, 777.1),
+        san_sophia_xz,
+    ]
     rundola_xz = route_osm_xz(
         net,
-        [
-            (-107.8118, 37.9372),
-            (-107.8145, 37.9357),
-            (-107.8244, 37.9328),
-            (-107.8241, 37.9290),
-            (-107.8275, 37.9270),
-        ],
-        avoid_names=("rundola",),
-        prefer_names=("telluride trail",),
-        max_detour_ratio=5.0,
+        [world_to_lon_lat(wx, wz) for wx, wz in tt_waypoints_xz],
+        avoid_names=("rundola", "gondola cut"),
+        prefer_names=("telluride trail", "gondola base footbridge", "san sophia station"),
+        max_detour_ratio=6.0,
     )
+    rundola_mid_ll = world_to_lon_lat(-1308.6, 673.1)
     rundola_cps = [
-        {"name": "Telluride Trail Mid-Station", "lon": -107.8244, "lat": 37.9328},
-        {"name": "San Sophia Station (10,540 ft)", "lon": -107.8275, "lat": 37.9270, "cutoffH": 3.0, "isFinish": True},
+        {"name": "Telluride Trail Mid-Climb", "lon": rundola_mid_ll[0], "lat": rundola_mid_ll[1], "targetMi": 1.3, "windowMi": 0.6},
+        {"name": "San Sophia Station (10,540 ft)", "lon": san_sophia_ll[0], "lat": san_sophia_ll[1], "cutoffH": 3.0, "isFinish": True},
+    ]
+
+    # 4b. Rundola — Original (Straight Up Gondola) — classic direct vertical-K climb right under Gondola Line 1:
+    # Starts at the exact same Gondola Base West Apron (-167.3, 169.9), climbs straight up Original Rundola (Gondola Cut)
+    # directly beneath aw17145067 cables to San Sophia Station East Apron (-1782.0, 677.0).
+    gondola_cut_edge = next((e for e in net.edges if e.get("name") == "Original Rundola (Gondola Cut)"), None)
+    if gondola_cut_edge:
+        gc = gondola_cut_edge["coords"]
+        rundola_orig_xz = [(gc[i], gc[i + 2]) for i in range(0, len(gc), 3)]
+        if dist2d(rundola_orig_xz[0][0], rundola_orig_xz[0][1], gondola_base_xz[0], gondola_base_xz[1]) > dist2d(rundola_orig_xz[-1][0], rundola_orig_xz[-1][1], gondola_base_xz[0], gondola_base_xz[1]):
+            rundola_orig_xz.reverse()
+    else:
+        rundola_orig_xz = route_osm_xz(
+            net,
+            [world_to_lon_lat(*gondola_base_xz), san_sophia_ll],
+            prefer_names=("original rundola", "gondola cut"),
+            max_detour_ratio=2.0,
+        )
+    mid_cut_ll = world_to_lon_lat(-975.0, 423.0)
+    rundola_orig_cps = [
+        {"name": "Mid-Gondola Cut (Coonskin)", "lon": mid_cut_ll[0], "lat": mid_cut_ll[1], "targetMi": 0.55, "windowMi": 0.3},
+        {"name": "San Sophia Station (10,540 ft)", "lon": san_sophia_ll[0], "lat": san_sophia_ll[1], "cutoffH": 2.5, "isFinish": True},
     ]
 
     # 5. Deep Creek Half Marathon
@@ -911,7 +949,8 @@ def build_races(net: TrailNetwork, sampler: TerrariumSampler) -> tuple[list[dict
         ("hardrock-100-ccw", "Hardrock 100 (Counter-Clockwise)", "The exact same 33,000+ ft of San Juan suffering, starting with Cunningham Gulch instead of KT so your quads are surprised differently.", 102.5, 33441, 48.0, "06:00", [lon_lat_to_world(a, b) for a, b in hr_ccw_ll], hr_ccw_cps, 2.5),
         ("imogene-pass-run", "Imogene Pass Run", "17.1 miles from Ouray (7,811 ft) up and over 13,114 ft Imogene Pass to Telluride. At least the second half is downhill — until your quads explode.", 17.1, 5300, 7.0, "07:30", imo_xz, imo_cps, 2.0),
         ("telluride-mountain-run", "Telluride Mountain Run (40M)", "40 rugged miles circling the box canyon, highlighted by the 'Mile and a Half of Sky' ridge above 13,000 ft where gravity becomes optional.", 40.0, 15000, 17.0, "05:00", [lon_lat_to_world(a, b) for a, b in tmr_ll], tmr_cps, 2.0),
-        ("rundola", "Rundola", "Up the Telluride Trail and gondola corridor to San Sophia Station (10,540 ft). You get to ride the gondola back down, which is the only civilized part.", 2.4, 1810, 3.0, "08:00", rundola_xz, rundola_cps, 1.5),
+        ("rundola", "Rundola (Telluride Trail)", "Modern USFS-permitted 4th of July course from the Telluride Gondola base up the full Telluride Trail switchbacks to San Sophia Station (10,540 ft). Forest Service switchbacks save the tundra — and you still get to ride the free gondola back down.", 2.6, 1810, 3.0, "08:00", rundola_xz, rundola_cps, 1.5),
+        ("rundola-original", "Rundola — Original (Straight Up Gondola)", "The legendary pre-permit straight-up lung-buster: 1.1 miles and ~1,800 ft of ~31% vertical directly under Gondola Line 1 from Oak St Base to San Sophia Station. Tourists wave from the cabins overhead while your calves negotiate their resignation.", 1.1, 1800, 2.5, "08:00", rundola_orig_xz, rundola_orig_cps, 1.0),
         ("deep-creek-half", "Deep Creek Trail Half Marathon", "13.1 miles of golden-aspen singletrack from Last Dollar Road across Deep Creek, Mill Creek, Waterline, and Jud Wiebe down to Oak Street.", 13.1, 3100, 5.5, "08:00", [lon_lat_to_world(a, b) for a, b in dc_ll], dc_cps, 2.0),
         ("kendall-mountain-run", "Kendall Mountain Run", "Born from a 1908 Silverton bar bet: climb nearly 4,000 ft up Kendall Mountain to 13,066 ft and sprint back to Memorial Park.", 12.3, 3960, 5.0, "08:00", [lon_lat_to_world(a, b) for a, b in kendall_ll], kendall_cps, 2.0),
         ("san-juan-solstice-50", "San Juan Solstice 50", "50-mile counter-clockwise high-alpine tour out of Lake City touching the Continental Divide above 13,300 ft. Bring a rain shell.", 50.0, 12500, 16.0, "05:00", [lon_lat_to_world(a, b) for a, b in sjs_ll], sjs_cps, 2.0),
@@ -926,7 +965,8 @@ def build_races(net: TrailNetwork, sampler: TerrariumSampler) -> tuple[list[dict
     for rid, name, blurb, off_d, off_g, cutoff_h, start_time, xz_pts, cp_defs, tol_m in specs:
         dense_full, total_m, gain_m = resample_and_eval(xz_pts, sampler, step_m=15.0, gain_threshold_m=6.0)
         checkpoints = project_checkpoints(dense_full, cp_defs)
-        simplified = simplify_polyline(dense_full, tol_m=tol_m)
+        max_seg_m = 45.0 if rid == "rundola-original" else 120.0
+        simplified = simplify_polyline(dense_full, tol_m=tol_m, max_seg_m=max_seg_m)
         line_flat = []
         for x, _, z, d in simplified:
             line_flat.extend([round(x, 1), round(z, 1), round(d, 1)])

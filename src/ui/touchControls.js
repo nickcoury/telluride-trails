@@ -111,14 +111,14 @@ export function createTouchControls({ container, engine, getSettings }) {
       lookPad.style.display = showTouch || isCoarse ? 'block' : 'none';
       return;
     }
-    if (desktopHintsEl) desktopHintsEl.hidden = false;
+    if (desktopHintsEl) desktopHintsEl.hidden = showTouch;
     touchControlsEl.hidden = !showTouch;
     lookPad.style.display = showTouch ? 'block' : 'none';
   }
   syncTouchVisibility();
 
   // Virtual Joystick
-  const MAX_RADIUS = 44;
+  let maxRadius = 40;
   const DEADZONE = 0.12;
 
   function resetJoystick() {
@@ -132,13 +132,13 @@ export function createTouchControls({ container, engine, getSettings }) {
     const dx = clientX - joyOrigin.x;
     const dy = clientY - joyOrigin.y;
     const dist = Math.hypot(dx, dy);
-    const clamped = Math.min(MAX_RADIUS, dist);
+    const clamped = Math.min(maxRadius, dist);
     const angle = Math.atan2(dy, dx);
     const kx = Math.cos(angle) * clamped;
     const ky = Math.sin(angle) * clamped;
     knobEl.style.transform = `translate3d(${kx.toFixed(1)}px, ${ky.toFixed(1)}px, 0)`;
 
-    const norm = clamped / MAX_RADIUS;
+    const norm = clamped / maxRadius;
     if (norm < DEADZONE) {
       engine.events.emit('ui:move', { x: 0, y: 0 });
     } else {
@@ -156,6 +156,7 @@ export function createTouchControls({ container, engine, getSettings }) {
     joyPointerId = e.pointerId;
     safeCapture(joystickEl, e.pointerId);
     const rect = joystickEl.getBoundingClientRect();
+    maxRadius = Math.max(26, Math.round((rect.width || 96) * 0.34));
     joyOrigin = { x: rect.left + rect.width * 0.5, y: rect.top + rect.height * 0.5 };
     joystickEl.classList.add('is-active');
     vibrate(8);
@@ -304,6 +305,19 @@ export function createTouchControls({ container, engine, getSettings }) {
     autoBtn.classList.toggle('is-active', autopilotActive);
   });
 
+  let aidBuffetExpanded = false;
+  let lastHudState = null;
+
+  const SHORT_AID_LABELS = {
+    gel: 'Gel',
+    cola: 'Coke',
+    potato: 'Potato',
+    electro: 'Electros',
+    broth: 'Broth',
+    watermelon: 'Melon',
+    quesadilla: 'Quesadilla',
+  };
+
   // Contextual actions handler (event delegation)
   contextEl.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-ctx]');
@@ -318,11 +332,16 @@ export function createTouchControls({ container, engine, getSettings }) {
       engine.events.emit('ui:eat', { key: btn.dataset.key || 'gel' });
     } else if (act === 'kiss') {
       engine.events.emit('ui:kissRock');
+    } else if (act === 'toggle-aid') {
+      aidBuffetExpanded = !aidBuffetExpanded;
+      lastContextSignature = '';
+      if (lastHudState) updateContext(lastHudState);
     }
   });
 
   function updateContext(hudState) {
     if (!hudState) return;
+    lastHudState = hudState;
 
     if (typeof hudState.autopilot === 'boolean' && hudState.autopilot !== autopilotActive) {
       autopilotActive = hudState.autopilot;
@@ -337,12 +356,18 @@ export function createTouchControls({ container, engine, getSettings }) {
     const nearStream = Boolean(hudState.nearStream);
     const canKissRock = Boolean(hudState.canKissRock || hudState.race?.ceremonyActive);
     const showAid = Boolean(nearAid) && !canKissRock;
+    if (!showAid && aidBuffetExpanded) {
+      aidBuffetExpanded = false;
+    }
     const gelsCarried = hudState.gelsCarried ?? 0;
     const lowEnergy = (hudState.stamina ?? hudState.energy ?? 1) < 0.65;
     const showQuickGel = !showAid && !canKissRock && gelsCarried > 0 && lowEnergy;
-    const sig = `${fallen}|${showAid ? aidName : ''}|${showAid ? aidFoods?.join(',') || '' : ''}|${nearStream}|${canKissRock}|${showQuickGel ? gelsCarried : 0}`;
+    const sig = `${fallen}|${showAid ? aidName : ''}|${showAid ? aidFoods?.join(',') || '' : ''}|${showAid ? (aidBuffetExpanded ? 1 : 0) : 0}|${nearStream}|${canKissRock}|${showQuickGel ? gelsCarried : 0}`;
     if (sig === lastContextSignature) return;
     lastContextSignature = sig;
+
+    contextEl.classList.toggle('context-actions--strip', showAid && !aidBuffetExpanded && !fallen && !canKissRock);
+    contextEl.classList.toggle('context-actions--expanded', showAid && aidBuffetExpanded);
 
     if (!fallen && !showAid && !nearStream && !canKissRock && !showQuickGel) {
       contextEl.hidden = true;
@@ -358,14 +383,40 @@ export function createTouchControls({ container, engine, getSettings }) {
       html += `<button type="button" class="ctx-btn ctx-btn--gold" data-ctx="kiss">🪨 Kiss the Hardrock!</button>`;
     }
     if (showAid) {
-      html += `<div class="ctx-aid-label">⛺ ${aidName || 'Aid Station'}</div>`;
-      const items = aidFoods
-        ? aidFoods.map((k) => ({ key: k, ...(FOOD_CATALOG[k] || { label: k, icon: '🍽', hint: '' }) }))
+      const rawItems = aidFoods
+        ? aidFoods
+            .filter((k) => k !== 'water')
+            .map((k) => ({ key: k, ...(FOOD_CATALOG[k] || { label: k, icon: '🍽', hint: '' }) }))
         : AID_SNACKS;
-      for (const s of items) {
-        html += `<button type="button" class="ctx-btn" data-ctx="eat" data-key="${s.key}" title="${s.hint}">${s.icon} ${s.label}</button>`;
+
+      if (aidBuffetExpanded) {
+        html += `<div class="ctx-aid-label">⛺ ${aidName || 'Aid Station'}</div>`;
+        html += `<button type="button" class="ctx-btn ctx-btn--water" data-ctx="refill">💧 Refill</button>`;
+        for (const s of rawItems) {
+          html += `<button type="button" class="ctx-btn" data-ctx="eat" data-key="${s.key}" title="${s.hint}">${s.icon} ${s.label}</button>`;
+        }
+        html += `<button type="button" class="ctx-btn ctx-btn--more" data-ctx="toggle-aid" aria-expanded="true">⛺ Less ▴</button>`;
+      } else {
+        const preferred = ['gel', 'cola', 'potato'];
+        const quickItems = [];
+        for (const pk of preferred) {
+          const found = rawItems.find((it) => it.key === pk) || (FOOD_CATALOG[pk] ? { key: pk, ...FOOD_CATALOG[pk] } : null);
+          if (found && !quickItems.some((q) => q.key === found.key)) quickItems.push(found);
+        }
+        for (const it of rawItems) {
+          if (quickItems.length >= 3) break;
+          if (!quickItems.some((q) => q.key === it.key)) quickItems.push(it);
+        }
+
+        html += `<button type="button" class="ctx-btn ctx-btn--water" data-ctx="refill">💧 Refill</button>`;
+        for (const s of quickItems) {
+          const shortLbl = SHORT_AID_LABELS[s.key] || s.label;
+          html += `<button type="button" class="ctx-btn" data-ctx="eat" data-key="${s.key}" title="${s.hint}">${s.icon} ${shortLbl}</button>`;
+        }
+        if (rawItems.length > quickItems.length) {
+          html += `<button type="button" class="ctx-btn ctx-btn--more" data-ctx="toggle-aid" aria-expanded="false" title="${aidName || 'Aid Station'}">⛺ More Aid ▾</button>`;
+        }
       }
-      html += `<button type="button" class="ctx-btn ctx-btn--water" data-ctx="refill">💧 Refill Flasks</button>`;
     } else if (nearStream && !canKissRock) {
       html += `<button type="button" class="ctx-btn ctx-btn--water" data-ctx="refill">💧 Filter Stream Water</button>`;
     }

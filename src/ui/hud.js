@@ -35,9 +35,9 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
       <header class="hud-top">
         <div class="hud-trail-pill">
           <span class="hud-trail-name">Telluride Trail</span>
-          <span class="hud-surface-badge" data-surface="trail">Trail</span>
+          <span class="hud-surface-badge" data-surface="trail"><span class="hud-surf-icon" hidden aria-hidden="true">⚠️</span><span class="hud-surf-text">Trail</span></span>
           <span class="hud-time-badge" hidden></span>
-          <span class="hud-storm-badge" hidden>⛈️ Ridge Storm</span>
+          <span class="hud-storm-badge" hidden><span aria-hidden="true">⛈️</span><span class="hud-badge-text"> Ridge Storm</span></span>
         </div>
 
         <div class="hud-top-actions">
@@ -46,20 +46,24 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
             <span class="hud-compass__deg">000°</span>
           </div>
           <button type="button" class="hud-icon-btn" data-hud-act="camera" aria-label="Switch camera view">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
             <span class="hud-cam-label">Chase</span>
           </button>
           <button type="button" class="hud-icon-btn" data-hud-act="photo" aria-label="Toggle photo mode">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          </button>
+          <button type="button" class="hud-icon-btn" data-hud-act="toggle-hud" aria-pressed="false" aria-label="Minimize HUD overlays" title="Minimize or expand HUD">
+            <svg class="hud-eye-open" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg class="hud-eye-closed" hidden width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
           </button>
           <button type="button" class="hud-icon-btn hud-icon-btn--pause" data-hud-act="pause" aria-label="Pause run">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
           </button>
         </div>
       </header>
 
       <div class="hud-sub-row">
-        <section class="hud-stats" aria-label="Runner telemetry">
+        <section class="hud-stats" aria-label="Runner telemetry (tap to expand on mobile)">
           <div class="hud-stat">
             <span class="hud-stat__label">Pace</span>
             <span class="hud-stat__val" data-field="pace">--:--</span>
@@ -74,7 +78,7 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
           </div>
           <div class="hud-stat">
             <span class="hud-stat__label">Elev / Grade</span>
-            <span class="hud-stat__val" data-field="elev">8,750 ft · 0%</span>
+            <span class="hud-stat__val" data-field="elev"><span data-field="elevOnly">8,750 ft</span><span class="hud-elev-grade" data-field="gradeOnly"> · +0%</span></span>
           </div>
 
           <div class="hud-meters">
@@ -100,6 +104,7 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
             <span data-field="finishEta">Est. finish: --</span>
             <span data-field="cutoff"></span>
           </div>
+          <div class="hud-race-compact" data-field="raceCompact"></div>
         </section>
       </div>
     </div>
@@ -121,16 +126,24 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
 
   const trailNameEl = wrap.querySelector('.hud-trail-name');
   const surfaceEl = wrap.querySelector('.hud-surface-badge');
+  const surfIconEl = wrap.querySelector('.hud-surf-icon');
+  const surfTextEl = wrap.querySelector('.hud-surf-text');
   const timeEl = wrap.querySelector('.hud-time-badge');
   const stormEl = wrap.querySelector('.hud-storm-badge');
+  const stormTextEl = stormEl.querySelector('.hud-badge-text');
   const compassDirEl = wrap.querySelector('.hud-compass__dir');
   const compassDegEl = wrap.querySelector('.hud-compass__deg');
   const camLabelEl = wrap.querySelector('.hud-cam-label');
+  const toggleHudBtn = wrap.querySelector('[data-hud-act="toggle-hud"]');
+  const eyeOpenEl = toggleHudBtn.querySelector('.hud-eye-open');
+  const eyeClosedEl = toggleHudBtn.querySelector('.hud-eye-closed');
 
+  const statsEl = wrap.querySelector('.hud-stats');
   const paceEl = wrap.querySelector('[data-field="pace"]');
   const distEl = wrap.querySelector('[data-field="dist"]');
   const vertEl = wrap.querySelector('[data-field="vert"]');
-  const elevEl = wrap.querySelector('[data-field="elev"]');
+  const elevOnlyEl = wrap.querySelector('[data-field="elevOnly"]');
+  const gradeOnlyEl = wrap.querySelector('[data-field="gradeOnly"]');
   const gaitEl = wrap.querySelector('[data-field="gait"]');
   const staminaFill = wrap.querySelector('[data-meter="stamina"] .hud-meter__fill');
   const staminaMeter = wrap.querySelector('[data-meter="stamina"]');
@@ -143,13 +156,16 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
   const nextAidEl = wrap.querySelector('[data-field="nextAid"]');
   const finishEtaEl = wrap.querySelector('[data-field="finishEta"]');
   const cutoffEl = wrap.querySelector('[data-field="cutoff"]');
+  const raceCompactEl = wrap.querySelector('[data-field="raceCompact"]');
 
+  const minimapEl = wrap.querySelector('.hud-minimap');
   const minimapCanvas = wrap.querySelector('.hud-minimap__canvas');
   const minimapCtx = minimapCanvas.getContext('2d');
   const toastsEl = wrap.querySelector('.hud-toasts');
   const photoBarEl = wrap.querySelector('.photo-bar');
 
   let photoMode = false;
+  let hudMinimized = false;
   let prevCamModeBeforePhoto = 'chase';
   let lastMinimapDrawMs = 0;
   let lastMiniX = NaN;
@@ -161,14 +177,17 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
   let lastStamPct = -1;
   let lastHydPct = -1;
 
+  const compactMql = window.matchMedia('(max-width: 680px), (max-height: 520px)');
+
   function showToast(text, tone = 'info', durationMs = 4500) {
     if (!text) return;
+    const maxToasts = compactMql.matches ? 1 : 3;
     const toast = document.createElement('div');
     toast.className = `hud-toast hud-toast--${tone}`;
     toast.textContent = text;
     toastsEl.appendChild(toast);
 
-    while (toastsEl.children.length > 3) {
+    while (toastsEl.children.length > maxToasts) {
       toastsEl.firstElementChild.remove();
     }
 
@@ -177,6 +196,21 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
       toast.classList.remove('is-visible');
       setTimeout(() => toast.remove(), 260);
     }, durationMs);
+  }
+
+  function setHudMinimized(min) {
+    hudMinimized = Boolean(min);
+    wrap.classList.toggle('is-hud-minimized', hudMinimized);
+    toggleHudBtn.setAttribute('aria-pressed', String(hudMinimized));
+    toggleHudBtn.setAttribute(
+      'aria-label',
+      hudMinimized ? 'Expand HUD overlays' : 'Minimize HUD overlays'
+    );
+    eyeOpenEl.hidden = hudMinimized;
+    eyeClosedEl.hidden = !hudMinimized;
+    if (!hudMinimized && lastHudData) {
+      drawMinimap(lastHudData, true);
+    }
   }
 
   function setPhotoMode(on) {
@@ -195,6 +229,19 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
     engine.events.emit('ui:photoMode', { enabled: photoMode });
   }
 
+  statsEl.addEventListener('click', () => {
+    if (!compactMql.matches) return;
+    onVibrate?.(6);
+    statsEl.classList.toggle('is-expanded');
+  });
+
+  minimapEl.addEventListener('click', () => {
+    if (!compactMql.matches) return;
+    onVibrate?.(6);
+    minimapEl.classList.toggle('is-expanded');
+    if (lastHudData) drawMinimap(lastHudData, true);
+  });
+
   wrap.addEventListener('click', (e) => {
     const btn = e.target.closest('button');
     if (!btn) return;
@@ -208,6 +255,9 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
     } else if (act === 'photo') {
       onVibrate?.(8);
       setPhotoMode(!photoMode);
+    } else if (act === 'toggle-hud') {
+      onVibrate?.(8);
+      setHudMinimized(!hudMinimized);
     } else if (btn.dataset.photo === 'exit') {
       setPhotoMode(false);
     } else if (btn.dataset.photo === 'snap') {
@@ -257,7 +307,7 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
   });
 
   function drawMinimap(data, force = false) {
-    if (photoMode) return;
+    if (photoMode || hudMinimized) return;
     const now = performance.now();
     if (!force && now - lastMinimapDrawMs < 200) return;
 
@@ -453,10 +503,11 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
       trailNameEl,
       data.trailName || (data.onTrail === false ? 'Off-Trail San Juans' : 'San Juan Trail')
     );
-    const surfaceLabel =
-      data.onTrail === false ? '⚠ Off-Trail' : data.surfaceLabel || data.surface || 'Trail';
-    setText(surfaceEl, String(surfaceLabel));
-    const surfKey = data.onTrail === false ? 'offtrail' : String(data.surface || 'trail').toLowerCase();
+    const isOffTrail = data.onTrail === false;
+    setHidden(surfIconEl, !isOffTrail);
+    const surfaceLabel = isOffTrail ? ' Off-Trail' : String(data.surfaceLabel || data.surface || 'Trail');
+    setText(surfTextEl, surfaceLabel);
+    const surfKey = isOffTrail ? 'offtrail' : String(data.surface || 'trail').toLowerCase();
     if (surfaceEl.dataset.surface !== surfKey) surfaceEl.dataset.surface = surfKey;
 
     if (data.localTimeStr) {
@@ -469,7 +520,7 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
     const showStorm = Boolean(data.stormActive) || (data.stormRisk ?? 0) > 0.55;
     setHidden(stormEl, !showStorm);
     if (showStorm) {
-      setText(stormEl, data.stormActive ? '⛈️ Monsoon Active!' : '⚡ Ridge Storm Risk');
+      setText(stormTextEl, data.stormActive ? ' Monsoon Active!' : ' Ridge Storm Risk');
     }
 
     // Compass
@@ -485,7 +536,8 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
     const gradePct = Math.round((data.grade ?? 0) * 100);
     setText(distEl, fmtDist(distM, units, 2));
     setText(vertEl, fmtVert(vertM, units));
-    setText(elevEl, `${fmtElev(elevM, units)} · ${gradePct >= 0 ? '+' : ''}${gradePct}%`);
+    setText(elevOnlyEl, fmtElev(elevM, units));
+    setText(gradeOnlyEl, ` · ${gradePct >= 0 ? '+' : ''}${gradePct}%`);
 
     // Stamina & Hydration
     const stamPct = Math.round(Math.max(0, Math.min(1, data.stamina ?? 1)) * 100);
@@ -517,7 +569,8 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
     if (race && (data.mode?.startsWith?.('race') || race.id)) {
       setHidden(raceBarEl, false);
       const clockSec = race.clockSec ?? race.clockS ?? data.elapsedSec ?? 0;
-      setText(raceClockEl, fmtClock(clockSec));
+      const clockStr = fmtClock(clockSec);
+      setText(raceClockEl, clockStr);
       const dilated = Boolean(
         data.timeDilated || race.timeDilated || (data.timeScale && data.timeScale > 1)
       );
@@ -528,26 +581,37 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
         setHidden(dilationBadgeEl, true);
       }
 
+      let compactAid = 'On Course';
       if (race.nextAidName) {
         const aidDist = fmtShortDist(race.nextAidDistM ?? 0, units);
         const aidEtaSec = race.etaSec ?? race.nextAidEtaS;
         const aidEta = aidEtaSec ? ` (~${fmtDurationHuman(aidEtaSec)})` : '';
         setText(nextAidEl, `Next: ${race.nextAidName} · ${aidDist}${aidEta}`);
+        const shortName = String(race.nextAidName).replace(/\s*\([^)]*\)\s*$/, '');
+        compactAid = `Next: ${shortName} (${aidDist})`;
       } else {
-        setText(
-          nextAidEl,
+        const cpStr =
           race.checkpointIdx !== undefined
             ? `Checkpoint ${race.checkpointIdx}/${race.totalCheckpoints || '?'}`
-            : 'On Course'
-        );
+            : 'On Course';
+        setText(nextAidEl, cpStr);
+        compactAid = cpStr;
       }
+      let rawEta = '';
       if (race.etaJoke || race.finishEtaStr || race.etaLabel) {
-        setText(finishEtaEl, race.etaJoke || race.finishEtaStr || race.etaLabel);
+        rawEta = race.etaJoke || race.finishEtaStr || race.etaLabel;
       } else if (Number.isFinite(race.remainingSec ?? race.etaS)) {
-        setText(finishEtaEl, fmtRealTimeFinishEta(race.remainingSec ?? race.etaS));
+        rawEta = fmtRealTimeFinishEta(race.remainingSec ?? race.etaS);
       } else {
-        setText(finishEtaEl, 'Real-time clock running');
+        rawEta = 'Real-time clock running';
       }
+      setText(finishEtaEl, rawEta);
+
+      const compactEta = rawEta
+        .replace(/^Est\.\s*finish:\s*/i, 'ETA ')
+        .replace(/\s*\([^)]*\)\s*$/, '');
+      const dilMark = dilated ? '*' : '';
+      setText(raceCompactEl, `⏱ ${clockStr}${dilMark} · ${compactAid} · ${compactEta}`);
 
       const remCutoff = Number.isFinite(race.cutoffRemainingSec)
         ? race.cutoffRemainingSec

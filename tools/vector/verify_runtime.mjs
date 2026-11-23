@@ -63,9 +63,38 @@ console.log(`Startup loadTrailData(): ${startupMs.toFixed(1)} ms (reqs=${fetched
 console.log(`POIs: ${trailData.pois.length} total, ${trailData.pois.filter((p) => p.freeRun).length} freeRun`);
 console.log(`Races: ${trailData.races.length}`);
 
-assert.equal(trailData.races.length, 11, 'Expected 11 races');
+assert.equal(trailData.races.length, 12, 'Expected 12 races');
 assert.ok(!JSON.stringify(trailData.pois).includes('St. Sophia'), 'St. Sophia should be San Sophia');
 assert.ok(!JSON.stringify(trailData.races).includes('St. Sophia'), 'St. Sophia in races should be San Sophia');
+
+// Check Gondola Base & San Sophia POIs + both Rundola races
+const townPoi = trailData.pois.find((p) => p.id === 'telluride-town');
+const sophiaPoi = trailData.pois.find((p) => p.id === 'san-sophia-gondola');
+assert.ok(townPoi && Math.hypot(townPoi.x - (-118.0), townPoi.z - 162.0) < 2.0, `telluride-town misplaced: (${townPoi?.x}, ${townPoi?.z})`);
+assert.ok(sophiaPoi && Math.hypot(sophiaPoi.x - (-1782.0), sophiaPoi.z - 677.0) < 2.0, `san-sophia-gondola misplaced: (${sophiaPoi?.x}, ${sophiaPoi?.z})`);
+assert.ok(sophiaPoi.y > 3205 && sophiaPoi.y < 3225, `san-sophia-gondola y=${sophiaPoi.y}m should be ~3212m (~10538ft)`);
+
+const rundolaTT = trailData.races.find((r) => r.id === 'rundola');
+const rundolaOrig = trailData.races.find((r) => r.id === 'rundola-original');
+assert.ok(rundolaTT && rundolaOrig, 'Expected both rundola and rundola-original races');
+assert.equal(rundolaTT.start.x, rundolaOrig.start.x, 'Both Rundola courses must share the exact same Gondola Base start X');
+assert.equal(rundolaTT.start.z, rundolaOrig.start.z, 'Both Rundola courses must share the exact same Gondola Base start Z');
+assert.ok(Math.hypot(rundolaTT.start.x - (-165.4), rundolaTT.start.z - 176.1) < 1.0, `Rundola start (${rundolaTT.start.x}, ${rundolaTT.start.z}) should be Gondola Base Apron (-165.4, 176.1)`);
+assert.equal(rundolaTT.finish.x, rundolaOrig.finish.x, 'Both Rundola courses must share the exact same San Sophia finish X');
+assert.equal(rundolaTT.finish.z, rundolaOrig.finish.z, 'Both Rundola courses must share the exact same San Sophia finish Z');
+assert.ok(Math.hypot(rundolaTT.finish.x - (-1782.0), rundolaTT.finish.z - 677.0) < 1.0, `Rundola finish (${rundolaTT.finish.x}, ${rundolaTT.finish.z}) should be San Sophia Apron (-1782.0, 677.0)`);
+assert.ok(rundolaTT.distanceMi >= 2.4 && rundolaTT.distanceMi <= 2.8, `rundola dist=${rundolaTT.distanceMi} mi out of range`);
+assert.ok(rundolaTT.gainFt >= 1760 && rundolaTT.gainFt <= 1860, `rundola gain=${rundolaTT.gainFt} ft out of range`);
+assert.ok(rundolaOrig.distanceMi >= 1.0 && rundolaOrig.distanceMi <= 1.2, `rundola-original dist=${rundolaOrig.distanceMi} mi out of range`);
+assert.ok(rundolaOrig.gainFt >= 1750 && rundolaOrig.gainFt <= 1850, `rundola-original gain=${rundolaOrig.gainFt} ft out of range`);
+
+// Verify heading convention atan2(-dx, -dz) on all races
+for (const r of trailData.races) {
+  const dx = r.line[3] - r.line[0];
+  const dz = r.line[4] - r.line[1];
+  const expectedH = Math.atan2(-dx, -dz);
+  assert.ok(Math.abs(r.start.heading - expectedH) < 0.01, `${r.id} start heading ${r.start.heading} != atan2(-dx,-dz) ${expectedH}`);
+}
 
 // Check Bear Creek Falls elevation (~9,976 ft = ~3040.8 m) & single Bridal Veil Falls
 const bcf = trailData.pois.find((p) => p.id === 'bear-creek-falls');
@@ -122,9 +151,71 @@ for (const cat of ['trails', 'waterways', 'lakes', 'buildings', 'aerialways', 's
   );
 }
 
-// 2. Local synchronous route() without graph.json
+// 2. Local synchronous route() without graph.json + Gondola Cut & building clearance checks
 const localPoly = trailData.route({ x: 0, z: 0 }, { x: 1200, z: 2200 });
 assert.ok(localPoly.length > 5 && !fetchedUrls.some((u) => u.endsWith('graph.json')));
+
+// Verify Gondola Base -> San Sophia local route() and nearest() on Gondola Cut + building clearance
+appState = 'loading';
+await trailData.loadArea(-1000, 420, 1400);
+const nearCut = trailData.nearest(-975, 423, 25);
+assert.ok(nearCut && nearCut.name === 'Original Rundola (Gondola Cut)', `Expected Original Rundola (Gondola Cut) at (-975,423), got ${nearCut?.name}`);
+const nearBase = trailData.nearest(rundolaOrig.start.x, rundolaOrig.start.z, 10);
+assert.ok(nearBase && nearBase.dist < 1.0, `Expected trail at Rundola start, got dist=${nearBase?.dist}`);
+const nearSophia = trailData.nearest(rundolaOrig.finish.x, rundolaOrig.finish.z, 10);
+assert.ok(nearSophia && nearSophia.dist < 1.0, `Expected trail at San Sophia finish, got dist=${nearSophia?.dist}`);
+const gondolaRoute = trailData.route(rundolaOrig.start, rundolaOrig.finish);
+assert.ok(gondolaRoute.length >= 2, `Expected valid route() from Gondola Base to San Sophia, got len=${gondolaRoute.length}`);
+assert.ok(rundolaOrig.line.length >= 30 * 3, `Expected densified polyline on rundola-original, got ${rundolaOrig.line.length / 3} pts`);
+
+// Point-in-polygon check against all loaded buildings for POIs + Rundola starts/finishes
+function ptInBuilding(px, pz, coords) {
+  let inside = false;
+  const n = coords.length / 3;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = coords[i * 3], zi = coords[i * 3 + 2];
+    const xj = coords[j * 3], zj = coords[j * 3 + 2];
+    if (((zi > pz) !== (zj > pz)) && (px < ((xj - xi) * (pz - zi)) / (zj - zi + 1e-12) + xi)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+for (const [label, pt] of [
+  ['telluride-town', townPoi],
+  ['san-sophia-gondola', sophiaPoi],
+  ['rundola start', rundolaTT.start],
+  ['rundola finish', rundolaTT.finish],
+  ['rundola-original start', rundolaOrig.start],
+  ['rundola-original finish', rundolaOrig.finish],
+]) {
+  for (const b of trailData.buildings) {
+    if (pt.x < b.bbox[0] || pt.x > b.bbox[2] || pt.z < b.bbox[1] || pt.z > b.bbox[3]) continue;
+    assert.ok(!ptInBuilding(pt.x, pt.z, b.coords), `${label} (${pt.x},${pt.z}) is INSIDE building ${b.id} (${b.name})`);
+  }
+}
+// Verify pylon clearance (>= 5.0 m) on both Rundola starts, finishes, and all rundola-original vertices
+const gondolaAw = trailData.aerialways.find((a) => a.id === 'aw17145067');
+assert.ok(gondolaAw && Array.isArray(gondolaAw.pylons) && gondolaAw.pylons.length >= 15, 'Expected aw17145067 pylons');
+for (const [label, pt] of [
+  ['rundola start', rundolaTT.start],
+  ['rundola finish', rundolaTT.finish],
+  ['rundola-original start', rundolaOrig.start],
+  ['rundola-original finish', rundolaOrig.finish],
+]) {
+  const minPylonD = Math.min(...gondolaAw.pylons.map((p) => Math.hypot(pt.x - p.x, pt.z - p.z)));
+  assert.ok(minPylonD >= 5.0, `${label} (${pt.x},${pt.z}) too close to gondola pylon: ${minPylonD.toFixed(2)}m`);
+}
+let minLinePylonD = Infinity;
+for (let i = 0; i < rundolaOrig.line.length; i += 3) {
+  const px = rundolaOrig.line[i], pz = rundolaOrig.line[i + 1];
+  for (const py of gondolaAw.pylons) {
+    const d = Math.hypot(px - py.x, pz - py.z);
+    if (d < minLinePylonD) minLinePylonD = d;
+  }
+}
+assert.ok(minLinePylonD >= 5.0, `rundola-original polyline too close to gondola pylon: ${minLinePylonD.toFixed(2)}m`);
+console.log(`Verified both Rundola courses, Gondola Cut nearest()/route(), zero building intersections, and pylon clearance >= ${minLinePylonD.toFixed(2)}m!`);
 
 // 3. Test concurrency cap (<=6) & LRU eviction across full 60km region load
 appState = 'loading';
