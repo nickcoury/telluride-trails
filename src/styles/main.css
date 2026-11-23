@@ -274,7 +274,12 @@
     padding-block-start: max(1rem, var(--safe-top));
     padding-block-end: max(1rem, var(--safe-bottom));
     padding-inline: max(1rem, var(--safe-left)) max(1rem, var(--safe-right));
-    background: radial-gradient(ellipse at 50% 20%, rgba(25, 48, 70, 0.65), rgba(10, 17, 24, 0.88));
+    background: radial-gradient(
+      ellipse at 50% 32%,
+      rgba(10, 18, 28, 0.06) 0%,
+      rgba(10, 18, 28, 0.22) 60%,
+      rgba(8, 14, 22, 0.46) 100%
+    );
     overflow-y: auto;
   }
 
@@ -282,7 +287,8 @@
     position: absolute;
     inset-inline: 0;
     inset-block-end: 0;
-    block-size: 46dvb;
+    block-size: 28dvb;
+    opacity: 0.14;
     pointer-events: none;
     overflow: hidden;
   }
@@ -385,29 +391,32 @@
   .screen-head {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    padding-block-start: max(0.7rem, var(--safe-top));
-    padding-block-end: 0.7rem;
-    padding-inline: max(0.85rem, var(--safe-left)) max(0.85rem, var(--safe-right));
+    gap: 0.55rem;
+    padding-block-start: max(0.65rem, var(--safe-top));
+    padding-block-end: 0.65rem;
+    padding-inline: max(0.75rem, var(--safe-left)) max(0.75rem, var(--safe-right));
     background: var(--bg-panel-solid);
     border-block-end: 1px solid var(--border-subtle);
     flex-shrink: 0;
+    flex-wrap: nowrap;
   }
 
   .screen-head h1 {
-    font-size: clamp(1.15rem, 1rem + 1vw, 1.5rem);
+    font-size: clamp(1rem, 0.85rem + 1.1vw, 1.5rem);
     font-weight: 800;
     margin-inline-end: auto;
+    white-space: nowrap;
   }
 
   .screen-head__tag {
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     font-weight: 700;
-    padding: 0.25rem 0.65rem;
+    padding: 0.22rem 0.55rem;
     border-radius: var(--radius-pill);
     background: rgba(244, 185, 66, 0.14);
     color: var(--accent-gold);
     border: 1px solid rgba(244, 185, 66, 0.35);
+    white-space: nowrap;
   }
 
   .picker-mode-tabs {
@@ -1041,11 +1050,14 @@
   .hud-top-actions {
     pointer-events: auto;
     display: flex;
+    flex: 1 1 auto;
+    justify-content: flex-end;
     align-items: center;
     gap: 0.4rem;
   }
 
   .hud-compass {
+    margin-inline-end: auto;
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
@@ -1056,6 +1068,12 @@
     font-variant-numeric: tabular-nums;
     font-weight: 800;
     font-size: 0.84rem;
+  }
+
+  @media (min-width: 680px) {
+    .hud-compass {
+      margin-inline-end: 0;
+    }
   }
 
   .hud-compass__dir {
@@ -1292,8 +1310,22 @@
     inset-inline-start: 50%;
     transform: translateX(-50%);
     display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
     gap: 0.6rem;
+    padding: 0.5rem 0.85rem;
+    border-radius: var(--radius-lg);
+    background: var(--bg-panel);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--border-strong);
     z-index: 8;
+  }
+
+  .photo-bar__hint {
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: var(--ink-secondary);
   }
 
   /* TOUCH CONTROLS */

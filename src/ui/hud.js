@@ -1,3 +1,4 @@
+import { getFeatureBounds } from './demSampler.js';
 import {
   fmtClock,
   fmtCompass,
@@ -10,8 +11,20 @@ import {
   fmtVert,
 } from './format.js';
 
+function setText(el, val) {
+  if (el._prevText !== val) {
+    el._prevText = val;
+    el.textContent = val;
+  }
+}
+
+function setHidden(el, hidden) {
+  const b = Boolean(hidden);
+  if (el.hidden !== b) el.hidden = b;
+}
+
 /**
- * In-game HUD: telemetry, race bar, minimap/compass, toast queue, and photo mode overlay.
+ * In-game HUD: telemetry, race bar, AABB-culled minimap/compass, toast queue, and photo mode overlay.
  */
 export function createHUD({ container, engine, trailData, getSettings, onPause, onVibrate }) {
   const wrap = document.createElement('div');
@@ -99,8 +112,9 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
     <div class="hud-toasts" aria-live="polite" aria-atomic="false"></div>
 
     <div class="photo-bar" hidden>
-      <button type="button" class="btn btn--primary" data-photo="snap">📸 Save Snapshot</button>
-      <button type="button" class="btn btn--ghost" data-photo="exit">Exit Photo Mode (H)</button>
+      <span class="photo-bar__hint">Drag to orbit · Scroll/pinch to zoom</span>
+      <button type="button" class="btn btn--primary btn--sm" data-photo="snap">📸 Save Snapshot</button>
+      <button type="button" class="btn btn--ghost btn--sm" data-photo="exit">Exit Photo Mode (H)</button>
     </div>
   `;
   container.appendChild(wrap);
@@ -136,9 +150,16 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
   const photoBarEl = wrap.querySelector('.photo-bar');
 
   let photoMode = false;
+  let prevCamModeBeforePhoto = 'chase';
   let lastMinimapDrawMs = 0;
+  let lastMiniX = NaN;
+  let lastMiniZ = NaN;
+  let lastMiniHeading = NaN;
+  let lastMiniTrailCount = -1;
   let activeTimeScale = 1;
   let lastHudData = null;
+  let lastStamPct = -1;
+  let lastHydPct = -1;
 
   function showToast(text, tone = 'info', durationMs = 4500) {
     if (!text) return;
@@ -147,7 +168,6 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
     toast.textContent = text;
     toastsEl.appendChild(toast);
 
-    // Keep max 3 stacked toasts
     while (toastsEl.children.length > 3) {
       toastsEl.firstElementChild.remove();
     }
@@ -160,9 +180,19 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
   }
 
   function setPhotoMode(on) {
-    photoMode = Boolean(on);
+    const next = Boolean(on);
+    if (photoMode === next) return;
+    photoMode = next;
     wrap.classList.toggle('is-photo-mode', photoMode);
     photoBarEl.hidden = !photoMode;
+    if (photoMode) {
+      const cur = engine.cameraRig?.getMode?.() || 'chase';
+      if (cur !== 'photo') prevCamModeBeforePhoto = cur;
+      engine.cameraRig?.setMode?.('photo');
+    } else if (engine.cameraRig?.getMode?.() === 'photo') {
+      engine.cameraRig?.setMode?.(prevCamModeBeforePhoto || 'chase');
+    }
+    engine.events.emit('ui:photoMode', { enabled: photoMode });
   }
 
   wrap.addEventListener('click', (e) => {
@@ -184,6 +214,10 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
       const gameCanvas = document.getElementById('game-canvas');
       if (gameCanvas) {
         try {
+          // Force synchronous render before reading WebGL buffer (preserveDrawingBuffer is false)
+          if (engine.renderer && engine.scene && engine.camera) {
+            engine.renderer.render(engine.scene, engine.camera);
+          }
           const url = gameCanvas.toDataURL('image/png');
           const a = document.createElement('a');
           a.href = url;
@@ -199,7 +233,7 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
 
   // Keyboard shortcut 'H' for photo mode
   const onKeyDown = (e) => {
-    if (wrap.hidden) return;
+    if (e.repeat || wrap.hidden) return;
     if (e.target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
     if (e.code === 'KeyH') {
       setPhotoMode(!photoMode);
@@ -208,32 +242,57 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
   window.addEventListener('keydown', onKeyDown);
 
   const unsubCam = engine.events.on('camera:mode', ({ mode }) => {
-    const labels = { chase: 'Chase', orbit: 'Orbit', 'first-person': '1st Person' };
-    camLabelEl.textContent = labels[mode] || mode;
+    const labels = { chase: 'Chase', orbit: 'Orbit', 'first-person': '1st Person', photo: 'Photo' };
+    setText(camLabelEl, labels[mode] || mode);
   });
 
   const unsubDilation = engine.events.on('ui:timeDilation', ({ scale }) => {
     activeTimeScale = Number(scale) || 1;
     if (activeTimeScale > 1) {
-      dilationBadgeEl.hidden = false;
-      dilationBadgeEl.textContent = `${activeTimeScale}× *`;
+      setHidden(dilationBadgeEl, false);
+      setText(dilationBadgeEl, `${activeTimeScale}× *`);
     } else {
-      dilationBadgeEl.hidden = true;
+      setHidden(dilationBadgeEl, true);
     }
   });
 
-  function drawMinimap(data) {
+  function drawMinimap(data, force = false) {
+    if (photoMode) return;
     const now = performance.now();
-    if (now - lastMinimapDrawMs < 80) return;
+    if (!force && now - lastMinimapDrawMs < 200) return;
+
+    const px = data.x ?? 0;
+    const pz = data.z ?? 0;
+    const heading = data.heading ?? 0;
+    const trailList = trailData?.trails;
+    const trailCount = Array.isArray(trailList) ? trailList.length : 0;
+
+    if (
+      !force &&
+      Number.isFinite(lastMiniX) &&
+      Math.hypot(px - lastMiniX, pz - lastMiniZ) < 2.0 &&
+      Math.abs(heading - lastMiniHeading) < 0.035 &&
+      trailCount === lastMiniTrailCount
+    ) {
+      return;
+    }
+
     lastMinimapDrawMs = now;
+    lastMiniX = px;
+    lastMiniZ = pz;
+    lastMiniHeading = heading;
+    lastMiniTrailCount = trailCount;
 
     const W = minimapCanvas.width;
     const H = minimapCanvas.height;
     const cx = W * 0.5;
     const cy = H * 0.5;
-    const px = data.x ?? 0;
-    const pz = data.z ?? 0;
-    const scale = 0.12; // 1 px ~ 8.3 m -> ~560 m radius visible
+    const scale = 0.12; // 1 px ~ 8.33 m -> 566 m radius
+    const viewRadiusM = 620;
+    const minWX = px - viewRadiusM;
+    const maxWX = px + viewRadiusM;
+    const minWZ = pz - viewRadiusM;
+    const maxWZ = pz + viewRadiusM;
 
     minimapCtx.clearRect(0, 0, W, H);
     minimapCtx.fillStyle = 'rgba(12, 20, 28, 0.86)';
@@ -247,60 +306,126 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
     minimapCtx.arc(cx, cy, W * 0.44, 0, Math.PI * 2);
     minimapCtx.stroke();
 
-    const toMini = (wx, wz) => ({
-      x: cx + (wx - px) * scale,
-      y: cy + (wz - pz) * scale,
-    });
-
-    // Nearby trails
-    if (Array.isArray(trailData?.trails)) {
-      for (const tr of trailData.trails) {
-        if (!tr.coords || tr.coords.length < 6) continue;
-        minimapCtx.strokeStyle =
-          tr.kind === 'road' || tr.kind === 'track'
-            ? 'rgba(220, 226, 232, 0.45)'
-            : 'rgba(244, 185, 66, 0.72)';
-        minimapCtx.lineWidth = 1.6;
-        minimapCtx.beginPath();
-        let started = false;
-        for (let i = 0; i < tr.coords.length; i += 3) {
-          const pt = toMini(tr.coords[i], tr.coords[i + 2]);
-          if (!started) {
-            minimapCtx.moveTo(pt.x, pt.y);
-            started = true;
-          } else {
-            minimapCtx.lineTo(pt.x, pt.y);
-          }
+    // AABB-culled & batched nearby trails (2 draw calls total, zero object allocs)
+    if (trailCount > 0) {
+      // Pass 1: roads & 4x4 tracks
+      minimapCtx.strokeStyle = 'rgba(220, 226, 232, 0.45)';
+      minimapCtx.lineWidth = 1.5;
+      minimapCtx.beginPath();
+      let hasRoads = false;
+      for (let t = 0; t < trailCount; t++) {
+        const tr = trailList[t];
+        if (tr.kind !== 'road' && tr.kind !== 'track') continue;
+        const b = getFeatureBounds(tr, 2, 3);
+        if (!b || b.maxX < minWX || b.minX > maxWX || b.maxZ < minWZ || b.minZ > maxWZ) continue;
+        const c = tr.coords;
+        minimapCtx.moveTo(cx + (c[0] - px) * scale, cy + (c[2] - pz) * scale);
+        for (let i = 3; i < c.length; i += 3) {
+          minimapCtx.lineTo(cx + (c[i] - px) * scale, cy + (c[i + 2] - pz) * scale);
         }
-        minimapCtx.stroke();
+        hasRoads = true;
       }
+      if (hasRoads) minimapCtx.stroke();
+
+      // Pass 2: singletrack trails & paths
+      minimapCtx.strokeStyle = 'rgba(244, 185, 66, 0.75)';
+      minimapCtx.lineWidth = 1.6;
+      minimapCtx.beginPath();
+      let hasTrails = false;
+      for (let t = 0; t < trailCount; t++) {
+        const tr = trailList[t];
+        if (tr.kind === 'road' || tr.kind === 'track') continue;
+        const b = getFeatureBounds(tr, 2, 3);
+        if (!b || b.maxX < minWX || b.minX > maxWX || b.maxZ < minWZ || b.minZ > maxWZ) continue;
+        const c = tr.coords;
+        minimapCtx.moveTo(cx + (c[0] - px) * scale, cy + (c[2] - pz) * scale);
+        for (let i = 3; i < c.length; i += 3) {
+          minimapCtx.lineTo(cx + (c[i] - px) * scale, cy + (c[i + 2] - pz) * scale);
+        }
+        hasTrails = true;
+      }
+      if (hasTrails) minimapCtx.stroke();
     }
 
-    // Active race line
-    const raceLine = data.race?.line || trailData?.races?.find((r) => r.id === data.race?.id)?.line;
+    // Active race line (Liang-Barsky 2D box segment clipping so long segments crossing view never drop)
+    const raceObj = data.race?.id ? trailData?.races?.find((r) => r.id === data.race.id) : null;
+    const raceLine = data.race?.line || raceObj?.line;
     if (raceLine && raceLine.length >= 6) {
       minimapCtx.strokeStyle = '#e65c2e';
       minimapCtx.lineWidth = 2.4;
       minimapCtx.beginPath();
-      for (let i = 0; i < raceLine.length; i += 3) {
-        const pt = toMini(raceLine[i], raceLine[i + 1]);
-        if (i === 0) minimapCtx.moveTo(pt.x, pt.y);
-        else minimapCtx.lineTo(pt.x, pt.y);
+      const clipR = 720;
+      let anySeg = false;
+      for (let i = 0; i <= raceLine.length - 6; i += 3) {
+        const x0 = raceLine[i] - px;
+        const z0 = raceLine[i + 1] - pz;
+        const x1 = raceLine[i + 3] - px;
+        const z1 = raceLine[i + 4] - pz;
+        if (
+          (x0 < -clipR && x1 < -clipR) ||
+          (x0 > clipR && x1 > clipR) ||
+          (z0 < -clipR && z1 < -clipR) ||
+          (z0 > clipR && z1 > clipR)
+        ) {
+          continue;
+        }
+        // Liang-Barsky clip against [-clipR, clipR]^2
+        let t0 = 0;
+        let t1 = 1;
+        const dx = x1 - x0;
+        const dz = z1 - z0;
+        const checks = [
+          [-dx, x0 + clipR],
+          [dx, clipR - x0],
+          [-dz, z0 + clipR],
+          [dz, clipR - z0],
+        ];
+        let reject = false;
+        for (let k = 0; k < 4; k++) {
+          const p = checks[k][0];
+          const q = checks[k][1];
+          if (p === 0) {
+            if (q < 0) {
+              reject = true;
+              break;
+            }
+          } else {
+            const r = q / p;
+            if (p < 0) {
+              if (r > t1) { reject = true; break; }
+              if (r > t0) t0 = r;
+            } else {
+              if (r < t0) { reject = true; break; }
+              if (r < t1) t1 = r;
+            }
+          }
+        }
+        if (reject) continue;
+        minimapCtx.moveTo(cx + (x0 + dx * t0) * scale, cy + (z0 + dz * t0) * scale);
+        minimapCtx.lineTo(cx + (x0 + dx * t1) * scale, cy + (z0 + dz * t1) * scale);
+        anySeg = true;
       }
-      minimapCtx.stroke();
+      if (anySeg) minimapCtx.stroke();
     }
 
     // Next aid marker
-    if (data.race?.nextAidPos) {
-      const ap = toMini(data.race.nextAidPos.x, data.race.nextAidPos.z);
-      minimapCtx.fillStyle = '#3ddc84';
-      minimapCtx.beginPath();
-      minimapCtx.arc(ap.x, ap.y, 4, 0, Math.PI * 2);
-      minimapCtx.fill();
+    const nextCp =
+      data.race?.nextAidPos ||
+      (raceObj?.checkpoints && data.race?.checkpointIdx != null
+        ? raceObj.checkpoints[data.race.checkpointIdx]
+        : null);
+    if (nextCp && Number.isFinite(nextCp.x) && Number.isFinite(nextCp.z)) {
+      const ax = cx + (nextCp.x - px) * scale;
+      const ay = cy + (nextCp.z - pz) * scale;
+      if (ax >= -6 && ax <= W + 6 && ay >= -6 && ay <= H + 6) {
+        minimapCtx.fillStyle = '#3ddc84';
+        minimapCtx.beginPath();
+        minimapCtx.arc(ax, ay, 4.2, 0, Math.PI * 2);
+        minimapCtx.fill();
+      }
     }
 
     // Runner directional arrow (heading=0 is -Z North = up on minimap)
-    const heading = data.heading ?? 0;
     minimapCtx.save();
     minimapCtx.translate(cx, cy);
     minimapCtx.rotate(-heading);
@@ -324,100 +449,120 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
     const units = getSettings?.()?.units || 'imperial';
 
     // Trail + surface + weather
-    trailNameEl.textContent = data.trailName || (data.onTrail === false ? 'Off-Trail San Juans' : 'San Juan Trail');
+    setText(
+      trailNameEl,
+      data.trailName || (data.onTrail === false ? 'Off-Trail San Juans' : 'San Juan Trail')
+    );
     const surfaceLabel =
-      data.onTrail === false
-        ? '⚠ Off-Trail'
-        : data.surfaceLabel || data.surface || 'Trail';
-    surfaceEl.textContent = String(surfaceLabel);
-    surfaceEl.dataset.surface = data.onTrail === false ? 'offtrail' : String(data.surface || 'trail').toLowerCase();
+      data.onTrail === false ? '⚠ Off-Trail' : data.surfaceLabel || data.surface || 'Trail';
+    setText(surfaceEl, String(surfaceLabel));
+    const surfKey = data.onTrail === false ? 'offtrail' : String(data.surface || 'trail').toLowerCase();
+    if (surfaceEl.dataset.surface !== surfKey) surfaceEl.dataset.surface = surfKey;
 
     if (data.localTimeStr) {
-      timeEl.hidden = false;
-      timeEl.textContent = data.localTimeStr;
+      setHidden(timeEl, false);
+      setText(timeEl, data.localTimeStr);
     } else {
-      timeEl.hidden = true;
+      setHidden(timeEl, true);
     }
 
     const showStorm = Boolean(data.stormActive) || (data.stormRisk ?? 0) > 0.55;
-    stormEl.hidden = !showStorm;
+    setHidden(stormEl, !showStorm);
     if (showStorm) {
-      stormEl.textContent = data.stormActive ? '⛈️ Monsoon Active!' : '⚡ Ridge Storm Risk';
+      setText(stormEl, data.stormActive ? '⛈️ Monsoon Active!' : '⚡ Ridge Storm Risk');
     }
 
     // Compass
     const comp = fmtCompass(data.heading ?? 0);
-    compassDirEl.textContent = comp.cardinal;
-    compassDegEl.textContent = `${String(comp.deg).padStart(3, '0')}°`;
+    setText(compassDirEl, comp.cardinal);
+    setText(compassDegEl, `${String(comp.deg).padStart(3, '0')}°`);
 
     // Telemetry
-    paceEl.textContent = fmtPace(data, units);
+    setText(paceEl, fmtPace(data, units));
     const distM = data.distM ?? data.distanceM ?? 0;
     const vertM = data.vertGainM ?? data.vertM ?? 0;
     const elevM = data.elevM ?? data.elevationM ?? 2667;
     const gradePct = Math.round((data.grade ?? 0) * 100);
-    distEl.textContent = fmtDist(distM, units, 2);
-    vertEl.textContent = fmtVert(vertM, units);
-    elevEl.textContent = `${fmtElev(elevM, units)} · ${gradePct >= 0 ? '+' : ''}${gradePct}%`;
+    setText(distEl, fmtDist(distM, units, 2));
+    setText(vertEl, fmtVert(vertM, units));
+    setText(elevEl, `${fmtElev(elevM, units)} · ${gradePct >= 0 ? '+' : ''}${gradePct}%`);
 
     // Stamina & Hydration
-    const stam = Math.max(0, Math.min(1, data.stamina ?? data.energy ?? 1));
-    const hyd = Math.max(0, Math.min(1, data.hydration ?? 1));
-    staminaFill.style.setProperty('--pct', `${Math.round(stam * 100)}%`);
-    staminaMeter.dataset.warn = stam < 0.25 ? 'low' : 'ok';
-    hydrationFill.style.setProperty('--pct', `${Math.round(hyd * 100)}%`);
-    hydrationMeter.dataset.warn = hyd < 0.25 ? 'low' : 'ok';
+    const stamPct = Math.round(Math.max(0, Math.min(1, data.stamina ?? 1)) * 100);
+    const hydPct = Math.round(Math.max(0, Math.min(1, data.hydration ?? 1)) * 100);
+    if (stamPct !== lastStamPct) {
+      lastStamPct = stamPct;
+      staminaFill.style.setProperty('--pct', `${stamPct}%`);
+      staminaMeter.dataset.warn = stamPct < 25 ? 'low' : 'ok';
+    }
+    if (hydPct !== lastHydPct) {
+      lastHydPct = hydPct;
+      hydrationFill.style.setProperty('--pct', `${hydPct}%`);
+      hydrationMeter.dataset.warn = hydPct < 25 ? 'low' : 'ok';
+    }
 
     // Gait / altitude badge
     if (data.gait || (data.altitudeFactor && data.altitudeFactor < 0.9)) {
-      gaitEl.hidden = false;
+      setHidden(gaitEl, false);
       const parts = [];
       if (data.gait) parts.push(String(data.gait).toUpperCase());
       if (data.altitudeFactor && data.altitudeFactor < 0.9) parts.push('🏔 Thin Air');
-      gaitEl.textContent = parts.join(' · ');
+      setText(gaitEl, parts.join(' · '));
     } else {
-      gaitEl.hidden = true;
+      setHidden(gaitEl, true);
     }
 
     // Race bar
     const race = data.race;
     if (race && (data.mode?.startsWith?.('race') || race.id)) {
-      raceBarEl.hidden = false;
-      raceClockEl.textContent = fmtClock(race.clockSec ?? race.clockS ?? data.elapsedSec ?? 0);
-      const dilated = Boolean(data.timeDilated || race.timeDilated || (data.timeScale && data.timeScale > 1));
+      setHidden(raceBarEl, false);
+      const clockSec = race.clockSec ?? race.clockS ?? data.elapsedSec ?? 0;
+      setText(raceClockEl, fmtClock(clockSec));
+      const dilated = Boolean(
+        data.timeDilated || race.timeDilated || (data.timeScale && data.timeScale > 1)
+      );
       if (dilated) {
-        dilationBadgeEl.hidden = false;
-        dilationBadgeEl.textContent = `${data.timeScale || activeTimeScale || '?'}× *`;
+        setHidden(dilationBadgeEl, false);
+        setText(dilationBadgeEl, `${data.timeScale || activeTimeScale || '?'}× *`);
       } else if (activeTimeScale <= 1) {
-        dilationBadgeEl.hidden = true;
+        setHidden(dilationBadgeEl, true);
       }
 
       if (race.nextAidName) {
         const aidDist = fmtShortDist(race.nextAidDistM ?? 0, units);
         const aidEtaSec = race.etaSec ?? race.nextAidEtaS;
         const aidEta = aidEtaSec ? ` (~${fmtDurationHuman(aidEtaSec)})` : '';
-        nextAidEl.textContent = `Next: ${race.nextAidName} · ${aidDist}${aidEta}`;
+        setText(nextAidEl, `Next: ${race.nextAidName} · ${aidDist}${aidEta}`);
       } else {
-        nextAidEl.textContent = race.checkpointIdx !== undefined
-          ? `Checkpoint ${race.checkpointIdx}/${race.totalCheckpoints || '?'}`
-          : 'On Course';
+        setText(
+          nextAidEl,
+          race.checkpointIdx !== undefined
+            ? `Checkpoint ${race.checkpointIdx}/${race.totalCheckpoints || '?'}`
+            : 'On Course'
+        );
       }
       if (race.etaJoke || race.finishEtaStr || race.etaLabel) {
-        finishEtaEl.textContent = race.etaJoke || race.finishEtaStr || race.etaLabel;
-      } else if (Number.isFinite(race.remainingSec)) {
-        finishEtaEl.textContent = fmtRealTimeFinishEta(race.remainingSec);
+        setText(finishEtaEl, race.etaJoke || race.finishEtaStr || race.etaLabel);
+      } else if (Number.isFinite(race.remainingSec ?? race.etaS)) {
+        setText(finishEtaEl, fmtRealTimeFinishEta(race.remainingSec ?? race.etaS));
       } else {
-        finishEtaEl.textContent = 'Real-time clock running';
+        setText(finishEtaEl, 'Real-time clock running');
       }
-      if (Number.isFinite(race.cutoffRemainingSec)) {
-        cutoffEl.textContent = `Cutoff in ${fmtDurationHuman(race.cutoffRemainingSec)}`;
+
+      const remCutoff = Number.isFinite(race.cutoffRemainingSec)
+        ? race.cutoffRemainingSec
+        : Number.isFinite(race.cutoffSec ?? race.nextAidCutoffS)
+          ? (race.cutoffSec ?? race.nextAidCutoffS) - clockSec
+          : null;
+      if (remCutoff !== null) {
+        setText(cutoffEl, `Cutoff in ${fmtDurationHuman(Math.max(0, remCutoff))}`);
       } else if (race.cutoffH) {
-        cutoffEl.textContent = `Cutoff ${race.cutoffH}h`;
+        setText(cutoffEl, `Cutoff ${race.cutoffH}h`);
       } else {
-        cutoffEl.textContent = '';
+        setText(cutoffEl, '');
       }
     } else {
-      raceBarEl.hidden = true;
+      setHidden(raceBarEl, true);
     }
 
     drawMinimap(data);

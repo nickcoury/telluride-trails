@@ -1,16 +1,26 @@
+import { sampleDem } from './demSampler.js';
 import { fmtDist, fmtElev } from './format.js';
 
 /**
  * Sample elevation profile points for a race.
- * Uses `race.elevations` if provided, else samples `terrain.getHeight` along `race.line`
- * if terrain has variation, else builds a representative alpine profile matching `race.gainFt`.
+ * Priority:
+ * 1. `race.elevations` if pre-computed
+ * 2. Real USGS 3DEP `sampleDem(x, z)` along `race.line` (covers full San Juan bbox)
+ * 3. `terrain.getHeight(x, z)` if resident & varied
+ * 4. Representative fallback while coarse DEM is still downloading (< 200 ms on first open)
  * @param {object} race
  * @param {object} terrain
- * @returns {Array<{ dM: number, elevM: number, name?: string }>}
+ * @returns {Array<{ dM: number, elevM: number }>}
  */
 export function getRaceProfile(race, terrain) {
-  const totalM = (race?.distanceMi || 10) * 1609.344;
-  const samples = 72;
+  const line = race?.line;
+  const stride = 3;
+  const count = line ? Math.floor(line.length / stride) : 0;
+  const totalM =
+    count > 0 && line[(count - 1) * stride + 2] > 0
+      ? line[(count - 1) * stride + 2]
+      : (race?.distanceMi || 10) * 1609.344;
+  const samples = 96;
 
   if (Array.isArray(race?.elevations) && race.elevations.length >= 2) {
     return race.elevations.map((elevM, i) => ({
@@ -19,34 +29,48 @@ export function getRaceProfile(race, terrain) {
     }));
   }
 
-  const line = race?.line;
-  if (line && line.length >= 6 && typeof terrain?.getHeight === 'function') {
-    const pts = [];
-    const stride = 3;
-    const count = Math.floor(line.length / stride);
-    let minE = Infinity;
-    let maxE = -Infinity;
+  if (count >= 2) {
+    // Prefer real z10 Terrarium DEM across the entire San Juans
+    const demPts = [];
+    let demMin = Infinity;
+    let demMax = -Infinity;
     for (let i = 0; i < samples; i++) {
-      const idx = Math.min(count - 1, Math.round((i / (samples - 1)) * (count - 1)));
-      const x = line[idx * stride];
-      const z = line[idx * stride + 1];
-      const dM = line[idx * stride + 2] ?? (i / (samples - 1)) * totalM;
-      const h = terrain.getHeight(x, z);
-      if (Number.isFinite(h)) {
-        minE = Math.min(minE, h);
-        maxE = Math.max(maxE, h);
-        pts.push({ dM, elevM: h });
+      const targetD = (i / (samples - 1)) * totalM;
+      // Binary search cumulative distance along race.line
+      let lo = 0;
+      let hi = count - 1;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (line[mid * stride + 2] < targetD) lo = mid + 1;
+        else hi = mid;
+      }
+      const idx1 = lo;
+      const idx0 = Math.max(0, idx1 - 1);
+      const d0 = line[idx0 * stride + 2];
+      const d1 = line[idx1 * stride + 2];
+      const t = d1 > d0 ? (targetD - d0) / (d1 - d0) : 0;
+      const x = line[idx0 * stride] + (line[idx1 * stride] - line[idx0 * stride]) * t;
+      const z = line[idx0 * stride + 1] + (line[idx1 * stride + 1] - line[idx0 * stride + 1]) * t;
+
+      let h = sampleDem(x, z);
+      if (h == null && typeof terrain?.getHeight === 'function') {
+        const th = terrain.getHeight(x, z);
+        if (Number.isFinite(th)) h = th;
+      }
+      if (h != null && Number.isFinite(h)) {
+        if (h < demMin) demMin = h;
+        if (h > demMax) demMax = h;
+        demPts.push({ dM: targetD, elevM: h });
       }
     }
-    if (pts.length >= 10 && maxE - minE > 25) {
-      return pts;
+    if (demPts.length >= 16 && demMax - demMin > 25) {
+      return demPts;
     }
   }
 
-  // Fallback representative alpine profile (until distant terrain tiles stream in)
-  const baseM = 2670; // ~8,760 ft Telluride/Silverton valley floor
+  // Fallback representative alpine profile (only shown for ~150 ms before z10 DEM loads)
+  const baseM = 2670;
   const gainM = Math.max(200, (race?.gainFt || 2500) / 3.28084);
-  const cps = race?.checkpoints || [];
   const peaks = Math.max(1, Math.min(6, Math.round(gainM / 950)));
   const amp = Math.min(1450, Math.max(320, gainM / peaks));
 
@@ -54,27 +78,11 @@ export function getRaceProfile(race, terrain) {
   for (let i = 0; i < samples; i++) {
     const t = i / (samples - 1);
     const dM = t * totalM;
-    let wave = 0;
-    if (peaks === 1) {
-      // Point-to-point climb or up-and-down
-      const isOneWay = (race?.id || '').includes('imogene') || (race?.id || '').includes('rundola');
-      wave = isOneWay ? Math.pow(t, 0.9) * (race.id.includes('imogene') ? Math.sin(t * Math.PI * 0.72) : 1) : Math.sin(t * Math.PI);
-    } else {
-      wave = Math.abs(Math.sin(t * Math.PI * peaks)) * 0.85 + 0.15 * Math.sin(t * Math.PI * (peaks * 2 + 1));
-    }
-    let elevM = baseM + wave * amp;
-    // Anchor near checkpoint elevations if supplied
-    for (const cp of cps) {
-      if (Number.isFinite(cp.elevM) || Number.isFinite(cp.y)) {
-        const cpD = cp.d ?? 0;
-        const dist = Math.abs(dM - cpD) / Math.max(1, totalM * 0.12);
-        if (dist < 1) {
-          const target = cp.elevM ?? cp.y;
-          elevM = elevM * dist + target * (1 - dist);
-        }
-      }
-    }
-    pts.push({ dM, elevM });
+    const wave =
+      peaks === 1
+        ? Math.sin(t * Math.PI)
+        : Math.abs(Math.sin(t * Math.PI * peaks)) * 0.85 + 0.15 * Math.sin(t * Math.PI * (peaks * 2 + 1));
+    pts.push({ dM, elevM: baseM + wave * amp });
   }
   return pts;
 }
@@ -113,13 +121,14 @@ export function createElevationChart({ race, terrain, units = 'imperial' }) {
   const toY = (e) => B - ((e - yMin) / ySpan) * (B - T);
 
   const linePoints = pts.map((p) => `${toX(p.dM).toFixed(1)},${toY(p.elevM).toFixed(1)}`).join(' ');
-  const areaPath = `M ${toX(pts[0].dM).toFixed(1)},${B} ` +
+  const areaPath =
+    `M ${toX(pts[0].dM).toFixed(1)},${B} ` +
     pts.map((p) => `L ${toX(p.dM).toFixed(1)},${toY(p.elevM).toFixed(1)}`).join(' ') +
     ` L ${toX(pts[pts.length - 1].dM).toFixed(1)},${B} Z`;
 
   const gradId = `elev-grad-${String(race.id || 'race').replace(/[^a-z0-9_-]/gi, '')}`;
 
-  const cps = (race.checkpoints || []).slice(0, 8);
+  const cps = (race.checkpoints || []).slice(0, 12);
   const cpSvg = cps
     .map((cp) => {
       const cx = toX(Math.min(totalM, Math.max(0, cp.d ?? 0)));

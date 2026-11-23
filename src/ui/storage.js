@@ -75,11 +75,30 @@ export function saveRecord(record) {
 }
 
 /**
- * Return best finish time (seconds) for a raceId, preferring clean (non-time-dilated) runs.
+ * Return best finish time (seconds) for a raceId, reading gameplay's PB store first
+ * and falling back to UI records, preferring clean (non-time-dilated) runs.
  * @param {string} raceId
- * @returns {object|null}
+ * @param {object} [game]
+ * @returns {{ elapsedSec: number, timeDilated: boolean }|null}
  */
-export function getBestRecord(raceId) {
+export function getBestRecord(raceId, game) {
+  if (!raceId) return null;
+  try {
+    const pbs =
+      typeof game?.getPersonalBests === 'function'
+        ? game.getPersonalBests()
+        : JSON.parse(localStorage.getItem('telluride_trails.pbs.v1') || '{}');
+    const gpBest = pbs?.[raceId];
+    if (gpBest && Number.isFinite(gpBest.clockS) && gpBest.clockS > 0) {
+      return {
+        elapsedSec: gpBest.clockS,
+        timeDilated: Boolean(gpBest.timeDilated),
+      };
+    }
+  } catch {
+    // fallback to local records
+  }
+
   const records = loadRecords().filter((r) => r.raceId === raceId && !r.dnf && r.elapsedSec > 0);
   if (!records.length) return null;
   const clean = records.filter((r) => !r.timeDilated);
@@ -99,6 +118,7 @@ export function peekSavedRun(game) {
       if (saved) return saved;
     }
     const candidateKeys = [
+      'telluride_trails.run.v1',
       'telluride_trails_save_v1',
       'telluride_trails_save',
       'telluride-trails-save',
@@ -108,8 +128,13 @@ export function peekSavedRun(game) {
       const raw = localStorage.getItem(key);
       if (!raw) continue;
       const parsed = JSON.parse(raw);
-      if (parsed && (parsed.mode || parsed.x !== undefined)) {
-        return parsed;
+      if (parsed && parsed.mode && !parsed.finished && !parsed.dnf) {
+        return {
+          ...parsed,
+          x: parsed.x ?? parsed.pos?.x ?? 0,
+          y: parsed.y ?? parsed.pos?.y ?? 0,
+          z: parsed.z ?? parsed.pos?.z ?? 0,
+        };
       }
     }
   } catch {

@@ -142,9 +142,10 @@ export function fmtDurationHuman(seconds) {
  */
 export function fmtCompass(headingRad = 0) {
   const deg = (((-headingRad * 180) / Math.PI) % 360 + 360) % 360;
+  const rounded = Math.round(deg) % 360;
   const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
   const idx = Math.round(deg / 45) % 8;
-  return { deg: Math.round(deg), cardinal: dirs[idx] };
+  return { deg: rounded, cardinal: dirs[idx] };
 }
 
 /**
@@ -182,7 +183,8 @@ export function getRaceDisclaimer(race) {
     return 'Real-time climb over a 13,114 ft pass. Roughly 2.5–4 real hours of joyful suffering.';
   }
   if (id.includes('rundola')) {
-    return '1,790 ft straight up the gondola line in real time. (~30–60 min; locals race it before coffee.)';
+    const gainStr = Math.round(race?.gainFt || 1810).toLocaleString();
+    return `${gainStr} ft straight up the gondola line in real time. (~30–60 min; locals race it before coffee.)`;
   }
   return '100% real-time mountain clock. Save & resume anytime, or sit at an aid station too long.';
 }
@@ -209,7 +211,7 @@ export const START_TIME_OPTIONS = [
   { id: 'dawn', label: 'Dawn (5:45 AM)', hour: 5.75 },
   { id: 'midday', label: 'Midday (12:30 PM)', hour: 12.5 },
   { id: 'afternoon', label: 'Afternoon (Monsoon o’clock)', hour: 15.0 },
-  { id: 'golden', label: 'Golden Hour (6:45 PM)', hour: 18.75 },
+  { id: 'golden', label: 'Golden Hour (7:50 PM)', hour: 19.83 },
   { id: 'night', label: 'Night (Headlamp)', hour: 22.0 },
   { id: 'realtime', label: 'Right now (Real clock)', hour: null },
 ];
@@ -225,7 +227,7 @@ export const AID_SNACKS = [
 export const TRIVIA = [
   'Hardrock 100 runners climb and descend 33,197 feet — more than Mount Everest from sea level, then back down.',
   'At the Hardrock 100 finish in Silverton, there is no tape to break: finishers kiss the painted Hardrock stone.',
-  'The Telluride Gondola is the only free public transit of its kind in the US, climbing 1,790 ft over Coonskin Ridge to St. Sophia Station (10,540 ft).',
+  'The Telluride Gondola is the only free public transit of its kind in the US, climbing ~1,810 ft over Coonskin Ridge to San Sophia Station (10,540 ft).',
   'Imogene Pass sits at 13,114 ft between Ouray and Telluride. The Imogene Pass Run has linked the two mining towns since 1974.',
   'Bridal Veil Falls plunges 365 feet at the east end of Telluride’s box canyon, topped by the historic 1907 Smuggler-Union hydroelectric power plant.',
   'Grant Swamp Pass (12,950 ft) on the Hardrock course isn’t a trail — it’s a notorious wall of loose San Juan talus and sliding scree.',
@@ -233,6 +235,6 @@ export const TRIVIA = [
   'Telluride sits at 8,750 ft in a glacially carved box canyon. Even walking uphill to get coffee counts as altitude training.',
   'Handies Peak (14,048 ft) is the highest point on the Hardrock 100 course — and one of Colorado’s most scenic 14ers.',
   'In real time, 1 second here = 1 second in the mountains. You can close the tab, sleep, and wake up still at Kroger’s Canteen (13,100 ft).',
-  'The Rundola climbs 1,790 vertical feet directly beneath the Telluride Gondola cabins — tourists wave down at runners gasping for air.',
+  'The Rundola climbs straight up beneath the Telluride Gondola cabins to San Sophia Station — tourists wave down at runners gasping for air.',
   'Silverton’s Kendall Mountain sits right across the Animas River from town, hosting a brutal out-and-back skyrun to 13,066 ft.',
 ];

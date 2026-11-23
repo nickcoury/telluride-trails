@@ -5,6 +5,7 @@ import {
   tileBoundsWorld,
   worldToTile,
 } from '../core/geo.js';
+import { ensureDemLoaded, getFeatureBounds, sampleDem } from './demSampler.js';
 import { fmtElev } from './format.js';
 
 const POI_COLORS = {
@@ -15,16 +16,6 @@ const POI_COLORS = {
   waterfall: '#67c8ff',
   lake: '#4da6ff',
   viewpoint: '#c792ea',
-};
-
-const POI_GLYPHS = {
-  town: '●',
-  trailhead: '▲',
-  pass: '✕',
-  peak: '⛰',
-  waterfall: '💧',
-  lake: '◆',
-  viewpoint: '◉',
 };
 
 /**
@@ -60,7 +51,9 @@ export function createMap2D({ container, trailData, terrain, engine, getUnits, o
         <span><i style="background:#3ddc84"></i>Trailhead</span>
         <span><i style="background:#f4b942"></i>Town</span>
         <span><i style="background:#e65c2e"></i>Pass</span>
+        <span><i style="background:#ff8a80"></i>Peak</span>
         <span><i style="background:#67c8ff"></i>Water</span>
+        <span><i style="background:#c792ea"></i>Viewpoint</span>
       </div>
       <div class="map2d__controls">
         <button type="button" class="map2d__btn" data-action="zoom-in" aria-label="Zoom in">+</button>
@@ -78,39 +71,35 @@ export function createMap2D({ container, trailData, terrain, engine, getUnits, o
   // World bounds of playable bbox
   const sw = lonLatToWorld(BBOX.west, BBOX.south);
   const ne = lonLatToWorld(BBOX.east, BBOX.north);
-  const worldCenterX = (sw.x + ne.x) * 0.5;
-  const worldCenterZ = (sw.z + ne.z) * 0.5;
 
-  // Camera state in world meters
-  let viewX = 0; // Start centered on Telluride (0, 0)
+  // Camera state in world meters (start centered on Telluride)
+  let viewX = 0;
   let viewZ = 0;
-  let metersPerPx = 28; // ~7 km across a mobile screen
+  let metersPerPx = 28;
   const MIN_MPP = 1.8;
   const MAX_MPP = 180;
 
-  let selectedPin = null; // { x, z, label }
+  let selectedPin = null;
   let disposed = false;
   let rafPending = false;
+  let streamTimer = null;
 
   // Manifests & tile caches
   let imageryManifest = null;
-  let terrainManifest = null;
   let overviewMeta = null;
   let overviewImg = null;
-  const imageryCache = new Map(); // key -> ImageBitmap | HTMLImageElement | 'loading' | null
-  const reliefCache = new Map(); // key -> { canvas, heights: Float32Array, size: number } | 'loading' | null
+  const imageryCache = new Map();
   const MAX_TILE_CACHE = 84;
 
   function trimCache(map) {
     if (map.size <= MAX_TILE_CACHE) return;
     const keys = map.keys();
     while (map.size > MAX_TILE_CACHE) {
-      const oldest = keys.next().value;
-      map.delete(oldest);
+      map.delete(keys.next().value);
     }
   }
 
-  // Load instant shaded-relief + imagery overview for the full San Juan bbox
+  // Load instant shaded-relief + imagery overview FIRST (high priority so it paints immediately)
   fetch(`${base}data/imagery/overview.json`)
     .then((r) => (r.ok ? r.json() : null))
     .then((meta) => {
@@ -119,6 +108,7 @@ export function createMap2D({ container, trailData, terrain, engine, getUnits, o
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.decoding = 'async';
+      img.fetchPriority = 'high';
       img.onload = () => {
         if (disposed) return;
         overviewImg = img;
@@ -128,7 +118,11 @@ export function createMap2D({ container, trailData, terrain, engine, getUnits, o
     })
     .catch(() => {});
 
-  // Load manifests silently in background for high-zoom detail + elevation sampling
+  // Defer coarse DEM preload slightly so overview.webp & vector chunks paint first
+  const demWarmTimer = setTimeout(() => {
+    if (!disposed) ensureDemLoaded(base).catch(() => {});
+  }, 450);
+
   fetch(`${base}data/imagery/manifest.json`)
     .then((r) => (r.ok ? r.json() : null))
     .then((m) => {
@@ -139,20 +133,16 @@ export function createMap2D({ container, trailData, terrain, engine, getUnits, o
     })
     .catch(() => {});
 
-  fetch(`${base}data/terrain/manifest.json`)
-    .then((r) => (r.ok ? r.json() : null))
-    .then((m) => {
-      if (m && !disposed) {
-        terrainManifest = m;
-        scheduleDraw();
-      }
-    })
-    .catch(() => {});
-
-  // Also trigger initial loadArea around Telluride so trail lines appear on the map
-  if (typeof trailData?.loadArea === 'function') {
-    trailData.loadArea(0, 0, 12000).then(() => scheduleDraw()).catch(() => {});
+  function scheduleVectorStream() {
+    if (typeof trailData?.loadArea !== 'function' || disposed) return;
+    if (streamTimer) clearTimeout(streamTimer);
+    streamTimer = setTimeout(() => {
+      if (disposed) return;
+      const radius = Math.min(12000, Math.max(3500, metersPerPx * 280));
+      trailData.loadArea(viewX, viewZ, radius).then(() => scheduleDraw()).catch(() => {});
+    }, 180);
   }
+  scheduleVectorStream();
 
   function resize() {
     const rect = wrap.getBoundingClientRect();
@@ -185,7 +175,6 @@ export function createMap2D({ container, trailData, terrain, engine, getUnits, o
   }
 
   function pickZoomForMpp(manifest, mpp) {
-    // Scaled Web Mercator width at Telluride lat (~37.94): ~31,605,000 m / 256 px = 123,457 m/px at z0
     const approxZ = Math.round(Math.log2(123457 / Math.max(0.5, mpp)));
     const minZ = manifest?.minZoom ?? 8;
     const maxZ = manifest?.maxZoom ?? 16;
@@ -216,138 +205,14 @@ export function createMap2D({ container, trailData, terrain, engine, getUnits, o
     return 'loading';
   }
 
-  function buildShadedReliefTile(img) {
-    const S = 64; // fast downsample for crisp hillshade at 60fps
-    const raw = document.createElement('canvas');
-    raw.width = S;
-    raw.height = S;
-    const rctx = raw.getContext('2d', { willReadFrequently: true });
-    rctx.drawImage(img, 0, 0, S, S);
-    const data = rctx.getImageData(0, 0, S, S).data;
-
-    const heights = new Float32Array(S * S);
-    for (let i = 0; i < S * S; i++) {
-      const r = data[i * 4];
-      const g = data[i * 4 + 1];
-      const b = data[i * 4 + 2];
-      heights[i] = r * 256 + g + b / 256 - 32768;
-    }
-
-    const out = document.createElement('canvas');
-    out.width = S;
-    out.height = S;
-    const octx = out.getContext('2d');
-    const outImg = octx.createImageData(S, S);
-    const px = outImg.data;
-
-    // NW directional light vector
-    const lx = -0.62;
-    const ly = -0.62;
-    const lz = 0.48;
-    const cellM = 38;
-
-    for (let y = 0; y < S; y++) {
-      const y0 = Math.max(0, y - 1);
-      const y1 = Math.min(S - 1, y + 1);
-      for (let x = 0; x < S; x++) {
-        const x0 = Math.max(0, x - 1);
-        const x1 = Math.min(S - 1, x + 1);
-        const h = heights[y * S + x];
-        const dzdx = (heights[y * S + x1] - heights[y * S + x0]) / ((x1 - x0) * cellM);
-        const dzdy = (heights[y1 * S + x] - heights[y0 * S + x]) / ((y1 - y0) * cellM);
-        const nx = -dzdx;
-        const ny = -dzdy;
-        const nz = 1.0;
-        const nLen = Math.hypot(nx, ny, nz) || 1;
-        const shade = Math.max(0.18, Math.min(1.15, (nx * lx + ny * ly + nz * lz) / nLen + 0.3));
-
-        // Hypsometric San Juan palette: valley pine -> subalpine -> alpine granite -> snow crest
-        let cr, cg, cb;
-        if (h < 2750) {
-          cr = 42; cg = 74; cb = 58;
-        } else if (h < 3350) {
-          const t = (h - 2750) / 600;
-          cr = 42 + t * 34; cg = 74 + t * 24; cb = 58 + t * 10;
-        } else if (h < 3850) {
-          const t = (h - 3350) / 500;
-          cr = 76 + t * 62; cg = 98 + t * 38; cb = 68 + t * 52;
-        } else {
-          const t = Math.min(1, (h - 3850) / 450);
-          cr = 138 + t * 88; cg = 136 + t * 92; cb = 120 + t * 112;
-        }
-
-        const idx = (y * S + x) * 4;
-        px[idx] = Math.min(255, cr * shade);
-        px[idx + 1] = Math.min(255, cg * shade);
-        px[idx + 2] = Math.min(255, cb * shade);
-        px[idx + 3] = 255;
-      }
-    }
-    octx.putImageData(outImg, 0, 0);
-    return { canvas: out, heights, size: S };
-  }
-
-  function requestReliefTile(z, x, y) {
-    const key = `${z}/${x}/${y}`;
-    if (reliefCache.has(key)) return reliefCache.get(key);
-    if (!terrainManifest || !hasTileInManifest(terrainManifest, z, x, y)) {
-      return null;
-    }
-    reliefCache.set(key, 'loading');
-    const ext = terrainManifest.ext || 'webp';
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.decoding = 'async';
-    img.onload = () => {
-      if (disposed) return;
-      try {
-        const relief = buildShadedReliefTile(img);
-        reliefCache.set(key, relief);
-        trimCache(reliefCache);
-        scheduleDraw();
-      } catch {
-        reliefCache.set(key, null);
-      }
-    };
-    img.onerror = () => {
-      reliefCache.set(key, null);
-    };
-    img.src = `${base}data/terrain/${z}/${x}/${y}.${ext}`;
-    return 'loading';
-  }
-
-  function sampleCachedElevation(wx, wz) {
-    // Prefer terrain.getHeight if resident and non-constant
+  function sampleBestElevation(wx, wz) {
+    const demH = sampleDem(wx, wz);
+    if (demH !== null && Number.isFinite(demH)) return demH;
     if (typeof terrain?.getHeight === 'function') {
       const h = terrain.getHeight(wx, wz);
       if (Number.isFinite(h) && h > 500) return h;
     }
-    if (terrainManifest) {
-      for (let z = terrainManifest.maxZoom ?? 14; z >= (terrainManifest.minZoom ?? 8); z--) {
-        const t = worldToTile(wx, wz, z);
-        const entry = reliefCache.get(`${z}/${t.x}/${t.y}`);
-        if (entry && entry !== 'loading' && entry.heights) {
-          const b = tileBoundsWorld(z, t.x, t.y);
-          const u = Math.max(0, Math.min(0.999, (wx - b.minX) / (b.maxX - b.minX)));
-          const v = Math.max(0, Math.min(0.999, (wz - b.minZ) / (b.maxZ - b.minZ)));
-          const px = Math.floor(u * entry.size);
-          const py = Math.floor(v * entry.size);
-          return entry.heights[py * entry.size + px];
-        }
-      }
-    }
     return 2667;
-  }
-
-  function drawPolyline(coords, stride = 3, closed = false) {
-    if (!coords || coords.length < stride * 2) return;
-    ctx.beginPath();
-    for (let i = 0; i < coords.length; i += stride) {
-      const { sx, sy } = worldToScreen(coords[i], coords[i + (stride === 3 ? 2 : 1)]);
-      if (i === 0) ctx.moveTo(sx, sy);
-      else ctx.lineTo(sx, sy);
-    }
-    if (closed) ctx.closePath();
   }
 
   function draw() {
@@ -359,26 +224,34 @@ export function createMap2D({ container, trailData, terrain, engine, getUnits, o
     const h = canvas.clientHeight || wrap.clientHeight || 320;
     if (w < 10 || h < 10) return;
 
+    const halfW = w * 0.5;
+    const halfH = h * 0.5;
+    const invMpp = 1 / metersPerPx;
+
     ctx.save();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    // Base alpine slate background
     ctx.fillStyle = '#121d26';
     ctx.fillRect(0, 0, w, h);
 
     const topLeft = screenToWorld(0, 0);
     const botRight = screenToWorld(w, h);
+    const minWX = Math.min(topLeft.wx, botRight.wx);
+    const maxWX = Math.max(topLeft.wx, botRight.wx);
+    const minWZ = Math.min(topLeft.wz, botRight.wz);
+    const maxWZ = Math.max(topLeft.wz, botRight.wz);
 
-    // 1. Render instant shaded-relief + imagery overview, plus high-zoom detail tiles when zoomed in
+    // 1. Instant shaded-relief + imagery overview + high-zoom tiles when zoomed in
     if (overviewImg && overviewMeta?.worldBounds) {
       const wb = overviewMeta.worldBounds;
-      const p0 = worldToScreen(wb.minX, wb.minZ);
-      const p1 = worldToScreen(wb.maxX, wb.maxZ);
-      ctx.drawImage(overviewImg, p0.sx, p0.sy, p1.sx - p0.sx, p1.sy - p0.sy);
+      const x0 = (wb.minX - viewX) * invMpp + halfW;
+      const y0 = (wb.minZ - viewZ) * invMpp + halfH;
+      const x1 = (wb.maxX - viewX) * invMpp + halfW;
+      const y1 = (wb.maxZ - viewZ) * invMpp + halfH;
+      ctx.drawImage(overviewImg, x0, y0, x1 - x0, y1 - y0);
     }
 
     const iZoom = imageryManifest ? pickZoomForMpp(imageryManifest, metersPerPx) : 13;
-
     if (imageryManifest && (metersPerPx < 22 || !overviewImg)) {
       const iMin = worldToTile(topLeft.wx, topLeft.wz, iZoom);
       const iMax = worldToTile(botRight.wx, botRight.wz, iZoom);
@@ -400,9 +273,11 @@ export function createMap2D({ container, trailData, terrain, engine, getUnits, o
               if (img && img !== 'loading') {
                 drawnImagery.add(k);
                 const b = tileBoundsWorld(z, fx, fy);
-                const p0 = worldToScreen(b.minX, b.minZ);
-                const p1 = worldToScreen(b.maxX, b.maxZ);
-                ctx.drawImage(img, p0.sx, p0.sy, p1.sx - p0.sx + 0.6, p1.sy - p0.sy + 0.6);
+                const x0 = (b.minX - viewX) * invMpp + halfW;
+                const y0 = (b.minZ - viewZ) * invMpp + halfH;
+                const x1 = (b.maxX - viewX) * invMpp + halfW;
+                const y1 = (b.maxZ - viewZ) * invMpp + halfH;
+                ctx.drawImage(img, x0, y0, x1 - x0 + 0.6, y1 - y0 + 0.6);
                 break;
               }
             }
@@ -412,136 +287,226 @@ export function createMap2D({ container, trailData, terrain, engine, getUnits, o
       }
     }
 
-    // Request relief tile lazily around viewport center for accurate tap elevation fallback
-    if (terrainManifest && !overviewImg) {
-      const tZoom = pickZoomForMpp(terrainManifest, metersPerPx * 1.4);
-      const tMin = worldToTile(topLeft.wx, topLeft.wz, tZoom);
-      const tMax = worldToTile(botRight.wx, botRight.wz, tZoom);
-      if ((Math.abs(tMax.x - tMin.x) + 1) * (Math.abs(tMax.y - tMin.y) + 1) <= 36) {
-        for (let ty = Math.min(tMin.y, tMax.y); ty <= Math.max(tMin.y, tMax.y); ty++) {
-          for (let tx = Math.min(tMin.x, tMax.x); tx <= Math.max(tMin.x, tMax.x); tx++) {
-            const tile = requestReliefTile(tZoom, tx, ty);
-            if (tile && tile !== 'loading' && tile.canvas) {
-              const b = tileBoundsWorld(tZoom, tx, ty);
-              const p0 = worldToScreen(b.minX, b.minZ);
-              const p1 = worldToScreen(b.maxX, b.maxZ);
-              ctx.drawImage(tile.canvas, p0.sx, p0.sy, p1.sx - p0.sx + 0.6, p1.sy - p0.sy + 0.6);
-            }
-          }
-        }
-      }
-    }
-
     // 2. Subtle Topo Grid
     const gridStepM = metersPerPx > 45 ? 5000 : metersPerPx > 12 ? 2000 : 500;
-    const gxStart = Math.floor(topLeft.wx / gridStepM) * gridStepM;
-    const gzStart = Math.floor(topLeft.wz / gridStepM) * gridStepM;
+    const gxStart = Math.floor(minWX / gridStepM) * gridStepM;
+    const gzStart = Math.floor(minWZ / gridStepM) * gridStepM;
     ctx.strokeStyle = 'rgba(255,255,255,0.06)';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    for (let x = gxStart; x <= botRight.wx; x += gridStepM) {
-      const { sx } = worldToScreen(x, 0);
+    for (let x = gxStart; x <= maxWX; x += gridStepM) {
+      const sx = (x - viewX) * invMpp + halfW;
       ctx.moveTo(sx, 0);
       ctx.lineTo(sx, h);
     }
-    for (let z = gzStart; z <= botRight.wz; z += gridStepM) {
-      const { sy } = worldToScreen(0, z);
+    for (let z = gzStart; z <= maxWZ; z += gridStepM) {
+      const sy = (z - viewZ) * invMpp + halfH;
       ctx.moveTo(0, sy);
       ctx.lineTo(w, sy);
     }
     ctx.stroke();
 
-    // 3. Lakes & Waterways
-    if (Array.isArray(trailData?.lakes)) {
+    const step3 = metersPerPx > 40 ? 9 : 3;
+
+    // 3. Lakes & Waterways (AABB-culled & batched)
+    if (Array.isArray(trailData?.lakes) && trailData.lakes.length > 0) {
       ctx.fillStyle = 'rgba(77, 166, 255, 0.45)';
       ctx.strokeStyle = 'rgba(103, 200, 255, 0.75)';
       ctx.lineWidth = 1.2;
-      for (const lake of trailData.lakes) {
-        if (!lake.coords) continue;
-        drawPolyline(lake.coords, 3, true);
+      for (let l = 0; l < trailData.lakes.length; l++) {
+        const lake = trailData.lakes[l];
+        const b = getFeatureBounds(lake, 2, 3);
+        if (!b || b.maxX < minWX || b.minX > maxWX || b.maxZ < minWZ || b.minZ > maxWZ) continue;
+        const c = lake.coords;
+        if (!c || c.length < 6) continue;
+        ctx.beginPath();
+        ctx.moveTo((c[0] - viewX) * invMpp + halfW, (c[2] - viewZ) * invMpp + halfH);
+        for (let i = 3; i < c.length; i += 3) {
+          ctx.lineTo((c[i] - viewX) * invMpp + halfW, (c[i + 2] - viewZ) * invMpp + halfH);
+        }
+        ctx.closePath();
         ctx.fill();
         ctx.stroke();
       }
     }
 
-    if (Array.isArray(trailData?.waterways)) {
+    if (Array.isArray(trailData?.waterways) && trailData.waterways.length > 0) {
       ctx.strokeStyle = 'rgba(103, 200, 255, 0.6)';
       ctx.lineWidth = metersPerPx < 15 ? 2 : 1.2;
-      for (const ww of trailData.waterways) {
-        if (!ww.coords) continue;
-        drawPolyline(ww.coords, 3, false);
-        ctx.stroke();
+      ctx.beginPath();
+      let anyWater = false;
+      for (let wIdx = 0; wIdx < trailData.waterways.length; wIdx++) {
+        const ww = trailData.waterways[wIdx];
+        const b = getFeatureBounds(ww, 2, 3);
+        if (!b || b.maxX < minWX || b.minX > maxWX || b.maxZ < minWZ || b.minZ > maxWZ) continue;
+        const c = ww.coords;
+        if (!c || c.length < 6) continue;
+        ctx.moveTo((c[0] - viewX) * invMpp + halfW, (c[2] - viewZ) * invMpp + halfH);
+        for (let i = step3; i < c.length; i += step3) {
+          ctx.lineTo((c[i] - viewX) * invMpp + halfW, (c[i + 2] - viewZ) * invMpp + halfH);
+        }
+        const last = c.length - 3;
+        ctx.lineTo((c[last] - viewX) * invMpp + halfW, (c[last + 2] - viewZ) * invMpp + halfH);
+        anyWater = true;
       }
+      if (anyWater) ctx.stroke();
     }
 
-    // 4. Trails & Roads
-    if (Array.isArray(trailData?.trails)) {
-      for (const tr of trailData.trails) {
-        if (!tr.coords) continue;
-        const isRoad = tr.kind === 'road' || tr.kind === 'track';
-        ctx.strokeStyle = isRoad ? 'rgba(220, 226, 232, 0.55)' : 'rgba(244, 185, 66, 0.75)';
-        ctx.lineWidth = isRoad ? (metersPerPx < 12 ? 2.4 : 1.3) : (metersPerPx < 12 ? 2 : 1.2);
-        ctx.setLineDash(isRoad ? [] : [4, 3]);
-        drawPolyline(tr.coords, 3, false);
-        ctx.stroke();
+    // 4. Trails & Roads (AABB-culled & batched into 2 strokes total)
+    if (Array.isArray(trailData?.trails) && trailData.trails.length > 0) {
+      const trails = trailData.trails;
+
+      ctx.strokeStyle = 'rgba(220, 226, 232, 0.55)';
+      ctx.lineWidth = metersPerPx < 12 ? 2.4 : 1.3;
+      ctx.beginPath();
+      let anyRoad = false;
+      for (let t = 0; t < trails.length; t++) {
+        const tr = trails[t];
+        if (tr.kind !== 'road' && tr.kind !== 'track') continue;
+        const b = getFeatureBounds(tr, 2, 3);
+        if (!b || b.maxX < minWX || b.minX > maxWX || b.maxZ < minWZ || b.minZ > maxWZ) continue;
+        const c = tr.coords;
+        ctx.moveTo((c[0] - viewX) * invMpp + halfW, (c[2] - viewZ) * invMpp + halfH);
+        for (let i = step3; i < c.length; i += step3) {
+          ctx.lineTo((c[i] - viewX) * invMpp + halfW, (c[i + 2] - viewZ) * invMpp + halfH);
+        }
+        const last = c.length - 3;
+        ctx.lineTo((c[last] - viewX) * invMpp + halfW, (c[last + 2] - viewZ) * invMpp + halfH);
+        anyRoad = true;
       }
+      if (anyRoad) ctx.stroke();
+
+      ctx.strokeStyle = 'rgba(244, 185, 66, 0.78)';
+      ctx.lineWidth = metersPerPx < 12 ? 2 : 1.2;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      let anyTrail = false;
+      for (let t = 0; t < trails.length; t++) {
+        const tr = trails[t];
+        if (tr.kind === 'road' || tr.kind === 'track') continue;
+        const b = getFeatureBounds(tr, 2, 3);
+        if (!b || b.maxX < minWX || b.minX > maxWX || b.maxZ < minWZ || b.minZ > maxWZ) continue;
+        const c = tr.coords;
+        ctx.moveTo((c[0] - viewX) * invMpp + halfW, (c[2] - viewZ) * invMpp + halfH);
+        for (let i = step3; i < c.length; i += step3) {
+          ctx.lineTo((c[i] - viewX) * invMpp + halfW, (c[i + 2] - viewZ) * invMpp + halfH);
+        }
+        const last = c.length - 3;
+        ctx.lineTo((c[last] - viewX) * invMpp + halfW, (c[last + 2] - viewZ) * invMpp + halfH);
+        anyTrail = true;
+      }
+      if (anyTrail) ctx.stroke();
       ctx.setLineDash([]);
     }
 
-    // 5. Race lines (Hardrock / classics) faintly shown as crimson/gold corridors
-    if (Array.isArray(trailData?.races)) {
+    // 5. Race lines (AABB-culled & batched)
+    if (Array.isArray(trailData?.races) && trailData.races.length > 0) {
       ctx.strokeStyle = 'rgba(230, 92, 46, 0.42)';
       ctx.lineWidth = 2;
-      for (const race of trailData.races) {
-        if (!race.line || race.line.length < 6) continue;
-        ctx.beginPath();
-        for (let i = 0; i < race.line.length; i += 3) {
-          const { sx, sy } = worldToScreen(race.line[i], race.line[i + 1]);
-          if (i === 0) ctx.moveTo(sx, sy);
-          else ctx.lineTo(sx, sy);
+      ctx.beginPath();
+      let anyRace = false;
+      const rStep = metersPerPx > 35 ? 12 : 3;
+      for (let r = 0; r < trailData.races.length; r++) {
+        const race = trailData.races[r];
+        const b = getFeatureBounds(race, 1, 3);
+        if (!b || b.maxX < minWX || b.minX > maxWX || b.maxZ < minWZ || b.minZ > maxWZ) continue;
+        const line = race.line;
+        if (!line || line.length < 6) continue;
+        ctx.moveTo((line[0] - viewX) * invMpp + halfW, (line[1] - viewZ) * invMpp + halfH);
+        for (let i = rStep; i < line.length; i += rStep) {
+          ctx.lineTo((line[i] - viewX) * invMpp + halfW, (line[i + 1] - viewZ) * invMpp + halfH);
         }
-        ctx.stroke();
+        const last = line.length - 3;
+        ctx.lineTo((line[last] - viewX) * invMpp + halfW, (line[last + 1] - viewZ) * invMpp + halfH);
+        anyRace = true;
       }
+      if (anyRace) ctx.stroke();
     }
 
-    // 6. POIs
+    // 6. POIs (priority-sorted + exact screen-space AABB collision culling + UI overlay exclusion)
     const pois = trailData?.pois || [];
-    ctx.font = '600 11px system-ui, -apple-system, sans-serif';
-    ctx.textBaseline = 'middle';
-    const drawnLabels = [];
-    for (const poi of pois) {
-      const { sx, sy } = worldToScreen(poi.x, poi.z);
-      if (sx < -40 || sx > w + 40 || sy < -40 || sy > h + 40) continue;
+    const KIND_RANK = {
+      town: 0,
+      trailhead: 1,
+      pass: 2,
+      peak: 3,
+      waterfall: 4,
+      lake: 5,
+      viewpoint: 6,
+    };
+    const visiblePois = [];
+    for (let i = 0; i < pois.length; i++) {
+      const poi = pois[i];
+      const sx = (poi.x - viewX) * invMpp + halfW;
+      const sy = (poi.z - viewZ) * invMpp + halfH;
+      if (sx < -24 || sx > w + 24 || sy < -24 || sy > h + 24) continue;
+      visiblePois.push({ poi, sx, sy, rank: KIND_RANK[poi.kind] ?? 7 });
+    }
+    visiblePois.sort((a, b) => a.rank - b.rank || (b.poi.freeRun ? 1 : 0) - (a.poi.freeRun ? 1 : 0));
 
+    // Draw all visible marker dots first
+    for (let i = visiblePois.length - 1; i >= 0; i--) {
+      const { poi, sx, sy } = visiblePois[i];
       const color = POI_COLORS[poi.kind] || '#e8eef6';
       ctx.beginPath();
-      ctx.arc(sx, sy, poi.kind === 'town' ? 6 : 4.8, 0, Math.PI * 2);
+      ctx.arc(sx, sy, poi.kind === 'town' ? 6 : 4.6, 0, Math.PI * 2);
       ctx.fillStyle = color;
       ctx.fill();
       ctx.lineWidth = 1.6;
       ctx.strokeStyle = '#0d151c';
       ctx.stroke();
+    }
 
-      // Declutter labels so towns & trailheads get priority
-      const priority = poi.kind === 'town' || poi.kind === 'trailhead' || poi.kind === 'pass';
-      if (metersPerPx < 55 || priority) {
-        const collides = drawnLabels.some(
-          (b) => Math.abs(b.sx - sx) < 92 && Math.abs(b.sy - sy) < 18
-        );
-        if (!collides) {
-          drawnLabels.push({ sx, sy });
-          ctx.fillStyle = 'rgba(13, 21, 28, 0.78)';
-          const textW = ctx.measureText(poi.name).width;
-          ctx.fillRect(sx + 8, sy - 9, textW + 8, 18);
-          ctx.fillStyle = '#f4f6f8';
-          ctx.fillText(poi.name, sx + 12, sy);
+    // Reserve UI overlay exclusion boxes (legend top-left, zoom buttons top-right, hint/scale bottom-left)
+    const placedBoxes = [
+      { x0: 0, y0: 0, x1: Math.min(w - 60, 410), y1: 48 },
+      { x0: w - 62, y0: 0, x1: w, y1: 162 },
+      { x0: 0, y0: h - 76, x1: Math.min(w, 410), y1: h },
+    ];
+
+    ctx.font = '600 11px system-ui, -apple-system, sans-serif';
+    ctx.textBaseline = 'middle';
+    for (let i = 0; i < visiblePois.length; i++) {
+      const { poi, sx, sy, rank } = visiblePois[i];
+      if (metersPerPx >= 55 && rank > 2) continue;
+      if (sx < 8 || sx > w - 8 || sy < 14 || sy > h - 14) continue;
+
+      const textW = ctx.measureText(poi.name).width;
+      const boxW = textW + 10;
+      const boxH = 18;
+      // Place label to the right of marker, or flip to left if near right edge
+      const placeLeft = sx + 9 + boxW > w - 8;
+      const bx0 = placeLeft ? sx - 9 - boxW : sx + 9;
+      const by0 = sy - boxH * 0.5;
+      const candidate = {
+        x0: Math.min(sx - 7, bx0 - 3),
+        y0: by0 - 2,
+        x1: Math.max(sx + 7, bx0 + boxW + 3),
+        y1: by0 + boxH + 2,
+      };
+      if (candidate.x0 < 4 || candidate.x1 > w - 4) continue;
+
+      let collides = false;
+      for (let j = 0; j < placedBoxes.length; j++) {
+        const b = placedBoxes[j];
+        if (candidate.x0 < b.x1 && candidate.x1 > b.x0 && candidate.y0 < b.y1 && candidate.y1 > b.y0) {
+          collides = true;
+          break;
         }
       }
+      if (collides) continue;
+
+      placedBoxes.push(candidate);
+      ctx.fillStyle = 'rgba(13, 21, 28, 0.82)';
+      ctx.fillRect(bx0, by0, boxW, boxH);
+      ctx.fillStyle = '#f4f6f8';
+      ctx.fillText(poi.name, bx0 + 5, sy);
     }
 
     // 7. Selected pin
     if (selectedPin) {
-      const { sx, sy } = worldToScreen(selectedPin.x, selectedPin.z);
+      const sx = (selectedPin.x - viewX) * invMpp + halfW;
+      const sy = (selectedPin.z - viewZ) * invMpp + halfH;
       ctx.beginPath();
       ctx.arc(sx, sy, 12, 0, Math.PI * 2);
       ctx.fillStyle = 'rgba(230, 92, 46, 0.28)';
@@ -560,7 +525,7 @@ export function createMap2D({ container, trailData, terrain, engine, getUnits, o
     const rawM = targetPx * metersPerPx;
     const niceSteps = [50, 100, 250, 500, 1000, 2000, 5000, 10000];
     const barM = niceSteps.find((s) => s >= rawM * 0.7) || 10000;
-    const barPx = barM / metersPerPx;
+    const barPx = barM * invMpp;
     const units = getUnits?.() || 'imperial';
     const barLabel =
       units === 'metric'
@@ -600,13 +565,13 @@ export function createMap2D({ container, trailData, terrain, engine, getUnits, o
     viewZ = Math.max(minZ, Math.min(maxZ, viewZ));
   }
 
-  function handleTap(clientX, clientY) {
+  async function handleTap(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
     const sx = clientX - rect.left;
     const sy = clientY - rect.top;
     const { wx, wz } = screenToWorld(sx, sy);
 
-    // 1. Check nearby POI within 20px screen hit radius
+    // 1. Check nearby POI within 22px screen hit radius
     let hitPoi = null;
     let bestPx = 22;
     for (const poi of trailData?.pois || []) {
@@ -624,7 +589,7 @@ export function createMap2D({ container, trailData, terrain, engine, getUnits, o
       onPickLocation?.({
         x: hitPoi.x,
         z: hitPoi.z,
-        y: Number.isFinite(hitPoi.y) ? hitPoi.y : sampleCachedElevation(hitPoi.x, hitPoi.z),
+        y: Number.isFinite(hitPoi.y) ? hitPoi.y : sampleBestElevation(hitPoi.x, hitPoi.z),
         name: hitPoi.name,
         kind: hitPoi.kind || 'poi',
         area: hitPoi.area || 'San Juans',
@@ -637,14 +602,22 @@ export function createMap2D({ container, trailData, terrain, engine, getUnits, o
       return;
     }
 
-    // 2. Snap any tapped map point to nearest trail
+    // 2. Ensure vector chunk at tapped location is resident before snapping to nearest trail!
+    if (typeof trailData?.loadArea === 'function') {
+      try {
+        await Promise.all([trailData.loadArea(wx, wz, 2200), ensureDemLoaded(base)]);
+      } catch {
+        // ignore offline/chunk errors
+      }
+    }
+    if (disposed) return;
+
     const snap = typeof trailData?.nearest === 'function' ? trailData.nearest(wx, wz, 1200) : null;
     const px = snap ? snap.x : wx;
     const pz = snap ? snap.z : wz;
-    const elevM = sampleCachedElevation(px, pz);
+    const elevM = sampleBestElevation(px, pz);
     const { lon, lat } = worldToLonLat(px, pz);
-    const heading =
-      snap && (snap.tx || snap.tz) ? Math.atan2(-snap.tx, -snap.tz) : 0;
+    const heading = snap && (snap.tx || snap.tz) ? Math.atan2(-snap.tx, -snap.tz) : 0;
 
     selectedPin = { x: px, z: pz, label: snap?.name || 'Custom Drop' };
     scheduleDraw();
@@ -671,7 +644,11 @@ export function createMap2D({ container, trailData, terrain, engine, getUnits, o
   let lastPinchDist = 0;
 
   function onPointerDown(e) {
-    canvas.setPointerCapture(e.pointerId);
+    try {
+      canvas.setPointerCapture?.(e.pointerId);
+    } catch {
+      // ignore synthetic or inactive pointer ids
+    }
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.size === 1) {
       dragStart = { x: e.clientX, y: e.clientY, vx: viewX, vz: viewZ };
@@ -694,6 +671,7 @@ export function createMap2D({ container, trailData, terrain, engine, getUnits, o
         const factor = lastPinchDist / d;
         metersPerPx = Math.max(MIN_MPP, Math.min(MAX_MPP, metersPerPx * factor));
         scheduleDraw();
+        scheduleVectorStream();
       }
       lastPinchDist = d;
       return;
@@ -707,6 +685,7 @@ export function createMap2D({ container, trailData, terrain, engine, getUnits, o
       viewZ = dragStart.vz - dy * metersPerPx;
       clampView();
       scheduleDraw();
+      scheduleVectorStream();
     }
   }
 
@@ -733,16 +712,17 @@ export function createMap2D({ container, trailData, terrain, engine, getUnits, o
     viewZ += before.wz - after.wz;
     clampView();
     scheduleDraw();
+    scheduleVectorStream();
   }
 
   function onKeyDown(e) {
     const step = 60 * metersPerPx;
-    if (e.key === 'ArrowLeft') { viewX -= step; clampView(); scheduleDraw(); }
-    else if (e.key === 'ArrowRight') { viewX += step; clampView(); scheduleDraw(); }
-    else if (e.key === 'ArrowUp') { viewZ -= step; clampView(); scheduleDraw(); }
-    else if (e.key === 'ArrowDown') { viewZ += step; clampView(); scheduleDraw(); }
-    else if (e.key === '+' || e.key === '=') { metersPerPx = Math.max(MIN_MPP, metersPerPx * 0.8); scheduleDraw(); }
-    else if (e.key === '-') { metersPerPx = Math.min(MAX_MPP, metersPerPx * 1.25); scheduleDraw(); }
+    if (e.key === 'ArrowLeft') { viewX -= step; clampView(); scheduleDraw(); scheduleVectorStream(); }
+    else if (e.key === 'ArrowRight') { viewX += step; clampView(); scheduleDraw(); scheduleVectorStream(); }
+    else if (e.key === 'ArrowUp') { viewZ -= step; clampView(); scheduleDraw(); scheduleVectorStream(); }
+    else if (e.key === 'ArrowDown') { viewZ += step; clampView(); scheduleDraw(); scheduleVectorStream(); }
+    else if (e.key === '+' || e.key === '=') { metersPerPx = Math.max(MIN_MPP, metersPerPx * 0.8); scheduleDraw(); scheduleVectorStream(); }
+    else if (e.key === '-') { metersPerPx = Math.min(MAX_MPP, metersPerPx * 1.25); scheduleDraw(); scheduleVectorStream(); }
   }
 
   canvas.addEventListener('pointerdown', onPointerDown);
@@ -764,6 +744,7 @@ export function createMap2D({ container, trailData, terrain, engine, getUnits, o
       }
       clampView();
       scheduleDraw();
+      scheduleVectorStream();
     });
   });
 
@@ -771,8 +752,8 @@ export function createMap2D({ container, trailData, terrain, engine, getUnits, o
   ro.observe(wrap);
   resize();
 
-  // Re-draw when vector chunks stream in
   const unsubChunk = engine?.events?.on?.('data:chunk', () => scheduleDraw());
+  const unsubEvict = engine?.events?.on?.('data:evict', () => scheduleDraw());
 
   return {
     focusPoint(x, z, mpp = 12) {
@@ -789,8 +770,11 @@ export function createMap2D({ container, trailData, terrain, engine, getUnits, o
     refresh: scheduleDraw,
     dispose() {
       disposed = true;
+      clearTimeout(demWarmTimer);
+      if (streamTimer) clearTimeout(streamTimer);
       ro.disconnect();
       if (unsubChunk) unsubChunk();
+      if (unsubEvict) unsubEvict();
       canvas.removeEventListener('pointerdown', onPointerDown);
       canvas.removeEventListener('pointermove', onPointerMove);
       canvas.removeEventListener('pointerup', onPointerUp);

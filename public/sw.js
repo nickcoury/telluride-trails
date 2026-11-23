@@ -1,7 +1,8 @@
-/* Telluride Trails Service Worker — App shell + bounded tile cache */
-const SHELL_CACHE = 'tt-shell-v1';
-const TILE_CACHE = 'tt-tiles-v1';
+/* Telluride Trails Service Worker — App shell + bounded immutable tile cache */
+const SHELL_CACHE = 'tt-shell-v2';
+const TILE_CACHE = 'tt-tiles-v2';
 const MAX_TILE_ENTRIES = 1500;
+const TRIM_EVERY_N_WRITES = 50;
 
 const BASE_PATH = new URL('./', self.location.href).pathname;
 const SHELL_PRECACHE = [
@@ -11,6 +12,9 @@ const SHELL_PRECACHE = [
   `${BASE_PATH}assets/ui/icon.svg`,
   `${BASE_PATH}assets/ui/icon-192.png`,
 ];
+
+let tileWritesSinceTrim = 0;
+let trimming = false;
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -36,14 +40,34 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-function isDataTileRequest(url) {
+/**
+ * Only immutable raster tiles (.webp/.png/.jpg) and numbered vector tile chunks
+ * use cache-first. Mutable manifests and top-level JSON metadata use network-first!
+ */
+function isImmutableDataTile(url) {
   const p = url.pathname;
-  return (
-    p.includes('/data/terrain/') ||
-    p.includes('/data/imagery/') ||
-    p.includes('/data/cover/') ||
-    p.includes('/data/vector/')
-  );
+  if (
+    p.endsWith('/manifest.json') ||
+    p.endsWith('/races.json') ||
+    p.endsWith('/pois.json') ||
+    p.endsWith('/overview.json') ||
+    p.endsWith('/graph.json') ||
+    p.endsWith('/corridor_tiles.json')
+  ) {
+    return false;
+  }
+  if (p.includes('/data/terrain/') || p.includes('/data/imagery/') || p.includes('/data/cover/')) {
+    return /\.(webp|png|jpg|jpeg)$/i.test(p);
+  }
+  if (p.includes('/data/vector/')) {
+    return p.includes('/chunks/') || /\/\d+_\d+\.json$/i.test(p);
+  }
+  return false;
+}
+
+function isMutableDataJson(url) {
+  const p = url.pathname;
+  return p.includes('/data/') && p.endsWith('.json');
 }
 
 function isDevAsset(url) {
@@ -57,16 +81,37 @@ function isDevAsset(url) {
 }
 
 async function trimTileCache() {
-  const cache = await caches.open(TILE_CACHE);
-  const keys = await cache.keys();
-  if (keys.length <= MAX_TILE_ENTRIES) return;
-  const excess = keys.length - MAX_TILE_ENTRIES;
-  for (let i = 0; i < excess; i++) {
-    await cache.delete(keys[i]);
+  if (trimming) return;
+  trimming = true;
+  try {
+    const cache = await caches.open(TILE_CACHE);
+    const keys = await cache.keys();
+    if (keys.length <= MAX_TILE_ENTRIES) return;
+    const excess = keys.length - MAX_TILE_ENTRIES;
+    for (let i = 0; i < excess; i++) {
+      await cache.delete(keys[i]);
+    }
+  } finally {
+    trimming = false;
   }
 }
 
-async function cacheFirstTile(request) {
+self.addEventListener('message', (event) => {
+  const data = event.data;
+  if (data?.type === 'CACHE_URLS' && Array.isArray(data.urls)) {
+    event.waitUntil(
+      caches.open(SHELL_CACHE).then((cache) =>
+        Promise.all(
+          data.urls
+            .filter((u) => typeof u === 'string' && u.startsWith(self.location.origin))
+            .map((u) => cache.add(u).catch(() => {}))
+        )
+      )
+    );
+  }
+});
+
+async function cacheFirstTile(request, event) {
   const cache = await caches.open(TILE_CACHE);
   const cached = await cache.match(request);
   if (cached) return cached;
@@ -74,17 +119,25 @@ async function cacheFirstTile(request) {
   const response = await fetch(request);
   if (response && response.ok) {
     const clone = response.clone();
-    cache.put(request, clone).then(() => trimTileCache()).catch(() => {});
+    tileWritesSinceTrim++;
+    const shouldTrim = tileWritesSinceTrim >= TRIM_EVERY_N_WRITES;
+    if (shouldTrim) tileWritesSinceTrim = 0;
+    const bgWork = cache
+      .put(request, clone)
+      .then(() => (shouldTrim ? trimTileCache() : undefined))
+      .catch(() => {});
+    event.waitUntil(bgWork);
   }
   return response;
 }
 
-async function networkFirstShell(request) {
+async function networkFirstShell(request, event) {
   const cache = await caches.open(SHELL_CACHE);
   try {
     const response = await fetch(request);
     if (response && response.ok) {
-      cache.put(request, response.clone()).catch(() => {});
+      const clone = response.clone();
+      event.waitUntil(cache.put(request, clone).catch(() => {}));
     }
     return response;
   } catch (err) {
@@ -98,17 +151,19 @@ async function networkFirstShell(request) {
   }
 }
 
-async function staleWhileRevalidateShell(request) {
+async function staleWhileRevalidateShell(request, event) {
   const cache = await caches.open(SHELL_CACHE);
   const cached = await cache.match(request);
   const networkPromise = fetch(request)
     .then((response) => {
       if (response && response.ok) {
-        cache.put(request, response.clone()).catch(() => {});
+        return cache.put(request, response.clone()).then(() => response);
       }
       return response;
     })
     .catch(() => null);
+
+  event.waitUntil(networkPromise);
 
   if (cached) return cached;
   const res = await networkPromise;
@@ -124,13 +179,17 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
   if (isDevAsset(url)) return;
 
-  if (isDataTileRequest(url)) {
-    event.respondWith(cacheFirstTile(request));
+  if (isImmutableDataTile(url)) {
+    event.respondWith(cacheFirstTile(request, event));
     return;
   }
 
-  if (request.mode === 'navigate' || url.pathname.endsWith('index.html')) {
-    event.respondWith(networkFirstShell(request));
+  if (
+    request.mode === 'navigate' ||
+    url.pathname.endsWith('index.html') ||
+    isMutableDataJson(url)
+  ) {
+    event.respondWith(networkFirstShell(request, event));
     return;
   }
 
@@ -139,6 +198,6 @@ self.addEventListener('fetch', (event) => {
     url.pathname.endsWith('.webmanifest') ||
     url.pathname.endsWith('.json')
   ) {
-    event.respondWith(staleWhileRevalidateShell(request));
+    event.respondWith(staleWhileRevalidateShell(request, event));
   }
 });

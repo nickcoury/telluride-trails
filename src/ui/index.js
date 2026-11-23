@@ -1,4 +1,5 @@
 import '../styles/main.css';
+import { fmtClock } from './format.js';
 import { setupPWA } from './pwa.js';
 import { loadSettings, saveSettings } from './storage.js';
 import { createHUD } from './hud.js';
@@ -26,9 +27,9 @@ export function createUI(engine, { trailData, game, terrain } = {}) {
       engine.quality?.setAuto?.(true);
     } else if (settings.qualityTier) {
       engine.quality?.setTier?.(settings.qualityTier, { auto: false });
-    }
-    if (Number.isFinite(settings.renderScale) && settings.renderScale !== 1.0) {
-      engine.quality?.setRenderScale?.(settings.renderScale);
+      if (Number.isFinite(settings.renderScale) && settings.renderScale !== 1.0) {
+        engine.quality?.setRenderScale?.(settings.renderScale);
+      }
     }
   }
   engine.events.emit('ui:settings', { ...settings });
@@ -54,8 +55,10 @@ export function createUI(engine, { trailData, game, terrain } = {}) {
     trailData,
     getSettings,
     onPause: () => {
-      game.pause?.();
       engine.events.emit('ui:pause');
+      if (engine.getAppState?.() !== 'paused') {
+        game.pause?.();
+      }
     },
     onVibrate: (p) => touchControls.vibrate(p),
   });
@@ -67,19 +70,26 @@ export function createUI(engine, { trailData, game, terrain } = {}) {
     onUpdateSettings: (patch) => {
       settings = saveSettings(patch);
       engine.events.emit('ui:settings', { ...settings });
-  engine.events.emit('ui:audio', {
-    master: settings.volume ?? 0.75,
-    music: settings.musicVolume ?? 0.65,
-    sfx: settings.sfxVolume ?? 0.85,
-    muted: !settings.audio,
-  });
+      if (
+        patch &&
+        ('audio' in patch || 'volume' in patch || 'musicVolume' in patch || 'sfxVolume' in patch)
+      ) {
+        engine.events.emit('ui:audio', {
+          master: settings.volume ?? 0.75,
+          music: settings.musicVolume ?? 0.65,
+          sfx: settings.sfxVolume ?? 0.85,
+          muted: !settings.audio,
+        });
+      }
       touchControls.syncTouchVisibility();
       hud.refreshUnits();
       screens.refresh();
     },
     onResume: () => {
-      game.resume?.();
       engine.events.emit('ui:resume');
+      if (engine.getAppState?.() === 'paused') {
+        game.resume?.();
+      }
     },
     onQuitToTitle: () => {
       if (typeof game.saveAndQuit === 'function') game.saveAndQuit();
@@ -199,7 +209,8 @@ export function createUI(engine, { trailData, game, terrain } = {}) {
       screens.showScreen('none');
       dialogs.closePause();
       hud.setVisible(true);
-      touchControls.setVisible(!hud.isPhotoMode());
+      touchControls.setPhotoMode(hud.isPhotoMode());
+      touchControls.setVisible(true);
     } else if (state === 'paused') {
       dialogs.openPause();
     } else if (state === 'results') {
@@ -209,13 +220,13 @@ export function createUI(engine, { trailData, game, terrain } = {}) {
   });
 
   // Live HUD & game events
+  const unsubPhoto = engine.events.on('ui:photoMode', ({ enabled }) => {
+    touchControls.setPhotoMode(enabled);
+  });
+
   const unsubHud = engine.events.on('hud', (data) => {
     hud.update(data);
     touchControls.updateContext(data);
-    // Keep touch controls hidden during photo mode
-    if (engine.getAppState?.() === 'playing') {
-      touchControls.setVisible(!hud.isPhotoMode());
-    }
   });
 
   const unsubToast = engine.events.on('game:toast', (payload) => {
@@ -229,15 +240,18 @@ export function createUI(engine, { trailData, game, terrain } = {}) {
     }
   });
 
+  // Gameplay delegates checkpoint & achievement toast display to UI (single toast + haptics)
   const unsubCp = engine.events.on('game:checkpoint', (cp) => {
     const name = cp?.name || 'Checkpoint';
-    hud.showToast(`📍 Reached ${name}`, 'ok', 4000);
+    const clock = Number.isFinite(cp?.clockS) ? ` (${fmtClock(cp.clockS)}${cp.timeDilated ? '*' : ''})` : '';
+    hud.showToast(`📍 Aid Station: ${name}${clock}`, 'ok', 4200);
     touchControls.vibrate([15, 30, 15]);
   });
 
   const unsubAch = engine.events.on('game:achievement', (ach) => {
     const title = ach?.title || ach?.name || String(ach);
-    hud.showToast(`🏆 Achievement: ${title}`, 'ok', 5000);
+    const desc = ach?.desc ? ` — ${ach.desc}` : '';
+    hud.showToast(`🏆 ${title}${desc}`, 'ok', 4800);
     touchControls.vibrate([20, 40, 20]);
   });
 
@@ -287,11 +301,6 @@ export function createUI(engine, { trailData, game, terrain } = {}) {
     if (Number.isFinite(pct)) screens.setLoadingProgress(pct, p?.stage);
   });
 
-  // Refresh POI/race screens if vector chunks or data finish loading
-  const unsubDataChunk = engine.events.on('data:chunk', () => {
-    screens.refresh();
-  });
-
   // Initial screen unless ?bench already moved state away from 'title'
   if (engine.getAppState?.() === 'title') {
     screens.showScreen('title');
@@ -302,6 +311,7 @@ export function createUI(engine, { trailData, game, terrain } = {}) {
     showToast: (text, tone, ms) => hud.showToast(text, tone, ms),
     dispose() {
       unsubAppState();
+      unsubPhoto();
       unsubHud();
       unsubToast();
       unsubCp();
@@ -309,7 +319,6 @@ export function createUI(engine, { trailData, game, terrain } = {}) {
       unsubFinish();
       unsubDnf();
       unsubPreloadProg();
-      unsubDataChunk();
       hud.dispose();
       touchControls.dispose();
       dialogs.dispose();

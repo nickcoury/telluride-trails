@@ -1,3 +1,4 @@
+import { ensureDemLoaded, isDemReady } from './demSampler.js';
 import { createElevationChart } from './elevChart.js';
 import {
   START_TIME_OPTIONS,
@@ -214,8 +215,14 @@ export function createScreens({
     }
     const units = getSettings()?.units || 'imperial';
     const dist = fmtDist(saved.distM ?? saved.distanceM ?? 0, units, 2);
-    const label = saved.raceName || (saved.raceId ? `Race: ${saved.raceId}` : 'Saved Free Run');
-    const clock = saved.clockS ?? saved.elapsedSec ? ` · ${fmtClock(saved.clockS ?? saved.elapsedSec)}` : '';
+    const matchedRace = saved.raceId
+      ? trailData?.races?.find((r) => r.id === saved.raceId)
+      : null;
+    const label =
+      saved.raceName || matchedRace?.name || (saved.raceId ? `Race: ${saved.raceId}` : 'Saved Free Run');
+    const savedSec =
+      saved.race?.clockS ?? saved.clockS ?? saved.elapsedRunS ?? saved.elapsedSec ?? 0;
+    const clock = savedSec > 0 ? ` · ${fmtClock(savedSec)}` : '';
     resumeBanner.hidden = false;
     resumeBanner.innerHTML = `
       <div class="resume-banner__text">
@@ -358,7 +365,7 @@ export function createScreens({
       card.className = 'race-card';
       const distM = (race.distanceMi || 0) * 1609.344;
       const gainM = (race.gainFt || 0) / 3.28084;
-      const best = getBestRecord(race.id);
+      const best = getBestRecord(race.id, game);
       const bestHtml = best
         ? `<span class="race-pb">🏆 PB: ${fmtClock(best.elapsedSec)}${best.timeDilated ? ' *' : ''}</span>`
         : '';
@@ -448,7 +455,17 @@ export function createScreens({
       ensureMap2D();
       setTimeout(() => map2d?.refresh(), 40);
     } else if (name === 'races') {
+      const wasReady = isDemReady();
+      const allHaveElevs =
+        Array.isArray(trailData?.races) &&
+        trailData.races.length > 0 &&
+        trailData.races.every((r) => Array.isArray(r.elevations) && r.elevations.length >= 2);
       renderRaces();
+      if (!wasReady && !allHaveElevs) {
+        ensureDemLoaded(engine?.assetsBase).then((ok) => {
+          if (ok && activeScreen === 'races') renderRaces();
+        });
+      }
     } else if (name === 'loading') {
       showTrivia();
       triviaTimer = setInterval(() => {

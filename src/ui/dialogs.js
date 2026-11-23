@@ -45,6 +45,16 @@ export async function closeDialogSmooth(dialog) {
  * Attach light-dismiss fallback for browsers lacking native `closedby="any"`.
  */
 function attachClosedByFallback(dialog, onCloseRequest) {
+  // Prevent Escape key inside modal dialogs from bubbling to window (`input.js` `input:pause`)
+  dialog.addEventListener(
+    'keydown',
+    (e) => {
+      if (e.code === 'Escape' || e.key === 'Escape') {
+        e.stopPropagation();
+      }
+    },
+    true
+  );
   dialog.addEventListener('cancel', (e) => {
     e.preventDefault();
     onCloseRequest(dialog);
@@ -274,7 +284,6 @@ export function createDialogs({ container, engine, getSettings, onUpdateSettings
       }
     } else if (camBtn) {
       const mode = camBtn.dataset.cam;
-      engine.cameraRig?.setMode?.(mode);
       engine.events.emit('ui:cameraMode', { mode });
       syncPauseCamera(mode);
     } else if (scaleBtn) {
@@ -336,10 +345,8 @@ export function createDialogs({ container, engine, getSettings, onUpdateSettings
     const tier = qSelect.value;
     onUpdateSettings?.({ qualityTier: tier });
     if (tier === 'auto') {
-      engine.quality?.setAuto?.(true);
       engine.events.emit('ui:quality', { tier: 'auto', auto: true });
     } else {
-      engine.quality?.setTier?.(tier, { auto: false });
       engine.events.emit('ui:quality', { tier, auto: false });
     }
     syncSettingsControls();
@@ -349,44 +356,26 @@ export function createDialogs({ container, engine, getSettings, onUpdateSettings
     const val = Number(scaleInput.value);
     scaleVal.textContent = `${Math.round(val * 100)}%`;
     onUpdateSettings?.({ renderScale: val });
-    engine.quality?.setRenderScale?.(val);
     engine.events.emit('ui:quality', { renderScale: val });
   });
 
-  function emitAudioPatch(s) {
-    engine.events.emit('ui:audio', {
-      master: s.volume ?? 0.75,
-      music: s.musicVolume ?? 0.65,
-      sfx: s.sfxVolume ?? 0.85,
-      muted: !s.audio,
-    });
-  }
-
   audioCheck.addEventListener('change', () => {
-    const next = { ...getSettings(), audio: audioCheck.checked };
     onUpdateSettings?.({ audio: audioCheck.checked });
-    emitAudioPatch(next);
   });
   volInput.addEventListener('input', () => {
     const v = Number(volInput.value);
     volVal.textContent = `${Math.round(v * 100)}%`;
-    const next = { ...getSettings(), volume: v };
     onUpdateSettings?.({ volume: v });
-    emitAudioPatch(next);
   });
   musicInput.addEventListener('input', () => {
     const v = Number(musicInput.value);
     musicVal.textContent = `${Math.round(v * 100)}%`;
-    const next = { ...getSettings(), musicVolume: v };
     onUpdateSettings?.({ musicVolume: v });
-    emitAudioPatch(next);
   });
   sfxInput.addEventListener('input', () => {
     const v = Number(sfxInput.value);
     sfxVal.textContent = `${Math.round(v * 100)}%`;
-    const next = { ...getSettings(), sfxVolume: v };
     onUpdateSettings?.({ sfxVolume: v });
-    emitAudioPatch(next);
   });
   hapticsCheck.addEventListener('change', () => {
     onUpdateSettings?.({ haptics: hapticsCheck.checked });
@@ -425,6 +414,10 @@ export function createDialogs({ container, engine, getSettings, onUpdateSettings
     sensVal.textContent = `${(s.lookSensitivity ?? 1.0).toFixed(1)}×`;
   }
 
+  const unsubQuality = engine.events?.on?.('quality:changed', () => {
+    if (settingsDlg.open) syncSettingsControls();
+  });
+
   // Credits dialog
   attachClosedByFallback(creditsDlg, (d) => closeDialogSmooth(d));
   creditsDlg.addEventListener('click', (e) => {
@@ -455,7 +448,9 @@ export function createDialogs({ container, engine, getSettings, onUpdateSettings
     const penalties = result?.penaltiesSec ?? result?.offTrailPenaltySec ?? 0;
     const avgPace = fmtPace({ speedMs: elapsedSec > 0 ? distM / elapsedSec : 0 }, units);
     const isNewPb = Boolean(result?.isNewPb);
-    const kissed = Boolean(result?.kissedRock || result?.ceremony === 'kissed');
+    const kissed = Boolean(
+      result?.kissedRock || result?.ceremony === 'kiss_rock' || result?.ceremony === 'kissed'
+    );
 
     if (result?.raceId) {
       saveRecord({
@@ -571,6 +566,7 @@ export function createDialogs({ container, engine, getSettings, onUpdateSettings
       });
     },
     dispose() {
+      unsubQuality?.();
       pauseDlg.remove();
       settingsDlg.remove();
       creditsDlg.remove();

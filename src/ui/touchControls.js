@@ -72,11 +72,13 @@ export function createTouchControls({ container, engine, getSettings }) {
   let hikeActive = false;
   let autopilotActive = false;
   let sprintActive = false;
+  let photoModeActive = false;
   let joyPointerId = null;
   let joyOrigin = { x: 0, y: 0 };
-  let lookPointerId = null;
-  let lastLook = { x: 0, y: 0 };
+  const lookPointers = new Map(); // pointerId -> { x, y }
+  let lastPinchDist = 0;
   let lastContextSignature = '';
+  const desktopHintsEl = wrap.querySelector('.desktop-hints');
 
   function vibrate(pattern = 10) {
     if (!getSettings?.()?.haptics) return;
@@ -89,10 +91,27 @@ export function createTouchControls({ container, engine, getSettings }) {
     }
   }
 
+  function safeCapture(el, pointerId) {
+    try {
+      el.setPointerCapture?.(pointerId);
+    } catch {
+      // Synthetic PointerEvents or ended pointers have no active browser pointer id
+    }
+  }
+
   function syncTouchVisibility() {
     const mode = getSettings?.()?.touchControls || 'auto';
     const isCoarse = window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
     const showTouch = mode === 'always' || (mode === 'auto' && isCoarse);
+    if (photoModeActive) {
+      touchControlsEl.hidden = true;
+      contextEl.hidden = true;
+      if (desktopHintsEl) desktopHintsEl.hidden = true;
+      // Keep lookPad active on touch devices in Photo Mode so users can orbit + pinch-zoom!
+      lookPad.style.display = showTouch || isCoarse ? 'block' : 'none';
+      return;
+    }
+    if (desktopHintsEl) desktopHintsEl.hidden = false;
     touchControlsEl.hidden = !showTouch;
     lookPad.style.display = showTouch ? 'block' : 'none';
   }
@@ -135,7 +154,7 @@ export function createTouchControls({ container, engine, getSettings }) {
     if (joyPointerId !== null) return;
     e.preventDefault();
     joyPointerId = e.pointerId;
-    joystickEl.setPointerCapture(e.pointerId);
+    safeCapture(joystickEl, e.pointerId);
     const rect = joystickEl.getBoundingClientRect();
     joyOrigin = { x: rect.left + rect.width * 0.5, y: rect.top + rect.height * 0.5 };
     joystickEl.classList.add('is-active');
@@ -155,28 +174,68 @@ export function createTouchControls({ container, engine, getSettings }) {
     if (e.pointerId === joyPointerId) resetJoystick();
   });
 
-  // Camera drag look pad (touch)
+  // Camera drag look + 2-pointer pinch-to-zoom pad
+  function emitZoomDelta(deltaY) {
+    const gameCanvas = document.getElementById('game-canvas');
+    if (gameCanvas) {
+      gameCanvas.dispatchEvent(new WheelEvent('wheel', { deltaY, bubbles: false }));
+    }
+    engine.events.emit('ui:zoom', { delta: Math.sign(deltaY) * Math.min(3, Math.abs(deltaY) * 0.01) });
+  }
+
   lookPad.addEventListener('pointerdown', (e) => {
-    if (lookPointerId !== null) return;
-    lookPointerId = e.pointerId;
-    lookPad.setPointerCapture(e.pointerId);
-    lastLook = { x: e.clientX, y: e.clientY };
+    safeCapture(lookPad, e.pointerId);
+    lookPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (lookPointers.size === 2) {
+      const [a, b] = [...lookPointers.values()];
+      lastPinchDist = Math.hypot(a.x - b.x, a.y - b.y);
+    }
   });
 
   lookPad.addEventListener('pointermove', (e) => {
-    if (e.pointerId !== lookPointerId) return;
-    const sens = (getSettings?.()?.lookSensitivity || 1.0) * 0.0045;
-    const dx = (e.clientX - lastLook.x) * sens;
-    const dy = (e.clientY - lastLook.y) * sens;
-    lastLook = { x: e.clientX, y: e.clientY };
-    engine.events.emit('ui:look', { dx, dy });
+    const prev = lookPointers.get(e.pointerId);
+    if (!prev) return;
+
+    if (lookPointers.size === 1) {
+      const sens = (getSettings?.()?.lookSensitivity || 1.0) * 0.0045;
+      const dx = (e.clientX - prev.x) * sens;
+      const dy = (e.clientY - prev.y) * sens;
+      prev.x = e.clientX;
+      prev.y = e.clientY;
+      engine.events.emit('ui:look', { dx, dy });
+      return;
+    }
+
+    prev.x = e.clientX;
+    prev.y = e.clientY;
+    if (lookPointers.size === 2) {
+      const [a, b] = [...lookPointers.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (lastPinchDist > 0 && d > 0) {
+        const diffPx = lastPinchDist - d; // pinch in = +deltaY (zoom out), spread = -deltaY (zoom in)
+        if (Math.abs(diffPx) > 0.5) {
+          emitZoomDelta(diffPx * 3.2);
+        }
+      }
+      lastPinchDist = d;
+    }
   });
 
   const endLook = (e) => {
-    if (e.pointerId === lookPointerId) lookPointerId = null;
+    lookPointers.delete(e.pointerId);
+    if (lookPointers.size < 2) lastPinchDist = 0;
   };
   lookPad.addEventListener('pointerup', endLook);
   lookPad.addEventListener('pointercancel', endLook);
+
+  // Forward wheel events on lookPad so desktop scroll-zoom works even when touchControls === 'always'
+  lookPad.addEventListener(
+    'wheel',
+    (e) => {
+      emitZoomDelta(e.deltaY);
+    },
+    { passive: true }
+  );
 
   // Action buttons
   hikeBtn.addEventListener('click', () => {
@@ -207,7 +266,7 @@ export function createTouchControls({ container, engine, getSettings }) {
 
   sprintBtn.addEventListener('pointerdown', (e) => {
     e.preventDefault();
-    sprintBtn.setPointerCapture(e.pointerId);
+    safeCapture(sprintBtn, e.pointerId);
     setSprint(true);
   });
   sprintBtn.addEventListener('pointerup', () => setSprint(false));
@@ -242,12 +301,11 @@ export function createTouchControls({ container, engine, getSettings }) {
   window.addEventListener('gamepaddisconnected', onGamepadChange);
   onGamepadChange();
 
-  // Sync autopilot button when keyboard 'P' toggles it
+  // Sync autopilot button visual state when keyboard 'P' toggles it (gameplay owns the toggle)
   const unsubAutoToggle = engine.events.on('input:autopilot-toggle', () => {
     autopilotActive = !autopilotActive;
     autoBtn.setAttribute('aria-pressed', String(autopilotActive));
     autoBtn.classList.toggle('is-active', autopilotActive);
-    engine.events.emit('ui:autopilot', { enabled: autopilotActive });
   });
 
   // Contextual actions handler (event delegation)
@@ -282,14 +340,15 @@ export function createTouchControls({ container, engine, getSettings }) {
     const aidFoods = Array.isArray(nearAid?.foods) && nearAid.foods.length ? nearAid.foods : null;
     const nearStream = Boolean(hudState.nearStream);
     const canKissRock = Boolean(hudState.canKissRock || hudState.race?.ceremonyActive);
+    const showAid = Boolean(nearAid) && !canKissRock;
     const gelsCarried = hudState.gelsCarried ?? 0;
     const lowEnergy = (hudState.stamina ?? hudState.energy ?? 1) < 0.65;
-    const showQuickGel = !nearAid && gelsCarried > 0 && lowEnergy;
-    const sig = `${fallen}|${aidName}|${aidFoods?.join(',') || ''}|${nearStream}|${canKissRock}|${showQuickGel ? gelsCarried : 0}`;
+    const showQuickGel = !showAid && !canKissRock && gelsCarried > 0 && lowEnergy;
+    const sig = `${fallen}|${showAid ? aidName : ''}|${showAid ? aidFoods?.join(',') || '' : ''}|${nearStream}|${canKissRock}|${showQuickGel ? gelsCarried : 0}`;
     if (sig === lastContextSignature) return;
     lastContextSignature = sig;
 
-    if (!fallen && !nearAid && !nearStream && !canKissRock && !showQuickGel) {
+    if (!fallen && !showAid && !nearStream && !canKissRock && !showQuickGel) {
       contextEl.hidden = true;
       contextEl.innerHTML = '';
       return;
@@ -302,7 +361,7 @@ export function createTouchControls({ container, engine, getSettings }) {
     if (canKissRock) {
       html += `<button type="button" class="ctx-btn ctx-btn--gold" data-ctx="kiss">🪨 Kiss the Hardrock!</button>`;
     }
-    if (nearAid) {
+    if (showAid) {
       html += `<div class="ctx-aid-label">⛺ ${aidName || 'Aid Station'}</div>`;
       const items = aidFoods
         ? aidFoods.map((k) => ({ key: k, ...(FOOD_CATALOG[k] || { label: k, icon: '🍽', hint: '' }) }))
@@ -311,7 +370,7 @@ export function createTouchControls({ container, engine, getSettings }) {
         html += `<button type="button" class="ctx-btn" data-ctx="eat" data-key="${s.key}" title="${s.hint}">${s.icon} ${s.label}</button>`;
       }
       html += `<button type="button" class="ctx-btn ctx-btn--water" data-ctx="refill">💧 Refill Flasks</button>`;
-    } else if (nearStream) {
+    } else if (nearStream && !canKissRock) {
       html += `<button type="button" class="ctx-btn ctx-btn--water" data-ctx="refill">💧 Filter Stream Water</button>`;
     }
     if (showQuickGel) {
@@ -322,13 +381,28 @@ export function createTouchControls({ container, engine, getSettings }) {
     contextEl.hidden = false;
   }
 
+  function clearTransientInputs() {
+    resetJoystick();
+    setSprint(false);
+    lookPointers.clear();
+    lastPinchDist = 0;
+  }
+
   return {
     syncTouchVisibility,
-    updateContext,
+    updateContext(hudState) {
+      if (photoModeActive) return;
+      updateContext(hudState);
+    },
     vibrate,
+    setPhotoMode(on) {
+      photoModeActive = Boolean(on);
+      if (photoModeActive) clearTransientInputs();
+      syncTouchVisibility();
+    },
     setVisible(visible) {
       wrap.hidden = !visible;
-      if (!visible) resetJoystick();
+      if (!visible) clearTransientInputs();
     },
     dispose() {
       unsubAutoToggle();
