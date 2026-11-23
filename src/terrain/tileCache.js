@@ -891,6 +891,16 @@ export function createTileCache({ engine, manifests, tierConfig }) {
   }
 
   let lastPinnedKeys = null;
+  let preloadPinnedKeys = null;
+  function setPreloadPinned(keys, clearTarget = null) {
+    if (clearTarget) {
+      if (preloadPinnedKeys === clearTarget) preloadPinnedKeys = null;
+      return;
+    }
+    preloadPinnedKeys = keys || null;
+    if (keys) lastPinnedKeys = keys;
+  }
+
   function evict(pinnedKeys = lastPinnedKeys) {
     if (pinnedKeys) lastPinnedKeys = pinnedKeys;
     if (totalBytes <= config.lruMaxBytes) return;
@@ -900,7 +910,9 @@ export function createTileCache({ engine, manifests, tierConfig }) {
 
     for (const [key, entry] of cache) {
       if (totalBytes <= targetBytes) break;
-      if (pinnedKeys && pinnedKeys.has(key)) continue;
+      if ((pinnedKeys && pinnedKeys.has(key)) || (preloadPinnedKeys && preloadPinnedKeys.has(key))) {
+        continue;
+      }
       // Keep z<=9 cached when under hard cap, but allow evicting off-frustum z9 tiles on low-VRAM tiers
       if (entry.z <= 9 && totalBytes <= config.lruMaxBytes * 1.05) continue;
       if (graceMs > 0 && now - entry.loadedAt < graceMs) continue;
@@ -1005,6 +1017,7 @@ export function createTileCache({ engine, manifests, tierConfig }) {
     processUploads,
     clearPendingFar,
     evict,
+    setPreloadPinned,
     setTierConfig,
     onContextRestored,
     onTileSettled,

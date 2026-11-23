@@ -22,11 +22,11 @@ export function createWorld(engine, terrain, trailData) {
   engine.worldTextures = worldTextures;
 
   const atmosphere = createAtmosphere(engine, terrain);
-  // Create structures before vegetation/rocks so engine.worldBuildingMask is registered immediately
+  // Create structures & water before vegetation/rocks so worldBuildingMask & worldWaterMask are registered immediately
   const structures = createStructures(engine, terrain, trailData, atmosphere);
+  const water = createWater(engine, terrain, trailData, atmosphere);
   const vegetation = createVegetation(engine, terrain, trailData, atmosphere);
   const rocks = createRocks(engine, terrain, trailData, atmosphere);
-  const water = createWater(engine, terrain, trailData, atmosphere);
 
   const unsubQuality = engine.events.on('quality:changed', (q) => {
     worldTextures.setAnisotropy(q?.maxAnisotropy ?? engine.quality.maxAnisotropy ?? 4);

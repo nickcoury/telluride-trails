@@ -406,8 +406,9 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
       }
 
       // Semantic RGB trail/asphalt/curb mask (z17 right under camera on high/ultra = 0.47 m/px!)
+      // Within 1.6 km covers all visually resolved trails/roads without exceeding trailMask cache capacity.
       let trailTex = null;
-      if (!isTitle && config.useTrailMask && z >= 14 && distCam < 3800) {
+      if (!isTitle && config.useTrailMask && z >= 14 && distCam < 1600) {
         const desiredMaskZ =
           distCam < 360 && z >= config.trailMaskNearZoom
             ? config.trailMaskNearZoom
@@ -608,6 +609,7 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
     const isTitle = engine.getAppState?.() === 'title';
     const r = Math.max(250, radiusM || 1200);
     const needed = new Set();
+    const preloadPinned = new Set();
 
     let done = false;
     let timer = 0;
@@ -620,6 +622,7 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
       if (off) off();
       // Full flush so every decoded tile is GPU-resident before loading screen drops!
       tileCache.processUploads(999, Infinity);
+      tileCache.setPreloadPinned(null, preloadPinned);
       if (!isTitle && config.useTrailMask) {
         trailMask.warmAround(x, z, config.trailMaskNearZoom || 16);
       }
@@ -635,8 +638,9 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
 
       for (let ty = y0; ty <= y1; ty++) {
         for (let tx = x0; tx <= x1; tx++) {
+          const key = `${kind}:${tz}/${tx}/${ty}`;
+          if (blocking) preloadPinned.add(key);
           if (!tileCache.getFast(kind, tz, tx, ty) && tileCache.hasSource(kind, tz, tx, ty)) {
-            const key = `${kind}:${tz}/${tx}/${ty}`;
             if (blocking) needed.add(key);
             const prio = blocking ? prioBase + tz : 30000 + tz * 100;
             tileCache.request(kind, tz, tx, ty, prio);
@@ -644,6 +648,10 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
         }
       }
     };
+
+    // Pin the new spawn's preload tiles (and replace stale prior-location pins) so evict()
+    // never drops freshly loaded preload tiles during cross-map teleports on low VRAM tiers!
+    tileCache.setPreloadPinned(preloadPinned);
 
     return new Promise((resolve) => {
       let totalNeeded = 0;

@@ -102,6 +102,8 @@ varying vec2 vPatchUv;
 varying vec2 vHeightUv;
 
 float hash21(vec2 p) {
+  // Periodic every 30 integer cells so 500 m camera-anchor shifts (all scales yield multiples of 30) are bit-exact seamless
+  p = mod(p, 30.0);
   p = fract(p * vec2(123.34, 456.21));
   p += dot(p, p + 45.32);
   return fract(p.x * p.y);
@@ -248,14 +250,13 @@ export function createTerrainMaterialPool({ engine, detailAssets }) {
         float elev = vWorldPos.y;
         float camDist = length(vWorldPos - uCamPos);
 
-        // Wrapped world coordinates (safe for mobile mediump precision at 60 km+)
-        vec2 wp64 = mod(vWorldPos.xz, 64.0);
-        vec2 wp128 = mod(vWorldPos.xz, 128.0);
-        vec2 wp256 = mod(vWorldPos.xz, 256.0);
+        // Camera-anchored continuous local coordinates (500 m steps): sub-mm mobile mediump precision at 60 km+,
+        // ZERO dFdx/dFdy mipmap wrap seams anywhere on screen, and exact integer UV continuity across 500 m crossings!
+        vec2 relXZ = vWorldPos.xz - floor(uCamPos.xz / 500.0) * 500.0;
 
-        // Multi-scale macro noise (kills tiling & adds natural San Juan geology variation)
-        float macroA = valueNoise2(wp256 * 0.0625); // 16 m wavelength
-        float macroB = valueNoise2(wp128 * 0.1875 + 17.3); // 5.3 m wavelength
+        // Multi-scale macro noise (500*0.06 = 30, 500*0.18 = 90 -> exact multiples of hash21's 30-cell period)
+        float macroA = valueNoise2(relXZ * 0.06);  // 16.7 m wavelength
+        float macroB = valueNoise2(relXZ * 0.18 + 17.3); // 5.5 m wavelength
         float macroVar = macroA * 0.62 + macroB * 0.38;
 
         // 1 fetch: Real NAIP orthoimagery (linearized by hardware SRGB8_ALPHA8)
@@ -379,9 +380,9 @@ export function createTerrainMaterialPool({ engine, detailAssets }) {
         vec3 dirtMicroNR = vec3(0.5, 0.5, 0.88);
         vec3 talusMicroAlb = vec3(0.175);
 
-        // Zero-fetch crisp procedural turf/pebble micro-grain for close-range tactile crispness
-        float fineGrain1 = valueNoise2(wp64 * 3.4 + 5.1);
-        float fineGrain2 = valueNoise2(wp64 * 11.2 + 19.7);
+        // Zero-fetch crisp procedural turf/pebble micro-grain (500*3.6=1800, 500*10.8=5400 -> exact multiples of 30)
+        float fineGrain1 = valueNoise2(relXZ * 3.6 + 5.1);
+        float fineGrain2 = valueNoise2(relXZ * 10.8 + 19.7);
         float microTurf = (fineGrain1 * 0.55 + fineGrain2 * 0.45) - 0.5;
 
         ${
@@ -391,7 +392,7 @@ export function createTerrainMaterialPool({ engine, detailAssets }) {
           if (nearFade > 0.01 && asphaltMask < 0.85) {
             float domLayer = 3.0;
             float domMean = 0.052;
-            float domScale = 0.35;
+            float domScale = 0.36;
             if (dirtTrailMask > 0.08) {
               domLayer = 2.0; domMean = 0.044; domScale = 0.42;
             } else if (wRock >= wTalus && wRock >= wGrass && wRock >= wForest) {
@@ -401,7 +402,7 @@ export function createTerrainMaterialPool({ engine, detailAssets }) {
             } else if (wForest >= wGrass) {
               domLayer = 4.0; domMean = 0.112; domScale = 0.34;
             }
-            vec3 domAlb = texture(uDetailAlbedoArray, vec3(wp64 * domScale, domLayer)).rgb;
+            vec3 domAlb = texture(uDetailAlbedoArray, vec3(relXZ * domScale, domLayer)).rgb;
             if (domLayer > 1.5 && domLayer < 2.5) dirtMicroAlb = domAlb;
             vec3 contrast = normalizeDetailContrast(domAlb, domMean, 1.40);
             baseColor = mix(baseColor, baseColor * contrast * (1.0 + microTurf * 0.22 * microFade), nearFade * 0.84);
@@ -409,27 +410,29 @@ export function createTerrainMaterialPool({ engine, detailAssets }) {
           `
             : /* glsl */ `
           if ((nearFade > 0.01 || (cliffFade > 0.01 && wRock > 0.06)) && asphaltMask < 0.92) {
-            // Anti-tiled dual-rotated UVs with gentle domain warp (kills grid alignment on wide talus & meadows!)
+            // Rational orthonormal Pythagorean rotations: 7-24-25 (0.96, 0.28) & 3-4-5 (0.6, 0.8)
+            // Across 500 m camera-anchor steps, rotMicro shifts by (+-480, +-140) and rotMeso by (+-300, +-400):
+            // all UV products are exact integers -> ZERO wrap seams & ZERO anchor-crossing pop!
             vec2 uvWarp = vec2(macroA - 0.5, macroB - 0.5) * 0.18;
-            vec2 rotMicro = vec2(wp64.x * 0.9205 - wp64.y * 0.3907, wp64.x * 0.3907 + wp64.y * 0.9205);
-            vec2 rotMeso = vec2(wp128.x * 0.6293 + wp128.y * 0.7771, -wp128.x * 0.7771 + wp128.y * 0.6293);
-            vec2 uvMicro = rotMicro * 0.44 + uvWarp;
-            vec2 uvMeso = rotMeso * 0.092 + vec2(macroA * 0.34, macroB * 0.34);
+            vec2 rotMicro = vec2(relXZ.x * 0.96 - relXZ.y * 0.28, relXZ.x * 0.28 + relXZ.y * 0.96);
+            vec2 rotMeso = vec2(relXZ.x * 0.60 + relXZ.y * 0.80, -relXZ.x * 0.80 + relXZ.y * 0.60);
+            vec2 uvMicro = rotMicro * 0.40 + uvWarp;
+            vec2 uvMeso = rotMeso * 0.10 + vec2(macroA * 0.34, macroB * 0.34);
             float mesoWeight = mix(0.20, 0.52, smoothstep(14.0, 95.0, camDist));
 
-            // 0: Rock (triplanar on steep cliffs, active-culled)
+            // 0: Rock (triplanar on steep cliffs using continuous camera-anchored coords, active-culled)
             vec3 rockAlb = vec3(0.115);
             vec3 rockNR = vec3(0.5, 0.5, 0.86);
             float rockH = 0.5;
             if (wRock > 0.03) {
               if (cliffW > 0.08 && cliffFade > 0.01) {
-                vec3 triPos = vec3(mod(vWorldPos.x, 100.0), mod(vWorldPos.y, 100.0), mod(vWorldPos.z, 100.0));
+                vec3 triPos = vec3(relXZ.x, vWorldPos.y, relXZ.y);
                 rockAlb = sampleTriplanarCliffAlb(triPos, terrainWorldN, 0.12);
-                ${isHigh ? `if (camDist < 120.0) rockAlb = mix(rockAlb, sampleTriplanarCliffAlb(triPos, terrainWorldN, 0.045), 0.30);` : ''}
+                ${isHigh ? `if (camDist < 120.0) rockAlb = mix(rockAlb, sampleTriplanarCliffAlb(triPos, terrainWorldN, 0.04), 0.30);` : ''}
                 rockNR = sampleTriplanarCliffNR(triPos, terrainWorldN, 0.12);
               } else {
-                rockAlb = texture(uDetailAlbedoArray, vec3(uvMicro * 0.45, 0.0)).rgb;
-                rockNR = texture(uDetailNrmRoughArray, vec3(uvMicro * 0.45, 0.0)).rgb;
+                rockAlb = texture(uDetailAlbedoArray, vec3(uvMicro * 0.50, 0.0)).rgb;
+                rockNR = texture(uDetailNrmRoughArray, vec3(uvMicro * 0.50, 0.0)).rgb;
               }
               rockH = clamp(dot(rockAlb, vec3(0.35, 0.45, 0.2)) / 0.16, 0.0, 1.0);
             }
@@ -439,9 +442,9 @@ export function createTerrainMaterialPool({ engine, detailAssets }) {
             vec3 talusNR = vec3(0.5, 0.5, 0.84);
             float talusH = 0.5;
             if (nearFade > 0.01 && (wTalus > 0.03 || (dirtTrailMask > 0.03 && elev > 3350.0))) {
-              talusAlb = texture(uDetailAlbedoArray, vec3(uvMicro * 0.78, 1.0)).rgb;
-              ${isHigh ? `talusAlb = mix(talusAlb, texture(uDetailAlbedoArray, vec3(uvMeso * 0.92, 1.0)).rgb, mesoWeight * 0.9);` : ''}
-              talusNR = texture(uDetailNrmRoughArray, vec3(uvMicro * 0.78, 1.0)).rgb;
+              talusAlb = texture(uDetailAlbedoArray, vec3(uvMicro * 0.75, 1.0)).rgb;
+              ${isHigh ? `talusAlb = mix(talusAlb, texture(uDetailAlbedoArray, vec3(uvMeso * 0.90, 1.0)).rgb, mesoWeight * 0.9);` : ''}
+              talusNR = texture(uDetailNrmRoughArray, vec3(uvMicro * 0.75, 1.0)).rgb;
               talusMicroAlb = talusAlb;
               talusH = clamp(dot(talusAlb, vec3(0.33, 0.34, 0.33)) / 0.24, 0.0, 1.0);
             }
@@ -451,9 +454,9 @@ export function createTerrainMaterialPool({ engine, detailAssets }) {
             vec3 dirtNR = vec3(0.5, 0.5, 0.88);
             float dirtH = 0.5;
             if (nearFade > 0.01 && (wDirt > 0.03 || dirtTrailMask > 0.03)) {
-              dirtAlb = texture(uDetailAlbedoArray, vec3(uvMicro * 1.15, 2.0)).rgb;
-              ${isHigh ? `dirtAlb = mix(dirtAlb, texture(uDetailAlbedoArray, vec3(uvMeso * 1.1, 2.0)).rgb, mesoWeight * 0.8);` : ''}
-              dirtNR = texture(uDetailNrmRoughArray, vec3(uvMicro * 1.15, 2.0)).rgb;
+              dirtAlb = texture(uDetailAlbedoArray, vec3(uvMicro * 1.25, 2.0)).rgb;
+              ${isHigh ? `dirtAlb = mix(dirtAlb, texture(uDetailAlbedoArray, vec3(uvMeso * 1.10, 2.0)).rgb, mesoWeight * 0.8);` : ''}
+              dirtNR = texture(uDetailNrmRoughArray, vec3(uvMicro * 1.25, 2.0)).rgb;
               dirtMicroAlb = dirtAlb;
               dirtMicroNR = dirtNR;
               dirtH = clamp(dot(dirtAlb, vec3(0.4, 0.4, 0.2)) / 0.08, 0.0, 1.0);
@@ -464,9 +467,9 @@ export function createTerrainMaterialPool({ engine, detailAssets }) {
             vec3 grassNR = vec3(0.5, 0.5, 0.92);
             float grassH = 0.5;
             if (nearFade > 0.01 && wGrass > 0.03) {
-              grassAlb = texture(uDetailAlbedoArray, vec3(uvMicro * 1.05, 3.0)).rgb;
-              ${isHigh ? `grassAlb = mix(grassAlb, texture(uDetailAlbedoArray, vec3(uvMeso * 1.15, 3.0)).rgb, mesoWeight * 0.85);` : ''}
-              grassNR = texture(uDetailNrmRoughArray, vec3(uvMicro * 1.05, 3.0)).rgb;
+              grassAlb = texture(uDetailAlbedoArray, vec3(uvMicro, 3.0)).rgb;
+              ${isHigh ? `grassAlb = mix(grassAlb, texture(uDetailAlbedoArray, vec3(uvMeso * 1.20, 3.0)).rgb, mesoWeight * 0.85);` : ''}
+              grassNR = texture(uDetailNrmRoughArray, vec3(uvMicro, 3.0)).rgb;
               grassH = clamp(dot(grassAlb, vec3(0.3, 0.55, 0.15)) / 0.075, 0.0, 1.0);
             }
 
@@ -475,16 +478,16 @@ export function createTerrainMaterialPool({ engine, detailAssets }) {
             vec3 forestNR = vec3(0.5, 0.5, 0.90);
             float forestH = 0.5;
             if (nearFade > 0.01 && wForest > 0.03) {
-              forestAlb = texture(uDetailAlbedoArray, vec3(uvMicro * 0.98, 4.0)).rgb;
-              ${isHigh ? `forestAlb = mix(forestAlb, texture(uDetailAlbedoArray, vec3(uvMeso * 1.0, 4.0)).rgb, mesoWeight * 0.85);` : ''}
-              forestNR = texture(uDetailNrmRoughArray, vec3(uvMicro * 0.98, 4.0)).rgb;
+              forestAlb = texture(uDetailAlbedoArray, vec3(uvMicro, 4.0)).rgb;
+              ${isHigh ? `forestAlb = mix(forestAlb, texture(uDetailAlbedoArray, vec3(uvMeso, 4.0)).rgb, mesoWeight * 0.85);` : ''}
+              forestNR = texture(uDetailNrmRoughArray, vec3(uvMicro, 4.0)).rgb;
               forestH = clamp(dot(forestAlb, vec3(0.4, 0.4, 0.2)) / 0.16, 0.0, 1.0);
             }
 
             // 5: High north-couloir summer snow (only when present)
             vec3 snowAlb = vec3(0.42);
             if (nearFade > 0.01 && wSnow > 0.03) {
-              snowAlb = texture(uDetailAlbedoArray, vec3(uvMicro * 0.55, 5.0)).rgb;
+              snowAlb = texture(uDetailAlbedoArray, vec3(uvMicro * 0.50, 5.0)).rgb;
             }
 
             // Height-based splat blending: crisp interlocking patches of talus, grass tufts, pine duff & cliff rock!
@@ -563,9 +566,9 @@ export function createTerrainMaterialPool({ engine, detailAssets }) {
             vec2 nF = (forestNR.rg * 2.0 - 1.0) * 2.05;
             vec2 blendedN = nR * bR + nT * bT + nD * bD + nG * bG + nF * bF;
 
-            // Fine procedural micro-bump on grass/forest/soil so low-contrast textures have crisp sunlit relief
-            float fxN = valueNoise2(wp64 * 9.5 + vec2(0.18, 0.0)) - valueNoise2(wp64 * 9.5 - vec2(0.18, 0.0));
-            float fzN = valueNoise2(wp64 * 9.5 + vec2(0.0, 0.18)) - valueNoise2(wp64 * 9.5 - vec2(0.0, 0.18));
+            // Fine procedural micro-bump on grass/forest/soil (500*9.6 = 4800 -> exact multiple of 30)
+            float fxN = valueNoise2(relXZ * 9.6 + vec2(0.18, 0.0)) - valueNoise2(relXZ * 9.6 - vec2(0.18, 0.0));
+            float fzN = valueNoise2(relXZ * 9.6 + vec2(0.0, 0.18)) - valueNoise2(relXZ * 9.6 - vec2(0.0, 0.18));
             blendedN += vec2(fxN, fzN) * (0.85 * bG + 0.65 * bF + 0.35 * bD) * microFade;
 
             float blendedRough = rockNR.b * bR + talusNR.b * bT + dirtNR.b * bD + grassNR.b * bG + forestNR.b * bF;
@@ -608,10 +611,10 @@ export function createTerrainMaterialPool({ engine, detailAssets }) {
 
         // 2. Concrete sidewalk & curb apron alongside paved town streets ONLY (B * (1 - G))
         if (curbApron > 0.02) {
-          float aggFine = valueNoise2(wp64 * 26.0);
-          float aggMed = valueNoise2(wp64 * 6.0 + 4.1);
-          float slabX = abs(fract(wp64.x * 0.62) - 0.5);
-          float slabZ = abs(fract(wp64.y * 0.62) - 0.5);
+          float aggFine = valueNoise2(relXZ * 24.0);
+          float aggMed = valueNoise2(relXZ * 6.0 + 4.1);
+          float slabX = abs(fract(relXZ.x * 0.60) - 0.5);
+          float slabZ = abs(fract(relXZ.y * 0.60) - 0.5);
           float jointLine = 1.0 - smoothstep(0.475, 0.50, max(slabX, slabZ)) * 0.24 * microFade;
           vec3 sidewalkBase = vec3(0.155, 0.150, 0.140) * (0.90 + aggFine * 0.12 + aggMed * 0.08) * jointLine;
           // Preserve desaturated macro NAIP building shadows without letting off-road grass bleed onto concrete
@@ -626,8 +629,8 @@ export function createTerrainMaterialPool({ engine, detailAssets }) {
           ${
             !isLow
               ? /* glsl */ `
-            float gx = valueNoise2(wp64 * 28.0 + vec2(0.12, 0.0)) - aggFine;
-            float gz = valueNoise2(wp64 * 28.0 + vec2(0.0, 0.12)) - aggFine;
+            float gx = valueNoise2(relXZ * 24.0 + vec2(0.12, 0.0)) - aggFine;
+            float gz = valueNoise2(relXZ * 24.0 + vec2(0.0, 0.12)) - aggFine;
             detailNormalXY = mix(detailNormalXY, vec2(gx, gz) * 0.45 * microFade, curbApron * 0.85);
             terrainRoughness = mix(terrainRoughness, 0.86, curbApron * 0.85);
             `
@@ -637,11 +640,11 @@ export function createTerrainMaterialPool({ engine, detailAssets }) {
 
         // 3. Paved Telluride / Ouray / Silverton town asphalt (G channel)
         if (asphaltMask > 0.02) {
-          // Fine isotropic asphalt mineral aggregate (centimeter-scale, NOT lumpy gravel!)
-          float gritFine = valueNoise2(wp64 * 34.0 + 1.3);
-          float gritUltra = valueNoise2(wp64 * 86.0 + 7.9);
-          float wear = valueNoise2(wp64 * 0.55 + 9.2);
-          float crack = smoothstep(0.47, 0.50, abs(valueNoise2(wp64 * 1.4 + 2.3) - 0.5));
+          // Fine isotropic asphalt mineral aggregate (500*{36,84,0.6,1.44,48} all exact multiples of 30)
+          float gritFine = valueNoise2(relXZ * 36.0 + 1.3);
+          float gritUltra = valueNoise2(relXZ * 84.0 + 7.9);
+          float wear = valueNoise2(relXZ * 0.60 + 9.2);
+          float crack = smoothstep(0.47, 0.50, abs(valueNoise2(relXZ * 1.44 + 2.3) - 0.5));
           float grain = 0.85 + gritFine * 0.16 + gritUltra * 0.14 - (1.0 - crack) * 0.06 * microFade;
 
           // Authentic cool weathered charcoal-slate asphalt (~0.048-0.068 linear, completely free of grass/dirt hues!)
@@ -656,8 +659,8 @@ export function createTerrainMaterialPool({ engine, detailAssets }) {
           ${
             !isLow
               ? /* glsl */ `
-            float ax = valueNoise2(wp64 * 46.0 + vec2(0.15, 0.0)) - valueNoise2(wp64 * 46.0 - vec2(0.15, 0.0));
-            float az = valueNoise2(wp64 * 46.0 + vec2(0.0, 0.15)) - valueNoise2(wp64 * 46.0 - vec2(0.0, 0.15));
+            float ax = valueNoise2(relXZ * 48.0 + vec2(0.15, 0.0)) - valueNoise2(relXZ * 48.0 - vec2(0.15, 0.0));
+            float az = valueNoise2(relXZ * 48.0 + vec2(0.0, 0.15)) - valueNoise2(relXZ * 48.0 - vec2(0.0, 0.15));
             vec2 asphaltN = vec2(ax, az) * 0.72 * microFade;
             detailNormalXY = mix(detailNormalXY, asphaltN, asphaltMask * 0.95);
             terrainRoughness = mix(terrainRoughness, mix(0.74, 0.84, wear), asphaltMask * 0.94);

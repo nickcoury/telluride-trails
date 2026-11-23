@@ -100,6 +100,7 @@ export function createTerrain(engine) {
     detailAssets.getAlbedoArray().needsUpdate = true;
     detailAssets.getNormalRoughArray().needsUpdate = true;
     tileCache.onContextRestored();
+    trailMask.onContextRestored();
   });
 
   function update(cameraPos) {

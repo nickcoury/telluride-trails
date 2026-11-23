@@ -86,7 +86,7 @@ function classifyFeature(item, engine) {
  * Features spatial AABB invalidation on data:chunk and 2-frame deferred disposal.
  */
 export function createTrailMaskManager({ engine, tierConfig }) {
-  const MAX_MASKS = 28;
+  const MAX_MASKS = 48;
   let maskSize = tierConfig?.trailMaskSize || 256;
 
   const segments = []; // { id, minX, maxX, minZ, maxZ, widthM, strength, category, hasSidewalk, coords }
@@ -400,6 +400,15 @@ export function createTrailMaskManager({ engine, tierConfig }) {
     pendingBuild.clear();
   }
 
+  function onContextRestored() {
+    fallbackMaskTex.needsUpdate = true;
+    for (const entry of maskCache.values()) {
+      if (!entry.empty && entry.texture) {
+        entry.texture.needsUpdate = true;
+      }
+    }
+  }
+
   function dispose() {
     disposed = true;
     offChunk();
@@ -422,6 +431,7 @@ export function createTrailMaskManager({ engine, tierConfig }) {
     warmAround,
     flushDeferred,
     setTierConfig,
+    onContextRestored,
     fallbackMaskTex,
     dispose,
   };

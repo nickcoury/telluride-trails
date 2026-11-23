@@ -303,33 +303,54 @@ export function createAtmosphere(engine, terrain) {
   headlampCheap.visible = false;
   scene.add(headlampCheap);
 
-  const poolSegX = 6;
-  const poolSegZ = 8;
-  const headlampPoolGeo = new THREE.PlaneGeometry(14, 24, poolSegX, poolSegZ);
+  const poolSegX = 10;
+  const poolSegZ = 12;
+  const headlampPoolGeo = new THREE.PlaneGeometry(16, 26, poolSegX, poolSegZ);
   headlampPoolGeo.rotateX(-Math.PI * 0.5);
   const poolCount = headlampPoolGeo.attributes.position.count;
-  const poolColors = new Float32Array(poolCount * 3);
-  for (let i = 0; i < poolCount; i++) {
-    const lx = headlampPoolGeo.attributes.position.getX(i) / 7.0;
-    const lz = (headlampPoolGeo.attributes.position.getZ(i) + 12.0) / 24.0;
-    const coneWidth = 0.22 + (1.0 - lz) * 0.78;
-    const radial = Math.max(0, 1.0 - Math.pow(lx / coneWidth, 2.0));
-    const longi = Math.sin(Math.min(1, Math.max(0, lz)) * Math.PI);
-    const w = Math.pow(radial, 1.4) * Math.pow(longi, 0.85) * 0.34;
-    poolColors[i * 3] = w * 1.05;
-    poolColors[i * 3 + 1] = w * 0.96;
-    poolColors[i * 3 + 2] = w * 0.80;
-  }
-  headlampPoolGeo.setAttribute('color', new THREE.BufferAttribute(poolColors, 3));
   const poolLocalXZ = new Float32Array(poolCount * 2);
   for (let i = 0; i < poolCount; i++) {
     poolLocalXZ[i * 2] = headlampPoolGeo.attributes.position.getX(i);
-    poolLocalXZ[i * 2 + 1] = 13.5 - headlampPoolGeo.attributes.position.getZ(i);
+    poolLocalXZ[i * 2 + 1] = 14.0 - headlampPoolGeo.attributes.position.getZ(i);
   }
-  const headlampPoolMat = new THREE.MeshBasicMaterial({
-    vertexColors: true,
+  const headlampPoolUniforms = {
+    uHeadlampOpacity: { value: 0.0 },
+  };
+  const headlampPoolMat = new THREE.ShaderMaterial({
+    uniforms: headlampPoolUniforms,
+    vertexShader: /* glsl */ `
+      varying vec2 vPoolUv;
+      #include <common>
+      #include <logdepthbuf_pars_vertex>
+      void main() {
+        vPoolUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        #include <logdepthbuf_vertex>
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uHeadlampOpacity;
+      varying vec2 vPoolUv;
+      #include <common>
+      #include <logdepthbuf_pars_fragment>
+      void main() {
+        #include <logdepthbuf_fragment>
+        // vPoolUv.y: 1.0 near runner -> 0.0 far ahead; vPoolUv.x: 0..1 left-to-right
+        float fwd = 1.0 - vPoolUv.y;
+        float lx = (vPoolUv.x - 0.5) * 2.0;
+        // Smooth widening cone, fading to exact 0 well inside UV perimeter (zero polygonal edges!)
+        float halfW = mix(0.26, 0.82, smoothstep(0.0, 1.0, fwd));
+        float rNorm = abs(lx) / halfW;
+        float radial = 1.0 - smoothstep(0.0, 1.0, rNorm);
+        radial = radial * radial;
+        float nearFade = smoothstep(0.04, 0.22, fwd);
+        float farFade = 1.0 - smoothstep(0.32, 0.92, fwd);
+        float intensity = radial * nearFade * farFade * uHeadlampOpacity * 0.26;
+        if (intensity < 0.002) discard;
+        gl_FragColor = vec4(vec3(1.0, 0.91, 0.74) * intensity, 1.0);
+      }
+    `,
     transparent: true,
-    opacity: 0,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     fog: false,
@@ -732,8 +753,8 @@ export function createAtmosphere(engine, terrain) {
       sunLight.intensity = (0.48 + 0.32 * uniforms.uMoonPhase.value) * (1 - rainAmt * 0.55) + lightningFlash * 2.8;
     }
 
-    // Runner headlamp aimed along runner heading (never backward into runner's face in orbit mode!)
-    const headlampAmt = 1.0 - THREE.MathUtils.smoothstep(sunY, -0.04, 0.06);
+    // Runner headlamp aimed along runner heading (switches off cleanly by 6:00 AM sunrise)
+    const headlampAmt = 1.0 - THREE.MathUtils.smoothstep(sunY, -0.05, 0.008);
     if (headlampAmt > 0.02) {
       const hdg = typeof playerPos?.heading === 'number' ? playerPos.heading : latestRunnerHeading;
       if (typeof hdg === 'number' && Number.isFinite(hdg)) {
@@ -768,7 +789,7 @@ export function createAtmosphere(engine, terrain) {
 
       if (terrain?.getHeight) {
         headlampPoolMesh.visible = true;
-        headlampPoolMat.opacity = headlampAmt;
+        headlampPoolUniforms.uHeadlampOpacity.value = headlampAmt;
         const rx = -_headDir.z;
         const rz = _headDir.x;
         const posArr = headlampPoolGeo.attributes.position.array;
