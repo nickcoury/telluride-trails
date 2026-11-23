@@ -7,6 +7,12 @@ import { recordPersonalBest } from './save.js';
 
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 
+// Precomputed aid station menus (zero per-frame allocations)
+const DAY_AID_MENU = Object.entries(FOODS)
+  .filter(([, f]) => !f.night)
+  .map(([key]) => key);
+const NIGHT_AID_MENU = Object.keys(FOODS);
+
 export function createRaceManager() {
   let activeRace = null;
   let segCount = 0;
@@ -186,9 +192,7 @@ export function createRaceManager() {
    */
   function getAidMenu(localHour) {
     const isNight = localHour >= 19 || localHour < 6.5;
-    return Object.entries(FOODS)
-      .filter(([, f]) => !f.night || isNight)
-      .map(([key]) => key);
+    return isNight ? NIGHT_AID_MENU : DAY_AID_MENU;
   }
 
   /**
@@ -199,6 +203,7 @@ export function createRaceManager() {
     if (!activeRace || finished || dnf) return { events, nearAid: null };
 
     clockS += dtSim;
+    const effectiveClockS = clockS + penaltyS;
 
     const proj = projectOnCourse(px, pz);
     offCourseM = proj.offCourse;
@@ -207,8 +212,8 @@ export function createRaceManager() {
       courseDistM = proj.distOnLine;
     }
 
-    // Check overall race cutoff
-    if (activeRace.cutoffH && clockS > activeRace.cutoffH * 3600) {
+    // Check overall race cutoff (including any off-course penalty seconds)
+    if (activeRace.cutoffH && effectiveClockS > activeRace.cutoffH * 3600) {
       dnf = true;
       dnfReason = `Exceeded overall ${activeRace.cutoffH}h course cutoff.`;
       events.push({ type: 'dnf', reason: dnfReason });
@@ -220,18 +225,19 @@ export function createRaceManager() {
     for (let i = 0; i < checkpoints.length; i++) {
       const cp = checkpoints[i];
       const dToCp = Math.hypot(px - cp.x, pz - cp.z);
-      if (dToCp <= 32) {
+      const isFinishCp = i === checkpoints.length - 1 && (cp.d >= totalDistM - 60 || /finish|kiss the rock/i.test(cp.name));
+      if (!ceremonyActive && !isFinishCp && dToCp <= 32) {
         nearAid = { name: cp.name, foods: getAidMenu(localHour) };
       }
       if (!cp.passed && i === checkpointIdx && (dToCp <= 28 || (offCourseM <= 55 && courseDistM >= cp.d - 15))) {
         cp.passed = true;
         checkpointIdx++;
         const prevSplitS = splits.length ? splits[splits.length - 1].clockS : 0;
-        const splitS = clockS - prevSplitS;
+        const splitS = effectiveClockS - prevSplitS;
         const cutoffS = cp.cutoffH ? cp.cutoffH * 3600 : null;
-        const deltaCutoffS = cutoffS != null ? cutoffS - clockS : null;
+        const deltaCutoffS = cutoffS != null ? cutoffS - effectiveClockS : null;
 
-        if (cutoffS != null && clockS > cutoffS) {
+        if (cutoffS != null && effectiveClockS > cutoffS) {
           dnf = true;
           dnfReason = `Missed cutoff at ${cp.name} (${formatDurationClock(cutoffS)}).`;
           events.push({ type: 'dnf', reason: dnfReason, checkpoint: cp.name });
@@ -242,7 +248,7 @@ export function createRaceManager() {
           name: cp.name,
           index: i + 1,
           total: checkpoints.length,
-          clockS,
+          clockS: effectiveClockS,
           splitS,
           cutoffS,
           deltaCutoffS,
@@ -253,13 +259,15 @@ export function createRaceManager() {
       }
     }
 
-    // Finish detection (after passing all checkpoints, or within finish radius near end)
+    // Finish detection: require >=85% of course covered so 0-checkpoint loop races never instant-finish
     const fin = activeRace.finish || (segCount > 0 ? { x: activeRace.line[(segCount - 1) * 3], z: activeRace.line[(segCount - 1) * 3 + 1] } : null);
     const dToFinish = fin ? Math.hypot(px - fin.x, pz - fin.z) : Math.max(0, totalDistM - courseDistM);
     const allCpsPassed = checkpointIdx >= checkpoints.length;
-    const nearEnd = courseDistM >= totalDistM - 35 || (allCpsPassed && dToFinish <= 24);
+    const minCourseCovered = courseDistM >= totalDistM * 0.85;
+    const nearEnd = courseDistM >= totalDistM - 35 || (allCpsPassed && minCourseCovered && dToFinish <= 24);
 
     if (nearEnd && !ceremonyActive) {
+      nearAid = null;
       const isHardrock = (activeRace.id || '').toLowerCase().includes('hardrock');
       if (isHardrock) {
         ceremonyActive = true;
@@ -269,6 +277,7 @@ export function createRaceManager() {
         completeFinish(events);
       }
     } else if (ceremonyActive) {
+      nearAid = null;
       ceremonyTimer -= Math.min(dtSim, 0.25);
       if (ceremonyTimer <= 0) {
         ceremonyActive = false;
@@ -335,21 +344,27 @@ export function createRaceManager() {
     return null;
   }
 
-  function getHudSummary(speedMs) {
+  function getHudSummary(speedMs, simEpochMs = Date.now()) {
     if (!activeRace) return null;
     const nextCp = checkpoints[checkpointIdx] || null;
     const remTotalM = Math.max(0, totalDistM - courseDistM);
     const effectiveSpeed = speedMs > 0.35 ? speedMs : 1.75; // conservative ultrarunner estimate when paused/stopped
     const etaS = remTotalM / effectiveSpeed;
-    const etaInfo = formatRealTimeEta(etaS);
+    const etaInfo = formatRealTimeEta(etaS, simEpochMs);
 
     const nextAidDistM = nextCp ? Math.max(0, nextCp.d - courseDistM) : remTotalM;
     const nextAidEtaS = nextAidDistM / effectiveSpeed;
+    const nextCutoffS = nextCp?.cutoffH ? nextCp.cutoffH * 3600 : (activeRace.cutoffH ? activeRace.cutoffH * 3600 : null);
+    const totalClockS = clockS + penaltyS;
+    const cutoffRemainingSec = nextCutoffS != null ? Math.max(0, nextCutoffS - totalClockS) : null;
+    const nextAidPos = nextCp
+      ? { x: nextCp.x, z: nextCp.z }
+      : (activeRace.finish ? { x: activeRace.finish.x, z: activeRace.finish.z } : null);
 
     return {
       id: activeRace.id,
       name: activeRace.name,
-      clockS: clockS + penaltyS,
+      clockS: totalClockS,
       rawClockS: clockS,
       penaltyS,
       timeDilated,
@@ -358,14 +373,19 @@ export function createRaceManager() {
       finishDistM: remTotalM,
       offCourseM,
       nextAidName: nextCp ? nextCp.name : 'Finish',
+      nextAidPos,
       nextAidDistM,
       nextAidEtaS,
-      nextAidCutoffS: nextCp?.cutoffH ? nextCp.cutoffH * 3600 : (activeRace.cutoffH ? activeRace.cutoffH * 3600 : null),
+      nextAidCutoffS: nextCutoffS,
+      cutoffH: activeRace.cutoffH ?? null,
+      cutoffRemainingSec,
+      remainingSec: etaS,
       etaS,
       etaLabel: etaInfo.label,
       etaJoke: etaInfo.joke,
       checkpointsPassed: checkpointIdx,
       totalCheckpoints: checkpoints.length,
+      splits,
       ceremonyActive,
     };
   }
@@ -393,6 +413,7 @@ export function createRaceManager() {
     isFinished: () => finished,
     isDnf: () => dnf,
     isCeremony: () => ceremonyActive,
+    getOffCourseM: () => offCourseM,
     getRace: () => activeRace,
     serialize() {
       if (!activeRace) return null;

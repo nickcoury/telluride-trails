@@ -1,13 +1,15 @@
 import { SAN_JUAN_FOG_GLSL } from './atmosphere.js';
 
 /**
- * Patch a Three.js built-in material (MeshLambertMaterial / MeshStandardMaterial)
- * with San Juan height-fog & aerial perspective, plus optional GPU wind sway and atlas UV rect.
+ * Patch a Three.js built-in material (MeshLambertMaterial / MeshBasicMaterial)
+ * with San Juan height-fog & aerial perspective, plus optional GPU wind sway,
+ * DoubleSide foliage wrap lighting, and atlas UV rect.
  * @param {import('three').Material} material
  * @param {Record<string, {value: any}>} atmosphereUniforms
  * @param {{
  *   wind?: boolean,
  *   windStrength?: number,
+ *   foliage?: boolean,
  *   atlasUv?: boolean,
  *   fadeStart?: number,
  *   fadeEnd?: number,
@@ -17,6 +19,7 @@ export function patchSanJuanMaterial(material, atmosphereUniforms, opts = {}) {
   const {
     wind = false,
     windStrength = 0.25,
+    foliage = false,
     atlasUv = false,
     fadeStart = 0,
     fadeEnd = 0,
@@ -37,11 +40,6 @@ export function patchSanJuanMaterial(material, atmosphereUniforms, opts = {}) {
       uRainAmount: atmosphereUniforms.uRainAmount,
       uTime: atmosphereUniforms.uTime,
     });
-
-    if (fadeEnd > fadeStart) {
-      shader.uniforms.uFadeStart = { value: fadeStart };
-      shader.uniforms.uFadeEnd = { value: fadeEnd };
-    }
 
     let vertHeader = 'varying vec3 vAtmosWorldPos;\n';
     if (wind) {
@@ -113,6 +111,19 @@ export function patchSanJuanMaterial(material, atmosphereUniforms, opts = {}) {
       );
     }
 
+    if (foliage) {
+      // Prevent DoubleSide back-face normal flip from crushing foliage/impostors/grass to pitch black,
+      // and add translucent canopy wrap sunlight + full sky hemisphere bounce.
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <lights_fragment_end>',
+        `#include <lights_fragment_end>
+        vec3 foliageAlbedo = BRDF_Lambert( diffuseColor.rgb );
+        float sunWrap = max( uSunDir.y, 0.0 ) * ( 1.0 - uRainAmount * 0.65 );
+        reflectedLight.directDiffuse = max( reflectedLight.directDiffuse, foliageAlbedo * uSunColor * sunWrap * 0.68 );
+        reflectedLight.indirectDiffuse = max( reflectedLight.indirectDiffuse, foliageAlbedo * uSkyAmbientColor * 0.82 );`
+      );
+    }
+
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <tonemapping_fragment>',
       `gl_FragColor.rgb = applySanJuanAtmosphere(gl_FragColor.rgb, vAtmosWorldPos, cameraPosition);
@@ -124,7 +135,8 @@ export function patchSanJuanMaterial(material, atmosphereUniforms, opts = {}) {
     );
   };
 
+  const wKey = wind ? windStrength.toFixed(4) : '0';
   material.customProgramCacheKey = () =>
-    `sanjuan_${wind ? 'w' : ''}${atlasUv ? 'a' : ''}_${fadeStart}_${fadeEnd}`;
+    `sanjuan_${wKey}_${foliage ? 'f' : ''}_${atlasUv ? 'a' : ''}_${fadeStart}_${fadeEnd}`;
   return material;
 }

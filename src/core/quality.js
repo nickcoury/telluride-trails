@@ -1,9 +1,11 @@
 /**
- * Quality tier definitions, GPU/device auto-detection, and dynamic renderScale controller
- * with rolling frame-time budget and hysteresis step-down/step-up.
+ * Quality tier definitions, GPU/device auto-detection, saved preference hydration
+ * (single source of truth), and dynamic renderScale controller with rolling frame-time
+ * budget, hysteresis step-down/step-up, and granular change flags on 'quality:changed'.
  */
 
 export const QUALITY_TIERS = ['low', 'medium', 'high', 'ultra'];
+const UI_SETTINGS_KEY = 'telluride_trails_settings_v1';
 
 const TIER_PRESETS = {
   low: {
@@ -70,16 +72,47 @@ const TIER_PRESETS = {
     treeDensity: 1.0,
     grass: true,
     water: 'reflective',
-    postFX: true,
+    postFX: false,
     maxAnisotropy: 16,
     targetFps: 60,
   },
 };
 
-function detectInitialTier(renderer) {
-  const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+function readPersistedQuality() {
+  try {
+    const raw = localStorage.getItem(UI_SETTINGS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return {
+      qualityTier: parsed.qualityTier,
+      renderScale: parsed.renderScale,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function isLowEndDeviceHint() {
+  const ua = navigator.userAgent || '';
+  const isIPadOS = /Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1;
+  const isMobile = isIPadOS || /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
   const cores = navigator.hardwareConcurrency || 4;
-  const mem = navigator.deviceMemory || 4;
+  const mem = typeof navigator.deviceMemory === 'number' ? navigator.deviceMemory : isMobile ? 4 : 8;
+  const urlTier = new URLSearchParams(window.location.search).get('tier');
+  if (urlTier === 'low') return true;
+  if (urlTier && TIER_PRESETS[urlTier]) return false;
+  const saved = readPersistedQuality();
+  if (saved?.qualityTier === 'low') return true;
+  return isMobile && (cores <= 4 || mem <= 3);
+}
+
+function detectInitialTier(renderer) {
+  const ua = navigator.userAgent || '';
+  const isIPadOS = /Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1;
+  const isMobile = isIPadOS || /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+  const cores = navigator.hardwareConcurrency || 4;
+  const mem = typeof navigator.deviceMemory === 'number' ? navigator.deviceMemory : isMobile ? 4 : 8;
 
   let gpuRenderer = '';
   try {
@@ -97,7 +130,7 @@ function detectInitialTier(renderer) {
   const isLowGpu = isSoftware || /mali-g5|mali-t|adreno \(tm\) [345]|powervr/.test(lowerGpu);
   const isDiscreteGpu = /nvidia|geforce|rtx|radeon rx|apple m[1-9]|arc /.test(lowerGpu);
 
-  if (isLowGpu || (isMobile && (cores <= 4 || mem <= 3))) return 'low';
+  if (isLowGpu || (isMobile && !isIPadOS && (cores <= 4 || mem <= 3))) return 'low';
   if (isMobile) return 'medium';
   if (isDiscreteGpu && cores >= 8 && mem >= 8) return 'high';
   return cores >= 6 ? 'high' : 'medium';
@@ -109,9 +142,30 @@ export function createQualityManager({ renderer, events }) {
   const lockTierParam = params.get('lockTier');
 
   const detectedMaxTier = detectInitialTier(renderer);
-  let autoMode = lockTierParam !== '1' && lockTierParam !== 'true';
-  let currentTier = TIER_PRESETS[urlTier] ? urlTier : detectedMaxTier;
-  if (TIER_PRESETS[urlTier] && (lockTierParam === '1' || lockTierParam === 'true')) {
+  const saved = !urlTier ? readPersistedQuality() : null;
+
+  let autoMode = true;
+  let currentTier = detectedMaxTier;
+  let initialScaleOverride = null;
+
+  if (TIER_PRESETS[urlTier]) {
+    currentTier = urlTier;
+    if (lockTierParam === '1' || lockTierParam === 'true') {
+      autoMode = false;
+    }
+  } else if (saved) {
+    if (saved.qualityTier === 'auto') {
+      autoMode = true;
+    } else if (TIER_PRESETS[saved.qualityTier]) {
+      currentTier = saved.qualityTier;
+      autoMode = false;
+    }
+    if (Number.isFinite(saved.renderScale) && saved.renderScale !== 1.0) {
+      initialScaleOverride = Math.max(0.45, Math.min(1.25, Number(saved.renderScale)));
+    }
+  }
+
+  if (lockTierParam === '1' || lockTierParam === 'true') {
     autoMode = false;
   }
 
@@ -155,33 +209,75 @@ export function createQualityManager({ renderer, events }) {
     state.maxAnisotropy = Math.min(preset.maxAnisotropy, maxAnisoCap);
   }
 
-  function emitChange(reason) {
-    events.emit('quality:changed', { ...state, reason });
+  function snapshotFlags(prev) {
+    return {
+      tierChanged: state.tier !== prev.tier,
+      renderScaleChanged: Math.abs(state.renderScale - prev.renderScale) >= 0.005,
+      anisotropyChanged: state.maxAnisotropy !== prev.maxAnisotropy,
+      shadowsChanged: state.shadows !== prev.shadows || state.shadowMapSize !== prev.shadowMapSize,
+      drawDistanceChanged: state.drawDistance !== prev.drawDistance,
+      autoChanged: state.auto !== prev.auto,
+    };
+  }
+
+  function emitChange(reason, flags) {
+    events.emit('quality:changed', {
+      ...state,
+      reason,
+      ...flags,
+    });
+  }
+
+  function applyPatch({ tier, auto, renderScale } = {}, reason = 'user') {
+    const prev = {
+      tier: state.tier,
+      auto: state.auto,
+      renderScale: state.renderScale,
+      maxAnisotropy: state.maxAnisotropy,
+      shadows: state.shadows,
+      shadowMapSize: state.shadowMapSize,
+      drawDistance: state.drawDistance,
+    };
+
+    if (tier === 'auto') {
+      autoMode = true;
+      applyTierPreset(detectInitialTier(renderer), true);
+    } else {
+      if (typeof auto === 'boolean') {
+        autoMode = auto;
+        state.auto = autoMode;
+      }
+      if (tier && TIER_PRESETS[tier]) {
+        applyTierPreset(tier, autoMode);
+      } else if (auto === true && !prev.auto) {
+        applyTierPreset(detectInitialTier(renderer), true);
+      }
+    }
+
+    if (typeof renderScale === 'number' && Number.isFinite(renderScale)) {
+      state.renderScale = Math.max(0.45, Math.min(1.25, renderScale));
+    }
+
+    const flags = snapshotFlags(prev);
+    if (flags.tierChanged || flags.renderScaleChanged || flags.autoChanged || flags.shadowsChanged) {
+      overBudgetStreak = 0;
+      underBudgetStreak = 0;
+      emitChange(reason, flags);
+    }
   }
 
   function setTier(tier, { auto = false } = {}) {
     if (!TIER_PRESETS[tier]) return;
-    autoMode = Boolean(auto);
-    applyTierPreset(tier, autoMode);
-    overBudgetStreak = 0;
-    underBudgetStreak = 0;
-    emitChange(autoMode ? 'auto-tier' : 'user');
+    applyPatch({ tier, auto: Boolean(auto) }, auto ? 'auto-tier' : 'user');
   }
 
   function setAuto(enabled) {
-    autoMode = Boolean(enabled);
-    state.auto = autoMode;
-    if (autoMode) {
-      applyTierPreset(detectInitialTier(renderer), true);
-    }
-    emitChange('auto-toggle');
+    applyPatch({ auto: Boolean(enabled), tier: enabled ? 'auto' : undefined }, 'auto-toggle');
   }
 
   function setRenderScale(scale) {
     const clamped = Math.max(0.45, Math.min(1.25, Number(scale) || 1));
-    if (Math.abs(clamped - state.renderScale) < 0.01) return;
-    state.renderScale = clamped;
-    emitChange('renderScale');
+    applyPatch({ renderScale: clamped }, 'renderScale');
   }
 
   function getEffectivePixelRatio() {
@@ -220,7 +316,6 @@ export function createQualityManager({ renderer, events }) {
 
     updatePercentiles();
     const budgetMs = 1000 / state.targetFps;
-    // Use p95/avg blend so occasional GC spikes don't trigger false downgrades
     const effectiveMs = state.avgFrameMs * 0.65 + state.p95FrameMs * 0.35;
 
     if (effectiveMs > budgetMs * 1.18) {
@@ -237,61 +332,64 @@ export function createQualityManager({ renderer, events }) {
     if (overBudgetStreak >= 3) {
       lastScaleAdjustTime = nowSec;
       overBudgetStreak = 0;
+      const prev = { ...state };
       if (state.renderScale > state.minRenderScale + 0.04) {
         state.renderScale = Math.max(state.minRenderScale, +(state.renderScale - 0.1).toFixed(2));
-        emitChange('adaptive-downscale');
+        emitChange('adaptive-downscale', snapshotFlags(prev));
       } else {
         const idx = QUALITY_TIERS.indexOf(currentTier);
         if (idx > 0 && nowSec - lastTierChangeTime > 5) {
           lastTierChangeTime = nowSec;
           applyTierPreset(QUALITY_TIERS[idx - 1], true);
-          emitChange('adaptive-tier-down');
+          emitChange('adaptive-tier-down', snapshotFlags(prev));
         }
       }
     } else if (underBudgetStreak >= 6) {
       lastScaleAdjustTime = nowSec;
       underBudgetStreak = 0;
+      const prev = { ...state };
       if (state.renderScale < state.maxRenderScale - 0.04) {
         state.renderScale = Math.min(state.maxRenderScale, +(state.renderScale + 0.05).toFixed(2));
-        emitChange('adaptive-upscale');
+        emitChange('adaptive-upscale', snapshotFlags(prev));
       } else {
-        // Step up tier only after sustained headroom and cooldown
         const idx = QUALITY_TIERS.indexOf(currentTier);
         const maxAllowedIdx = QUALITY_TIERS.indexOf(detectedMaxTier);
-        if (idx >= 0 && idx < maxAllowedIdx && nowSec - lastTierChangeTime > 12 && effectiveMs < budgetMs * 0.52) {
+        if (
+          idx >= 0 &&
+          idx < maxAllowedIdx &&
+          nowSec - lastTierChangeTime > 12 &&
+          effectiveMs < budgetMs * 0.52
+        ) {
           lastTierChangeTime = nowSec;
           applyTierPreset(QUALITY_TIERS[idx + 1], true);
-          emitChange('adaptive-tier-up');
+          emitChange('adaptive-tier-up', snapshotFlags(prev));
         }
       }
     }
   }
 
-  events.on('ui:quality', (payload) => {
-    if (!payload) return;
-    if (payload.tier === 'auto') {
-      setAuto(true);
-      return;
-    }
-    if (typeof payload.auto === 'boolean') {
-      setAuto(payload.auto);
-    }
-    if (payload.tier && TIER_PRESETS[payload.tier]) {
-      setTier(payload.tier, { auto: Boolean(payload.auto) });
-    }
-    if (typeof payload.renderScale === 'number') {
-      setRenderScale(payload.renderScale);
-    }
+  const unsubUiQuality = events.on('ui:quality', (payload) => {
+    if (!payload || typeof payload !== 'object') return;
+    applyPatch(payload, 'user');
   });
 
   applyTierPreset(currentTier, autoMode);
+  if (initialScaleOverride !== null) {
+    state.renderScale = initialScaleOverride;
+  }
+
+  function dispose() {
+    unsubUiQuality();
+  }
 
   return Object.assign(state, {
     setTier,
     setAuto,
     setRenderScale,
+    applyPatch,
     getEffectivePixelRatio,
     recordFrame,
+    dispose,
     getPreset: (tier) => ({ ...(TIER_PRESETS[tier] || TIER_PRESETS.medium) }),
   });
 }

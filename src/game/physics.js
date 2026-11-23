@@ -92,48 +92,6 @@ export function evaluateSurface(x, z, terrain, trailData) {
 }
 
 /**
- * Compute desired world-space direction (unit dx, dz) and target speed from input + trail magnet.
- * Heading convention: yaw=0 faces North (-Z), yaw=+PI/2 faces East (+X) or West?
- * Standard Three.js Y-rotation: forward = (sin(yaw), 0, -cos(yaw)) or (-sin(yaw), 0, -cos(yaw))?
- * Let's support camera-relative input cleanly!
- */
-export function computeTrailMagnet(moveX, moveZ, nearest, isTouch = false) {
-  if (!nearest || nearest.dist > 5.5) return { x: moveX, z: moveZ };
-  const len = Math.hypot(moveX, moveZ);
-  if (len < 0.05) return { x: moveX, z: moveZ };
-
-  const ux = moveX / len;
-  const uz = moveZ / len;
-
-  // Tangent (tx, tz) is bidirectional; pick sign matching player's intended direction
-  let tx = nearest.tx ?? 0;
-  let tz = nearest.tz ?? -1;
-  const tLen = Math.hypot(tx, tz);
-  if (tLen < 1e-5) return { x: moveX, z: moveZ };
-  tx /= tLen;
-  tz /= tLen;
-
-  const dot = ux * tx + uz * tz;
-  if (dot < 0) {
-    tx = -tx;
-    tz = -tz;
-  }
-
-  // Only assist when player is roughly moving along the trail (within ~55 deg),
-  // never fight the player if they deliberately turn perpendicular off-trail!
-  const align = Math.abs(dot);
-  if (align < 0.55) return { x: moveX, z: moveZ };
-
-  // Subtle pull toward trail centerline + tangent alignment
-  const toCenterX = nearest.x; // wait: nearest gives point {x, z}
-  const strength = isTouch ? 0.36 : 0.18;
-  const bx = ux * (1 - strength) + tx * strength;
-  const bz = uz * (1 - strength) + tz * strength;
-  const bLen = Math.hypot(bx, bz) || 1;
-  return { x: (bx / bLen) * len, z: (bz / bLen) * len };
-}
-
-/**
  * Blend steering slightly toward trail centerline so runner stays centered on singletrack.
  */
 export function applyTrailCenterPull(px, pz, dirX, dirZ, nearest, isTouch = false) {
@@ -188,7 +146,7 @@ export function baseEffortSpeed(effort) {
 /**
  * Determine gait label & final target speed.
  */
-export function computeTargetSpeed({ effort, grade, surfaceInfo, phys }) {
+export function computeTargetSpeed({ effort, grade, surface = 'trail', surfaceInfo, phys }) {
   if (effort === 'idle') return { speedMs: 0, gait: 'idle', isPowerHike: false };
 
   let base = baseEffortSpeed(effort);
@@ -202,7 +160,7 @@ export function computeTargetSpeed({ effort, grade, surfaceInfo, phys }) {
     base = Math.min(base, effort === 'sprint' ? 2.45 : 2.05);
   }
 
-  const gMul = gradeSpeedMultiplier(grade, surfaceInfo.name || 'trail');
+  const gMul = gradeSpeedMultiplier(grade, surface);
   const sMul = surfaceInfo.speedMul ?? 1.0;
   const pMul = physiologySpeedFactor(phys);
 

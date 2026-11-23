@@ -30,6 +30,16 @@ const store = {
   },
 };
 
+// In-memory cache for unlocked achievements so per-substep checks are O(1) with zero localStorage reads.
+let achCache = null;
+
+function ensureAchCache() {
+  if (!achCache) {
+    achCache = store.get(ACH_KEY) || {};
+  }
+  return achCache;
+}
+
 export function hasSavedRun() {
   const s = store.get(SAVE_KEY);
   return Boolean(s && s.mode && s.pos && !s.finished && !s.dnf);
@@ -77,11 +87,15 @@ export function recordPersonalBest(raceId, { clockS, timeDilated, dateIso }) {
 }
 
 export function loadAchievements() {
-  return store.get(ACH_KEY) || {};
+  return { ...ensureAchCache() };
+}
+
+export function isAchievementUnlocked(id) {
+  return Boolean(ensureAchCache()[id]);
 }
 
 export function saveAchievement(id) {
-  const all = loadAchievements();
+  const all = ensureAchCache();
   if (all[id]) return false;
   all[id] = { unlockedAt: Date.now() };
   store.set(ACH_KEY, all);

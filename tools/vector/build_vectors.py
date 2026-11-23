@@ -70,9 +70,9 @@ def classify_highway(h: dict) -> tuple[str, float, str]:
             width = 5.0
 
     if hw == "via_ferrata" or sac in ("alpine_hiking", "demanding_alpine_hiking", "difficult_alpine_hiking"):
-        diff = "expert"
+        diff = "alpine_expert"
     elif sac == "demanding_mountain_hiking" or (hw == "track" and tracktype in ("grade4", "grade5")):
-        diff = "hard"
+        diff = "demanding_hard"
     elif sac == "mountain_hiking" or hw in ("path", "bridleway", "track"):
         diff = "moderate"
     else:
@@ -333,6 +333,9 @@ def main():
     # 4. Project waterways, lakes, waterfalls, buildings, aerialways, ski runs
     waterways = []
     for ww in raw["waterways"]:
+        # Skip unnamed seasonal/intermittent dry gullies (keeps all named creeks/rivers + all perennial streams)
+        if ww.get("intermittent") == "yes" and not ww.get("name"):
+            continue
         coords_flat = []
         xz_pts = []
         for lon, lat in ww["coords"]:
@@ -343,7 +346,12 @@ def main():
             xz_pts.append((rx, rz))
         w_m = parse_number(ww.get("width", ""), 0.0)
         if w_m <= 0:
-            w_m = 9.0 if ww["kind"] == "river" else (3.5 if ww["kind"] == "stream" else 2.5)
+            if ww["kind"] == "river":
+                w_m = 7.5
+            elif ww["kind"] in ("stream", "creek"):
+                w_m = 2.4 if ww.get("name") else 1.6
+            else:
+                w_m = 1.5
         waterways.append({
             "id": f"w{ww['id']}",
             "name": ww["name"],
@@ -356,20 +364,26 @@ def main():
     lakes = []
     for lk in raw["lakes"]:
         c_ll = lk["coords"]
-        cx_ll = sum(p[0] for p in c_ll) / len(c_ll)
-        cy_ll = sum(p[1] for p in c_ll) / len(c_ll)
+        # Strip duplicate closing vertex so earcut / ShapeUtils.triangulateShape gets a clean open ring
+        ring_ll = c_ll[:-1] if (len(c_ll) > 3 and c_ll[0] == c_ll[-1]) else c_ll
+        if len(ring_ll) < 3:
+            continue
+        cx_ll = sum(p[0] for p in ring_ll) / len(ring_ll)
+        cy_ll = sum(p[1] for p in ring_ll) / len(ring_ll)
         y_lake = round(get_elev(cx_ll, cy_ll), 1)
         coords_flat = []
         xz_pts = []
-        for lon, lat in c_ll:
+        for lon, lat in ring_ll:
             wx, wz = lon_lat_to_world(lon, lat)
             rx, rz = round(wx, 1), round(wz, 1)
             coords_flat.extend([rx, y_lake, rz])
             xz_pts.append((rx, rz))
-        # Shoelace area
+        # Shoelace area on closed ring
         area = 0.0
-        for i in range(len(xz_pts) - 1):
-            area += xz_pts[i][0] * xz_pts[i + 1][1] - xz_pts[i + 1][0] * xz_pts[i][1]
+        n_ring = len(xz_pts)
+        for i in range(n_ring):
+            j = (i + 1) % n_ring
+            area += xz_pts[i][0] * xz_pts[j][1] - xz_pts[j][0] * xz_pts[i][1]
         area = abs(area) * 0.5
         if area < 40.0:
             continue
@@ -419,12 +433,15 @@ def main():
     buildings = []
     for b in raw["buildings"]:
         c_ll = b["coords"]
-        cx_ll = sum(p[0] for p in c_ll) / len(c_ll)
-        cy_ll = sum(p[1] for p in c_ll) / len(c_ll)
+        ring_ll = c_ll[:-1] if (len(c_ll) > 3 and c_ll[0] == c_ll[-1]) else c_ll
+        if len(ring_ll) < 3:
+            continue
+        cx_ll = sum(p[0] for p in ring_ll) / len(ring_ll)
+        cy_ll = sum(p[1] for p in ring_ll) / len(ring_ll)
         base_y = round(get_elev(cx_ll, cy_ll), 1)
         coords_flat = []
         xz_pts = []
-        for lon, lat in c_ll:
+        for lon, lat in ring_ll:
             wx, wz = lon_lat_to_world(lon, lat)
             rx, rz = round(wx, 1), round(wz, 1)
             coords_flat.extend([rx, base_y, rz])
@@ -590,19 +607,26 @@ def main():
     kind_to_idx = {k: i for i, k in enumerate(kinds_list)}
     flat_nodes = []
     for x, y, z in graph_node_list:
-        flat_nodes.extend([x, z])  # 2D XZ for fast A*
+        flat_nodes.extend([int(round(x)), int(round(z))])  # integer meters XZ for compact A*
 
     compact_edges = []
     for e in trail_edges:
-        # Store simplified polyline XZ for route() result
+        # Subsample intermediate vertices >= 12m apart & integer-round so graph.json stays small
         c = e["coords"]
-        xz_flat = []
-        for i in range(0, len(c), 3):
-            xz_flat.extend([c[i], c[i + 2]])
+        n_pts = len(c) // 3
+        xz_flat = [int(round(c[0])), int(round(c[2]))]
+        last_x, last_z = c[0], c[2]
+        for pt_i in range(1, n_pts - 1):
+            px, pz = c[pt_i * 3], c[pt_i * 3 + 2]
+            if math.hypot(px - last_x, pz - last_z) >= 12.0:
+                xz_flat.extend([int(round(px)), int(round(pz))])
+                last_x, last_z = px, pz
+        if n_pts > 1:
+            xz_flat.extend([int(round(c[-3])), int(round(c[-1]))])
         compact_edges.append([
             e["u"],
             e["v"],
-            e["lengthM"],
+            int(round(e["lengthM"])),
             kind_to_idx.get(e["kind"], 0),
             get_name_idx(e["name"]),
             xz_flat,

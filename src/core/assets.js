@@ -1,7 +1,8 @@
 /**
- * Shared asset loader with concurrency limit, retries, and lightweight caching.
+ * Shared asset loader with concurrency limit, smart retries (no 4xx retry storms),
+ * and bounded LRU JSON cache.
  */
-export function createAssetLoader({ baseUrl = '/', maxConcurrent = 6 } = {}) {
+export function createAssetLoader({ baseUrl = '/', maxConcurrent = 6, maxJsonCache = 128 } = {}) {
   const jsonCache = new Map();
   let active = 0;
   /** @type {Array<() => void>} */
@@ -33,6 +34,10 @@ export function createAssetLoader({ baseUrl = '/', maxConcurrent = 6 } = {}) {
     return `${cleanBase}${cleanPath}`;
   }
 
+  function isRetryableStatus(status) {
+    return status === 408 || status === 429 || status >= 500;
+  }
+
   async function fetchWithRetry(url, { signal, retries = 2 } = {}) {
     await acquire();
     try {
@@ -40,11 +45,17 @@ export function createAssetLoader({ baseUrl = '/', maxConcurrent = 6 } = {}) {
       for (let attempt = 0; attempt <= retries; attempt++) {
         try {
           const res = await fetch(url, { signal });
-          if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+          if (!res.ok) {
+            const err = new Error(`HTTP ${res.status} for ${url}`);
+            err.status = res.status;
+            if (!isRetryableStatus(res.status)) throw err;
+            throw err;
+          }
           return res;
         } catch (err) {
           lastErr = err;
-          if (signal?.aborted || attempt === retries) throw err;
+          const nonRetryable = typeof err?.status === 'number' && !isRetryableStatus(err.status);
+          if (signal?.aborted || nonRetryable || attempt === retries) throw err;
           await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
         }
       }
@@ -57,10 +68,19 @@ export function createAssetLoader({ baseUrl = '/', maxConcurrent = 6 } = {}) {
   async function fetchJson(path, { cache = true, signal, retries = 2 } = {}) {
     const url = resolveUrl(path);
     if (cache && jsonCache.has(url)) {
-      return jsonCache.get(url);
+      const hit = jsonCache.get(url);
+      jsonCache.delete(url);
+      jsonCache.set(url, hit);
+      return hit;
     }
     const promise = fetchWithRetry(url, { signal, retries }).then((r) => r.json());
-    if (cache) jsonCache.set(url, promise);
+    if (cache) {
+      jsonCache.set(url, promise);
+      while (jsonCache.size > maxJsonCache) {
+        const oldestKey = jsonCache.keys().next().value;
+        jsonCache.delete(oldestKey);
+      }
+    }
     try {
       return await promise;
     } catch (err) {

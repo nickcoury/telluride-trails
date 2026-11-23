@@ -3,9 +3,9 @@
  * - Warm felt-harp / Rhodes arpeggiated chords in D Major (Dadd9 -> Bm7 -> Gmaj7 -> A6sus4)
  * - Sparse stochastic D-major pentatonic mountain melody
  * - Lookahead Web Audio scheduler that pauses completely when in-game
+ * - Zero graph node retention (all scheduled plucks disconnect on ended)
  */
 
-// Frequencies in Hz (D major / B minor palette)
 const NOTE = {
   G2: 98.00,
   A2: 110.00,
@@ -112,11 +112,14 @@ export function createMenuMusic(audioCtx) {
     g2.connect(env);
     env.connect(warmFilter);
 
+    osc1.onended = () => {
+      try { env.disconnect(); } catch {}
+      release();
+    };
     osc1.start(time);
     osc2.start(time);
     osc1.stop(time + duration + 0.03);
     osc2.stop(time + duration + 0.03);
-    osc1.onended = release;
   }
 
   function tickScheduler() {
@@ -135,20 +138,17 @@ export function createMenuMusic(audioCtx) {
       const beatInBar = stepIdx % 8;
       const chord = CHORDS[bar];
 
-      // Bass / root on beat 0, fifth on beat 4
       if (beatInBar === 0) {
         schedulePluck(chord[0], nextStepTime, 2.8, 0.085, true);
       } else if (beatInBar === 4) {
         schedulePluck(chord[1], nextStepTime, 1.9, 0.055, false);
       }
 
-      // Gentle rolling arpeggio notes
       if (beatInBar === 1 || beatInBar === 3 || beatInBar === 6) {
         const note = chord[(beatInBar + bar) % chord.length];
         schedulePluck(note, nextStepTime, 1.45, 0.042, false);
       }
 
-      // Sparse delicate alpine melody note
       if ((beatInBar === 2 || beatInBar === 5) && Math.random() < 0.58) {
         const mNote = MELODY_POOL[Math.floor(Math.random() * MELODY_POOL.length)];
         schedulePluck(mNote, nextStepTime, 1.75, 0.032, false);

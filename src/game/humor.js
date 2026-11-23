@@ -7,17 +7,44 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+// Hoisted formatter (constructed once, reused in HUD ETA formatting)
+let DENVER_ETA_FMT = null;
+try {
+  DENVER_ETA_FMT = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Denver',
+    weekday: 'long',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: false,
+  });
+} catch {
+  DENVER_ETA_FMT = null;
+}
+
 /**
- * Format an absurdly honest real-time ETA string.
+ * Format an absurdly honest real-time ETA string anchored to Telluride local time.
  */
-export function formatRealTimeEta(etaSeconds) {
-  if (!Number.isFinite(etaSeconds) || etaSeconds <= 0 || etaSeconds > 30 * 86400) {
+export function formatRealTimeEta(etaSeconds, baseEpochMs = Date.now()) {
+  if (!Number.isFinite(etaSeconds) || etaSeconds < 0 || etaSeconds > 30 * 86400) {
     return { label: 'Eventually', joke: 'Estimated finish: Sometime this geological epoch.' };
   }
-  const finishDate = new Date(Date.now() + etaSeconds * 1000);
-  const day = DAYS[finishDate.getDay()];
-  const hh = finishDate.getHours();
-  const mm = String(finishDate.getMinutes()).padStart(2, '0');
+  const finishDate = new Date(baseEpochMs + etaSeconds * 1000);
+  let day = DAYS[finishDate.getDay()];
+  let hh = finishDate.getHours();
+  let mm = String(finishDate.getMinutes()).padStart(2, '0');
+  if (DENVER_ETA_FMT) {
+    try {
+      const parts = DENVER_ETA_FMT.formatToParts(finishDate);
+      for (let i = 0; i < parts.length; i++) {
+        const p = parts[i];
+        if (p.type === 'weekday') day = p.value;
+        else if (p.type === 'hour') hh = Number(p.value) % 24;
+        else if (p.type === 'minute') mm = p.value;
+      }
+    } catch {
+      // fallback to local timezone
+    }
+  }
   const ampm = hh >= 12 ? 'PM' : 'AM';
   const h12 = ((hh + 11) % 12) + 1;
   const timeStr = `${h12}:${mm} ${ampm}`;

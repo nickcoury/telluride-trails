@@ -293,9 +293,39 @@ def build_curated_pois(proj: dict, net: TrailNetwork, sampler: TerrariumSampler)
                 best = p
         return best
 
+    def match_waterfall(name_sub: str, near_ll: tuple[float, float], max_m: float = 2500.0):
+        tx, tz = lon_lat_to_world(*near_ll)
+        best = None
+        best_d = max_m
+        nl = name_sub.lower()
+        for wf in osm_waterfalls:
+            if nl not in (wf.get("name") or "").lower():
+                continue
+            d = dist2d(tx, tz, wf["x"], wf["z"])
+            if d < best_d:
+                best_d = d
+                best = wf
+        return best
+
+    def match_lake(name_sub: str, near_ll: tuple[float, float], max_m: float = 3500.0):
+        tx, tz = lon_lat_to_world(*near_ll)
+        best = None
+        best_d = max_m
+        nl = name_sub.lower()
+        for lk in osm_lakes:
+            if nl not in (lk.get("name") or "").lower():
+                continue
+            cx = (lk["bbox"][0] + lk["bbox"][2]) * 0.5
+            cz = (lk["bbox"][1] + lk["bbox"][3]) * 0.5
+            d = dist2d(tx, tz, cx, cz)
+            if d < best_d:
+                best_d = d
+                best = {"x": round(cx, 1), "z": round(cz, 1), "y": lk["y"]}
+        return best
+
     CURATED = [
         # Telluride
-        ("telluride-town", "Telluride Gondola Plaza", "town", "Telluride", (-107.8123, 37.9362), (-107.8080, 37.9340), True, "Historic box-canyon base at 8,750 ft — step off Oak St right onto San Juan singletrack."),
+        ("telluride-town", "Telluride Gondola Plaza", "town", "Telluride", (-107.8123, 37.9368), (-107.7850, 37.9355), True, "Historic box-canyon hub at 8,750 ft — head east toward Ajax Peak & Bridal Veil."),
         ("telluride-town-park", "Telluride Town Park", "trailhead", "Telluride", (-107.8058, 37.9356), (-107.7950, 37.9260), True, "East end of town where Bear Creek, Bridal Veil, and TMR kick off."),
         ("bear-creek-th", "Bear Creek Trailhead", "trailhead", "Telluride", (-107.8085, 37.9325), (-107.8020, 37.9100), True, "Iconic box-canyon singletrack climbing toward Bear Creek Falls & Wasatch."),
         ("jud-wiebe-th", "Jud Wiebe Trailhead", "trailhead", "Telluride", (-107.8152, 37.9403), (-107.8180, 37.9450), True, "Beloved 3-mile sunny aspen loop perched directly above downtown Telluride."),
@@ -303,8 +333,8 @@ def build_curated_pois(proj: dict, net: TrailNetwork, sampler: TerrariumSampler)
         ("bridal-veil-basin", "Bridal Veil Basin", "viewpoint", "Telluride", (-107.7650, 37.9110), (-107.7550, 37.9050), True, "High alpine basin above the historic 1907 hydroelectric powerhouse."),
         ("ingram-falls", "Ingram Falls", "waterfall", "Telluride", (-107.7722, 37.9262), (-107.7550, 37.9330), True, "Roaring cascade along the Black Bear / Tomboy switchbacks above Pandora."),
         ("cornet-creek-falls", "Cornet Creek Falls", "waterfall", "Telluride", (-107.8108, 37.9422), (-107.8105, 37.9400), True, "Dramatic red-sandstone waterfall tucked right behind town off Jud Wiebe."),
-        ("bear-creek-falls", "Bear Creek Falls", "waterfall", "Telluride", (-107.8018, 37.9068), (-107.7980, 37.8960), True, "2.5 miles up Bear Creek Preserve — turn around or push for Wasatch Pass."),
-        ("san-sophia-gondola", "Telluride Gondola — St. Sophia Station", "viewpoint", "Telluride", (-107.8260, 37.9277), (-107.8200, 37.9320), True, "10,540 ft ridge crest between Telluride and Mountain Village (finish of Rundola)."),
+        ("bear-creek-falls", "Bear Creek Falls", "waterfall", "Telluride", (-107.8125, 37.9060), (-107.8050, 37.8960), True, "2.5 miles up Bear Creek Preserve at 9,980 ft — turn around or push for Wasatch Pass."),
+        ("san-sophia-gondola", "Telluride Gondola — San Sophia Station", "viewpoint", "Telluride", (-107.8260, 37.9277), (-107.8200, 37.9320), True, "10,540 ft ridge crest between Telluride and Mountain Village (finish of Rundola)."),
         ("mountain-village", "Mountain Village Heritage Plaza", "town", "Telluride", (-107.8473, 37.9319), (-107.8350, 37.9280), True, "9,545 ft ski village linked by free gondola and singletrack loops."),
         ("deep-creek-th", "Deep Creek Trailhead", "trailhead", "Telluride", (-107.8825, 37.9688), (-107.8550, 37.9720), True, "Aspen-lined singletrack bench linking Last Dollar Rd to Mill Creek and town."),
         ("mill-creek-th", "Mill Creek / Waterline Trailhead", "trailhead", "Telluride", (-107.8350, 37.9510), (-107.8250, 37.9470), True, "Shaded north-side singletrack traversing Eider Creek and Waterline."),
@@ -312,7 +342,7 @@ def build_curated_pois(proj: dict, net: TrailNetwork, sampler: TerrariumSampler)
         ("telluride-peak", "Telluride Peak", "peak", "Telluride", (-107.7490, 37.9312), (-107.7372, 37.9325), False, "13,509 ft high-wire ridge summit between Ajax Peak and Imogene Pass."),
         ("imogene-pass", "Imogene Pass", "pass", "Telluride", (-107.7372, 37.9325), (-107.7535, 37.9332), True, "13,114 ft crest connecting Ouray and Telluride — highest point of the Imogene Run."),
         ("black-bear-pass", "Black Bear Pass", "pass", "Telluride", (-107.7435, 37.8995), (-107.7680, 37.9160), True, "12,840 ft white-knuckle shelf road dropping above Bridal Veil Falls."),
-        ("alta-lakes", "Alta Lakes", "lake", "Telluride", (-107.8780, 37.8860), (-107.8700, 37.8830), True, "High alpine lakes at 11,300 ft beneath Bald Mountain and Wilson."),
+        ("alta-lakes", "Alta Lakes", "lake", "Telluride", (-107.8404, 37.8866), (-107.8464, 37.8859), True, "High alpine lakes at 11,300 ft beneath Bald Mountain and Palmyra."),
 
         # Ophir & Lizard Head
         ("ophir-town", "Ophir Town", "town", "Ophir & Lizard Head", (-107.8328, 37.8569), (-107.8100, 37.8540), True, "Tiny 9,695 ft valley hamlet guarding the western approach to Ophir Pass."),
@@ -324,7 +354,7 @@ def build_curated_pois(proj: dict, net: TrailNetwork, sampler: TerrariumSampler)
 
         # Sneffels & Blue Lakes
         ("blue-lakes-th", "Blue Lakes Trailhead", "trailhead", "Sneffels & Blue Lakes", (-107.8077, 38.0340), (-107.8168, 38.0027), True, "Gateway to the glowing turquoise glacial tarns beneath Mt. Sneffels."),
-        ("lower-blue-lake", "Lower Blue Lake", "lake", "Sneffels & Blue Lakes", (-107.7989, 37.9978), (-107.7939, 37.9964), True, "Turquoise alpine jewel at 10,970 ft below Dallas Peak and Sneffels."),
+        ("lower-blue-lake", "Lower Blue Lake", "lake", "Sneffels & Blue Lakes", (-107.8151, 38.0008), (-107.8085, 38.0013), True, "Turquoise alpine jewel at 10,910 ft below Dallas Peak and Sneffels."),
         ("blue-lakes-pass", "Blue Lakes Pass", "pass", "Sneffels & Blue Lakes", (-107.7847, 37.9948), (-107.7653, 37.9883), True, "13,000 ft divide linking Blue Lakes basin and Yankee Boy Basin."),
         ("yankee-boy-basin", "Yankee Boy Basin / Mt. Sneffels TH", "trailhead", "Sneffels & Blue Lakes", (-107.7830, 37.9890), (-107.7920, 38.0030), True, "Wildflower-choked high cirque under 14,150 ft Mt. Sneffels."),
         ("virginius-pass", "Virginius Pass (Kroger's Canteen)", "pass", "Sneffels & Blue Lakes", (-107.7786, 37.9555), (-107.7590, 37.9710), True, "13,100 ft knife-edge notch hosting Hardrock's highest aid station."),
@@ -356,10 +386,26 @@ def build_curated_pois(proj: dict, net: TrailNetwork, sampler: TerrariumSampler)
     result = []
     used_keys = set()
 
+    def is_duplicate_poi(name: str, x: float, z: float) -> bool:
+        nl = name.lower().strip()
+        for existing in result:
+            enl = existing["name"].lower().strip()
+            d = dist2d(x, z, existing["x"], existing["z"])
+            if d < 320.0:
+                return True
+            if enl == nl and d < 7500.0:
+                return True
+        return False
+
     for pid, name, kind, area, ll, look_ll, snap_flag, desc in CURATED:
         matched = None
         if kind in ("peak", "pass", "town"):
             matched = match_osm(name.split("(")[0].strip(), ll, kind_filter={kind}, max_m=1500.0)
+        elif kind == "waterfall":
+            matched = match_waterfall(name.split("(")[0].strip().replace("Falls", "").strip(), ll, max_m=2200.0)
+        elif kind == "lake":
+            matched = match_lake(name.split("(")[0].replace("Basin", "").strip(), ll, max_m=3000.0)
+
         if matched:
             wx, wz, wy = matched["x"], matched["z"], matched["y"]
         else:
@@ -374,7 +420,8 @@ def build_curated_pois(proj: dict, net: TrailNetwork, sampler: TerrariumSampler)
             if snapped:
                 sx, sy, sz, tx, tz, _ = snapped
                 wx, wz = sx, sz
-                if kind not in ("peak", "pass"):
+                # Preserve exact matched elevation for peaks, passes, waterfalls, and lakes!
+                if not (matched and kind in ("peak", "pass", "waterfall", "lake")):
                     wy = sy
                 if tx * (look_x - wx) + tz * (look_z - wz) < 0:
                     tx, tz = -tx, -tz
@@ -415,10 +462,8 @@ def build_curated_pois(proj: dict, net: TrailNetwork, sampler: TerrariumSampler)
             continue
         if p["kind"] == "peak" and p["y"] < 3800:
             continue
-        cell = (round(p["x"] / 300), round(p["z"] / 300))
-        if cell in used_keys:
+        if is_duplicate_poi(p["name"], p["x"], p["z"]):
             continue
-        used_keys.add(cell)
         heading = 0.0
         snapped = net.snap_to_trail(p["x"], p["z"], max_dist=150.0)
         if snapped:
@@ -440,15 +485,17 @@ def build_curated_pois(proj: dict, net: TrailNetwork, sampler: TerrariumSampler)
             continue
         if not (wx_min <= wf["x"] <= wx_max and wz_min <= wf["z"] <= wz_max):
             continue
-        cell = (round(wf["x"] / 300), round(wf["z"] / 300))
-        if cell in used_keys:
+        wf_area = area_from_xz(wf["x"], wf["z"])
+        wf_name = wf["name"]
+        if wf_name == "Bear Creek Falls" and wf_area == "Ouray":
+            wf_name = "Bear Creek Falls (Ouray)"
+        if is_duplicate_poi(wf_name, wf["x"], wf["z"]):
             continue
-        used_keys.add(cell)
         result.append({
             "id": wf["id"],
-            "name": wf["name"],
+            "name": wf_name,
             "kind": "waterfall",
-            "area": area_from_xz(wf["x"], wf["z"]),
+            "area": wf_area,
             "x": wf["x"],
             "z": wf["z"],
             "y": wf["y"],
@@ -463,10 +510,8 @@ def build_curated_pois(proj: dict, net: TrailNetwork, sampler: TerrariumSampler)
         cz = (lk["bbox"][1] + lk["bbox"][3]) * 0.5
         if not (wx_min <= cx <= wx_max and wz_min <= cz <= wz_max):
             continue
-        cell = (round(cx / 300), round(cz / 300))
-        if cell in used_keys:
+        if is_duplicate_poi(lk["name"], cx, cz):
             continue
-        used_keys.add(cell)
         result.append({
             "id": lk["id"],
             "name": lk["name"],
@@ -569,17 +614,32 @@ def route_osm_xz(net: TrailNetwork, waypoints_ll: list[tuple[float, float]], kin
 
 
 def project_checkpoints(dense_full: list[tuple[float, float, float, float]], cp_defs: list[dict]) -> list[dict]:
-    """Project checkpoints onto the race polyline in strictly monotonic progression order."""
+    """Project checkpoints onto the race polyline in strictly monotonic progression order, honoring targetMi on out-and-backs/loops."""
     n = len(dense_full)
     min_idx = 0
     out = []
     for cp in cp_defs:
         cx, cz = lon_lat_to_world(cp["lon"], cp["lat"])
-        # Search forward from min_idx (except final finish which is at n-1)
         if cp.get("isFinish"):
             bi = n - 1
+        elif cp.get("targetMi") is not None:
+            target_d = cp["targetMi"] * 1609.344
+            window_d = cp.get("windowMi", 2.5) * 1609.344
+            bi = min_idx
+            best_score = float("inf")
+            for i in range(min_idx, n):
+                pd_i = dense_full[i][3]
+                if abs(pd_i - target_d) > window_d:
+                    continue
+                d2 = (dense_full[i][0] - cx) ** 2 + (dense_full[i][2] - cz) ** 2
+                score = d2 + ((pd_i - target_d) * 0.25) ** 2
+                if score < best_score:
+                    best_score = score
+                    bi = i
+            if best_score == float("inf"):
+                bi = min(range(min_idx, n), key=lambda i: abs(dense_full[i][3] - target_d))
+            min_idx = min(n - 1, bi + 1)
         else:
-            # Find local best within reasonable forward window (or global forward)
             bi = min_idx
             best_d2 = float("inf")
             for i in range(min_idx, n):
@@ -587,12 +647,11 @@ def project_checkpoints(dense_full: list[tuple[float, float, float, float]], cp_
                 if d2 < best_d2:
                     best_d2 = d2
                     bi = i
-                # Stop early if we found a <80m hit and started moving far away (>2km)
                 elif best_d2 < 80 * 80 and d2 > 2000 * 2000:
                     break
-            min_idx = bi + 1
-        px, _, pz, pd = dense_full[bi]
-        obj = {"name": cp["name"], "d": round(pd, 1), "x": round(px, 1), "z": round(pz, 1)}
+            min_idx = min(n - 1, bi + 1)
+        px, py, pz, pd = dense_full[bi]
+        obj = {"name": cp["name"], "d": round(pd, 1), "x": round(px, 1), "z": round(pz, 1), "y": round(py, 1)}
         if cp.get("cutoffH") is not None:
             obj["cutoffH"] = cp["cutoffH"]
         out.append(obj)
@@ -615,6 +674,7 @@ def inject_graph_connectors(net: TrailNetwork, race_tracks_xz: list[list[tuple[f
         names.append(route_name)
     else:
         name_idx = names.index(route_name)
+        edges[:] = [e for e in edges if e[4] != name_idx]
 
     added_edges = 0
     for track_xz in race_tracks_xz:
@@ -769,7 +829,7 @@ def build_races(net: TrailNetwork, sampler: TerrariumSampler) -> tuple[list[dict
     )
     rundola_cps = [
         {"name": "Telluride Trail Mid-Station", "lon": -107.8244, "lat": 37.9328},
-        {"name": "San Sophia Ridge / St. Sophia (10,540 ft)", "lon": -107.8275, "lat": 37.9270, "cutoffH": 3.0, "isFinish": True},
+        {"name": "San Sophia Station (10,540 ft)", "lon": -107.8275, "lat": 37.9270, "cutoffH": 3.0, "isFinish": True},
     ]
 
     # 5. Deep Creek Half Marathon
@@ -780,24 +840,25 @@ def build_races(net: TrailNetwork, sampler: TerrariumSampler) -> tuple[list[dict
         {"name": "Courthouse / Oak St (Finish)", "lon": -107.8126, "lat": 37.9381, "cutoffH": 5.5, "isFinish": True},
     ]
 
-    # 6. Kendall Mountain Run
+    # 6. Kendall Mountain Run (out-and-back: targetMi prevents outbound checkpoints from snapping to inbound leg)
     kendall_ll = load_caltopo_line("kendall_VLGH.json")
     kendall_cps = [
-        {"name": "Deer Park Aid", "lon": -107.6509, "lat": 37.7834},
-        {"name": "The Notch Aid", "lon": -107.6397, "lat": 37.7928},
-        {"name": "Kendall Mountain Summit (13,066 ft)", "lon": -107.6419, "lat": 37.7938},
+        {"name": "Deer Park Aid", "lon": -107.6492, "lat": 37.7844, "targetMi": 3.4, "windowMi": 1.2},
+        {"name": "The Notch Aid", "lon": -107.6335, "lat": 37.7897, "targetMi": 5.0, "windowMi": 0.9},
+        {"name": "Kendall Mountain Summit (13,066 ft)", "lon": -107.6439, "lat": 37.7926, "targetMi": 6.1, "windowMi": 0.7},
+        {"name": "The Notch (Return)", "lon": -107.6335, "lat": 37.7897, "targetMi": 7.2, "windowMi": 1.0},
         {"name": "Silverton Memorial Park (Finish)", "lon": -107.6606, "lat": 37.8165, "cutoffH": 5.0, "isFinish": True},
     ]
 
     # 7. San Juan Solstice 50
     sjs_ll = load_caltopo_line("sjs50_6R6DT.json")
     sjs_cps = [
-        {"name": "Alpine Gulch", "lon": -107.3222, "lat": 37.9952},
-        {"name": "Williams Creek", "lon": -107.3328, "lat": 37.9216},
-        {"name": "Carson", "lon": -107.3630, "lat": 37.8708},
-        {"name": "Continental Divide", "lon": -107.3436, "lat": 37.9089},
-        {"name": "Slumgullion", "lon": -107.2743, "lat": 37.9827},
-        {"name": "Vickers", "lon": -107.2989, "lat": 38.0030},
+        {"name": "Alpine Gulch", "lon": -107.3484, "lat": 37.9686, "targetMi": 7.0, "windowMi": 2.0},
+        {"name": "Williams Creek", "lon": -107.3372, "lat": 37.9216, "targetMi": 15.7, "windowMi": 2.5},
+        {"name": "Carson", "lon": -107.3635, "lat": 37.8804, "targetMi": 21.0, "windowMi": 2.5},
+        {"name": "Continental Divide", "lon": -107.2883, "lat": 37.9059, "targetMi": 30.5, "windowMi": 3.0},
+        {"name": "Slumgullion", "lon": -107.2742, "lat": 37.9827, "targetMi": 39.4, "windowMi": 2.5},
+        {"name": "Vickers", "lon": -107.2820, "lat": 38.0344, "targetMi": 45.3, "windowMi": 2.5},
         {"name": "Lake City Town Park (Finish)", "lon": -107.3171, "lat": 38.0285, "cutoffH": 16.0, "isFinish": True},
     ]
 
@@ -812,7 +873,7 @@ def build_races(net: TrailNetwork, sampler: TerrariumSampler) -> tuple[list[dict
         {"name": "Silverton Memorial Park (Finish)", "lon": -107.6609, "lat": 37.8165, "cutoffH": 11.0, "isFinish": True},
     ]
 
-    # 9. Ouray 50
+    # 9. Ouray 50 (multi-loop out of Fellin Park: targetMi locks each aid visit to its real lap)
     o50_ll = load_caltopo_line("ouray50_5SLT69H.json", [
         "01. Fellin Park -> Weehawken AS",
         "02. Weehawken AS -> Alpine Mine Overlook -> Weehawken AS",
@@ -824,11 +885,12 @@ def build_races(net: TrailNetwork, sampler: TerrariumSampler) -> tuple[list[dict
         "08. Fellin Park AS -> Bridge of Heaven -> Fellin Park (Finish)",
     ])
     o50_cps = [
-        {"name": "Weehawken Aid", "lon": -107.7050, "lat": 38.0150},
-        {"name": "Crystal Lake Aid", "lon": -107.6840, "lat": 37.9680},
-        {"name": "Fellin Park (Lap 1)", "lon": -107.6714, "lat": 38.0228},
-        {"name": "Silvershield Aid", "lon": -107.6650, "lat": 38.0320},
-        {"name": "Bridge of Heaven", "lon": -107.6480, "lat": 38.0180},
+        {"name": "Weehawken Aid", "lon": -107.7002, "lat": 37.9943, "targetMi": 3.5, "windowMi": 2.0},
+        {"name": "Crystal Lake Aid", "lon": -107.6637, "lat": 37.9601, "targetMi": 15.7, "windowMi": 2.5},
+        {"name": "Fellin Park (Lap 1)", "lon": -107.6738, "lat": 38.0282, "targetMi": 24.3, "windowMi": 2.0},
+        {"name": "Silvershield Aid", "lon": -107.6828, "lat": 38.0391, "targetMi": 30.6, "windowMi": 2.5},
+        {"name": "Fellin Park (Lap 2)", "lon": -107.6731, "lat": 38.0285, "targetMi": 41.4, "windowMi": 2.0},
+        {"name": "Bridge of Heaven (12,264 ft)", "lon": -107.6381, "lat": 38.0386, "targetMi": 46.5, "windowMi": 2.5},
         {"name": "Fellin Park (Finish)", "lon": -107.6714, "lat": 38.0228, "cutoffH": 24.0, "isFinish": True},
     ]
 
@@ -837,9 +899,10 @@ def build_races(net: TrailNetwork, sampler: TerrariumSampler) -> tuple[list[dict
     bl_part2_xz = route_osm_xz(net, [(-107.7847, 37.9948), (-107.7653, 37.9883), (-107.7240, 37.9740)], prefer_names=("yankee boy", "camp bird"), max_detour_ratio=5.0)
     bl_xz = bl_part1_xz + bl_part2_xz
     bl_cps = [
-        {"name": "Lower Blue Lake", "lon": -107.7989, "lat": 37.9978},
-        {"name": "Blue Lakes Pass (13,000 ft)", "lon": -107.7847, "lat": 37.9948},
-        {"name": "Yankee Boy Basin", "lon": -107.7653, "lat": 37.9883},
+        {"name": "Lower Blue Lake", "lon": -107.8151, "lat": 38.0008, "targetMi": 3.4, "windowMi": 1.2},
+        {"name": "Upper Blue Lake", "lon": -107.7989, "lat": 37.9978, "targetMi": 4.8, "windowMi": 1.0},
+        {"name": "Blue Lakes Pass (13,000 ft)", "lon": -107.7847, "lat": 37.9948, "targetMi": 6.2, "windowMi": 1.0},
+        {"name": "Yankee Boy Basin", "lon": -107.7653, "lat": 37.9883, "targetMi": 7.9, "windowMi": 1.2},
         {"name": "Camp Bird Finish", "lon": -107.7240, "lat": 37.9740, "cutoffH": 9.0, "isFinish": True},
     ]
 
@@ -848,7 +911,7 @@ def build_races(net: TrailNetwork, sampler: TerrariumSampler) -> tuple[list[dict
         ("hardrock-100-ccw", "Hardrock 100 (Counter-Clockwise)", "The exact same 33,000+ ft of San Juan suffering, starting with Cunningham Gulch instead of KT so your quads are surprised differently.", 102.5, 33441, 48.0, "06:00", [lon_lat_to_world(a, b) for a, b in hr_ccw_ll], hr_ccw_cps, 2.5),
         ("imogene-pass-run", "Imogene Pass Run", "17.1 miles from Ouray (7,811 ft) up and over 13,114 ft Imogene Pass to Telluride. At least the second half is downhill — until your quads explode.", 17.1, 5300, 7.0, "07:30", imo_xz, imo_cps, 2.0),
         ("telluride-mountain-run", "Telluride Mountain Run (40M)", "40 rugged miles circling the box canyon, highlighted by the 'Mile and a Half of Sky' ridge above 13,000 ft where gravity becomes optional.", 40.0, 15000, 17.0, "05:00", [lon_lat_to_world(a, b) for a, b in tmr_ll], tmr_cps, 2.0),
-        ("rundola", "Rundola", "Up the Telluride Trail and gondola corridor to St. Sophia Station (10,540 ft). You get to ride the gondola back down, which is the only civilized part.", 2.4, 1810, 3.0, "08:00", rundola_xz, rundola_cps, 1.5),
+        ("rundola", "Rundola", "Up the Telluride Trail and gondola corridor to San Sophia Station (10,540 ft). You get to ride the gondola back down, which is the only civilized part.", 2.4, 1810, 3.0, "08:00", rundola_xz, rundola_cps, 1.5),
         ("deep-creek-half", "Deep Creek Trail Half Marathon", "13.1 miles of golden-aspen singletrack from Last Dollar Road across Deep Creek, Mill Creek, Waterline, and Jud Wiebe down to Oak Street.", 13.1, 3100, 5.5, "08:00", [lon_lat_to_world(a, b) for a, b in dc_ll], dc_cps, 2.0),
         ("kendall-mountain-run", "Kendall Mountain Run", "Born from a 1908 Silverton bar bet: climb nearly 4,000 ft up Kendall Mountain to 13,066 ft and sprint back to Memorial Park.", 12.3, 3960, 5.0, "08:00", [lon_lat_to_world(a, b) for a, b in kendall_ll], kendall_cps, 2.0),
         ("san-juan-solstice-50", "San Juan Solstice 50", "50-mile counter-clockwise high-alpine tour out of Lake City touching the Continental Divide above 13,300 ft. Bring a rain shell.", 50.0, 12500, 16.0, "05:00", [lon_lat_to_world(a, b) for a, b in sjs_ll], sjs_cps, 2.0),
@@ -867,6 +930,31 @@ def build_races(net: TrailNetwork, sampler: TerrariumSampler) -> tuple[list[dict
         line_flat = []
         for x, _, z, d in simplified:
             line_flat.extend([round(x, 1), round(z, 1), round(d, 1)])
+
+        # 128-sample real DEM elevation profile (meters) preserving true high/low extrema per bin
+        n_prof = 128
+        elevations = []
+        dn = len(dense_full)
+        d_idx = 0
+        for s_i in range(n_prof):
+            target_d = (s_i / (n_prof - 1)) * total_m
+            while d_idx + 1 < dn and dense_full[d_idx + 1][3] < target_d:
+                d_idx += 1
+            if d_idx + 1 < dn:
+                d0 = dense_full[d_idx][3]
+                d1 = dense_full[d_idx + 1][3]
+                t = (target_d - d0) / max(1e-6, d1 - d0)
+                ey = dense_full[d_idx][1] * (1.0 - t) + dense_full[d_idx + 1][1] * t
+            else:
+                ey = dense_full[-1][1]
+            elevations.append(round(ey, 1))
+        # Pin true global max & min elevation into their exact profile bins so 14er summits never alias between bins
+        max_pt = max(dense_full, key=lambda p: p[1])
+        min_pt = min(dense_full, key=lambda p: p[1])
+        max_bin = min(n_prof - 1, max(0, int(round((max_pt[3] / max(1.0, total_m)) * (n_prof - 1)))))
+        min_bin = min(n_prof - 1, max(0, int(round((min_pt[3] / max(1.0, total_m)) * (n_prof - 1)))))
+        elevations[max_bin] = round(max_pt[1], 1)
+        elevations[min_bin] = round(min_pt[1], 1)
 
         s0 = simplified[0]
         s1 = simplified[min(1, len(simplified) - 1)]
@@ -898,6 +986,7 @@ def build_races(net: TrailNetwork, sampler: TerrariumSampler) -> tuple[list[dict
             "start": {"x": round(s0[0], 1), "z": round(s0[2], 1), "heading": start_h},
             "finish": {"x": round(e1[0], 1), "z": round(e1[2], 1), "heading": fin_h},
             "checkpoints": checkpoints,
+            "elevations": elevations,
             "line": line_flat,
         })
 

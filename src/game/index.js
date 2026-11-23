@@ -27,7 +27,6 @@ import {
 } from './physics.js';
 import {
   formatAwayJoke,
-  formatDurationClock,
   pickAltQuote,
   pickBonkQuote,
   pickCliffWarning,
@@ -81,6 +80,14 @@ export function createGame(engine, terrain, trailData, world) {
   let saveAccumS = 0;
   let lastStreamX = NaN;
   let lastStreamZ = NaN;
+  let lastShadowsEnabled = null;
+  const isCoarsePointer = Boolean(typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches);
+
+  // Cached return-to-course route for race autopilot (prevents per-substep A* stalls)
+  let cachedReturnRoute = null;
+  let cachedRouteIdx = 1;
+  let cachedRoutePerfMs = -Infinity;
+  const camPoseScratch = { x: 0, y: 0, z: 0, heading: 0 };
 
   function ensureVectorArea(x, z) {
     if (!trailData?.loadArea) return;
@@ -93,11 +100,15 @@ export function createGame(engine, terrain, trailData, world) {
 
   // Vertical ground-follow smoothing + small trail hop
   let smoothY = terrain.getHeight(0, 0);
+  let vertRefY = smoothY;
   let jumpOffset = 0;
   let jumpVel = 0;
   let stumbleTimer = 0;
   let fallTimer = 0;
   let prevNearStream = false;
+  let lastNearAid = null;
+  let lastStormRisk = 0;
+  let raceOffCourseS = 0;
   let lastSurfaceInfo = null;
   let lastLocalClock = weather.getDenverClock();
 
@@ -143,8 +154,8 @@ export function createGame(engine, terrain, trailData, world) {
     const def = ACHIEVEMENTS[id];
     if (!def) return;
     if (saveAchievement(id)) {
+      // UI listens to 'game:achievement' and displays the achievement toast
       engine.events.emit('game:achievement', { ...def });
-      toast(`Achievement: ${def.title} — ${def.desc}`, 'ok', 4.5);
     }
   }
 
@@ -152,7 +163,10 @@ export function createGame(engine, terrain, trailData, world) {
     const camMode = engine.cameraRig?.getMode?.() || 'chase';
     const isFp = camMode === 'first-person';
     const shadowsEnabled = Boolean(engine.quality?.shadows);
-    runner.setShadowsEnabled(shadowsEnabled);
+    if (shadowsEnabled !== lastShadowsEnabled) {
+      lastShadowsEnabled = shadowsEnabled;
+      runner.setShadowsEnabled(shadowsEnabled);
+    }
 
     runner.root.position.set(state.x, state.y, state.z);
     runner.root.rotation.y = state.heading;
@@ -184,8 +198,15 @@ export function createGame(engine, terrain, trailData, world) {
     state.x = x;
     state.z = z;
     smoothY = terrain.getHeight(x, z);
+    vertRefY = smoothY;
     state.y = smoothY;
     state.heading = heading;
+    camPoseScratch.x = x;
+    camPoseScratch.y = smoothY;
+    camPoseScratch.z = z;
+    camPoseScratch.heading = heading;
+    cachedReturnRoute = null;
+    cachedRoutePerfMs = -Infinity;
     state.distanceM = 0;
     state.vertM = 0;
     state.vertLossM = 0;
@@ -199,6 +220,9 @@ export function createGame(engine, terrain, trailData, world) {
     elapsedRunS = 0;
     maxElevFt = smoothY * M_TO_FT;
     offTrailSeconds = 0;
+    raceOffCourseS = 0;
+    lastNearAid = null;
+    lastStormRisk = 0;
     lntWarningsCount = 0;
     stumbleTimer = 0;
     fallTimer = 0;
@@ -288,8 +312,10 @@ export function createGame(engine, terrain, trailData, world) {
 
     const sx = race.start?.x ?? race.line?.[0] ?? 0;
     const sz = race.start?.z ?? race.line?.[1] ?? 0;
-    let heading = 0;
-    if (race.line && race.line.length >= 6) {
+    let heading = typeof race.start?.heading === 'number' && Number.isFinite(race.start.heading)
+      ? race.start.heading
+      : 0;
+    if (typeof race.start?.heading !== 'number' && race.line && race.line.length >= 6) {
       heading = Math.atan2(-(race.line[3] - race.line[0]), -(race.line[4] - race.line[1]));
     }
 
@@ -328,8 +354,15 @@ export function createGame(engine, terrain, trailData, world) {
     state.z = saved.pos?.z ?? 0;
     ensureVectorArea(state.x, state.z);
     smoothY = terrain.getHeight(state.x, state.z);
+    vertRefY = smoothY;
     state.y = smoothY;
     state.heading = saved.heading ?? 0;
+    camPoseScratch.x = state.x;
+    camPoseScratch.y = state.y;
+    camPoseScratch.z = state.z;
+    camPoseScratch.heading = state.heading;
+    cachedReturnRoute = null;
+    cachedRoutePerfMs = -Infinity;
     state.distanceM = saved.distanceM ?? 0;
     state.vertM = saved.vertM ?? 0;
     state.vertLossM = saved.vertLossM ?? 0;
@@ -403,6 +436,7 @@ export function createGame(engine, terrain, trailData, world) {
       return resumeSaved();
     }
     state.paused = false;
+    weather.syncWorldClock(true);
     engine.setAppState?.('playing');
     engine.events.emit('game:paused', { paused: false });
     return true;
@@ -431,8 +465,15 @@ export function createGame(engine, terrain, trailData, world) {
     state.x = x;
     state.z = z;
     smoothY = terrain.getHeight(x, z);
+    vertRefY = smoothY;
     state.y = smoothY;
     state.heading = heading;
+    camPoseScratch.x = x;
+    camPoseScratch.y = smoothY;
+    camPoseScratch.z = z;
+    camPoseScratch.heading = heading;
+    cachedReturnRoute = null;
+    cachedRoutePerfMs = -Infinity;
     jumpOffset = 0;
     jumpVel = 0;
     ensureVectorArea(x, z);
@@ -445,14 +486,34 @@ export function createGame(engine, terrain, trailData, world) {
       const target = raceMgr.getAutopilotTarget(state.x, state.z, 22);
       if (target) {
         if (target.offCourseM > 90 && trailData?.route) {
-          const poly = trailData.route({ x: state.x, z: state.z }, target);
-          if (poly && poly.length >= 2) {
-            const p = poly[1];
+          const nowPerf = performance.now();
+          const cooldownExpired = (nowPerf - cachedRoutePerfMs) > 2500;
+          let needRecompute = cooldownExpired;
+          if (!needRecompute && cachedReturnRoute && cachedReturnRoute.length >= 2) {
+            const wp = cachedReturnRoute[cachedRouteIdx];
+            if (wp && Math.hypot(wp.x - state.x, wp.z - state.z) < 12 && cachedRouteIdx < cachedReturnRoute.length - 1) {
+              cachedRouteIdx++;
+            }
+            const curWp = cachedReturnRoute[cachedRouteIdx];
+            if (curWp && Math.hypot(curWp.x - state.x, curWp.z - state.z) > 120) {
+              needRecompute = true;
+            }
+          }
+          if (needRecompute) {
+            cachedRoutePerfMs = nowPerf;
+            cachedReturnRoute = trailData.route({ x: state.x, z: state.z }, target) || null;
+            cachedRouteIdx = 1;
+          }
+          if (cachedReturnRoute && cachedReturnRoute.length >= 2) {
+            const p = cachedReturnRoute[Math.min(cachedRouteIdx, cachedReturnRoute.length - 1)];
             const dx = p.x - state.x;
             const dz = p.z - state.z;
             const len = Math.hypot(dx, dz) || 1;
             return { x: dx / len, z: dz / len };
           }
+        } else {
+          cachedReturnRoute = null;
+          cachedRoutePerfMs = -Infinity;
         }
         const dx = target.x - state.x;
         const dz = target.z - state.z;
@@ -498,6 +559,7 @@ export function createGame(engine, terrain, trailData, world) {
       timeScale,
     });
     lastLocalClock = weatherState.clock;
+    lastStormRisk = weatherState.stormRisk;
 
     for (const ev of weatherState.events) {
       if (ev.type === 'storm_start') {
@@ -512,15 +574,15 @@ export function createGame(engine, terrain, trailData, world) {
       }
     }
 
-    // Handle stumble / fall recovery
-    if (fallTimer > 0) {
+    // Handle stumble / fall recovery (clocks, physiology, and race timer still advance!)
+    const isFallenNow = fallTimer > 0;
+    if (isFallenNow) {
       fallTimer = Math.max(0, fallTimer - dtSim);
       state.speedMs = 0;
       state.gait = 'fallen';
       if (input.jump || autopilot) {
         fallTimer = Math.min(fallTimer, 0.3);
       }
-      return { surfEval, weatherState, nearAid: null, nearStream: false };
     }
     if (stumbleTimer > 0) {
       stumbleTimer = Math.max(0, stumbleTimer - dtSim);
@@ -531,7 +593,9 @@ export function createGame(engine, terrain, trailData, world) {
     let dirZ = 0;
     let moveMag = 0;
 
-    if (raceMgr.isCeremony()) {
+    if (isFallenNow) {
+      moveMag = 0;
+    } else if (raceMgr.isCeremony()) {
       moveMag = 0;
       state.gait = 'ceremony';
     } else if (autopilot) {
@@ -553,8 +617,7 @@ export function createGame(engine, terrain, trailData, world) {
         dirZ = (forwardZ * my + rightZ * mx) / moveMag;
 
         // Subtle trail-keeping magnet (stronger on touch screens)
-        const isTouch = Boolean(window.matchMedia?.('(pointer: coarse)').matches);
-        const pulled = applyTrailCenterPull(state.x, state.z, dirX, dirZ, surfEval.nearest, isTouch);
+        const pulled = applyTrailCenterPull(state.x, state.z, dirX, dirZ, surfEval.nearest, isCoarsePointer);
         dirX = pulled.x;
         dirZ = pulled.z;
       }
@@ -583,6 +646,7 @@ export function createGame(engine, terrain, trailData, world) {
     const target = computeTargetSpeed({
       effort,
       grade: state.grade,
+      surface: surfEval.surface,
       surfaceInfo: surfEval.surfaceInfo,
       phys,
     });
@@ -592,7 +656,11 @@ export function createGame(engine, terrain, trailData, world) {
     state.speedMs += clamp(desiredSpeed - state.speedMs, -accel * dtSim, accel * dtSim);
     if (desiredSpeed < 0.05 && state.speedMs < 0.05) state.speedMs = 0;
 
-    state.gait = stumbleTimer > 0 ? 'stumble' : (state.speedMs < 0.12 ? 'idle' : target.gait);
+    state.gait = isFallenNow
+      ? 'fallen'
+      : (raceMgr.isCeremony()
+        ? 'ceremony'
+        : (stumbleTimer > 0 ? 'stumble' : (state.speedMs < 0.12 ? 'idle' : target.gait)));
 
     let vx = dirX * state.speedMs;
     let vz = dirZ * state.speedMs;
@@ -623,18 +691,29 @@ export function createGame(engine, terrain, trailData, world) {
       state.heading += diff * Math.min(1, dtSim * 10);
     }
 
-    // Ground elevation & vert tracking
+    // Ground elevation & vert tracking (with hysteresis so micro-jitter/LOD pops don't inflate vert)
     const newGroundY = terrain.getHeight(state.x, state.z);
-    const dy = newGroundY - prevGroundY;
-    if (dy > 0) state.vertM += dy;
-    else state.vertLossM += -dy;
+    if (stepDist > 0.01) {
+      const refDelta = newGroundY - vertRefY;
+      if (Math.abs(refDelta) >= 1.5 && Math.abs(refDelta) < 18) {
+        if (refDelta > 0) state.vertM += refDelta;
+        else state.vertLossM += -refDelta;
+        vertRefY = newGroundY;
+      } else if (Math.abs(refDelta) >= 18) {
+        // Large sudden LOD pop: re-anchor without fake vertical gain
+        vertRefY = newGroundY;
+      }
+    } else if (Math.abs(newGroundY - vertRefY) >= 4) {
+      vertRefY = newGroundY;
+    }
 
     const elevFt = newGroundY * M_TO_FT;
     if (elevFt > maxElevFt) maxElevFt = elevFt;
 
     // Jump / trail hop
-    if (input.jump && jumpOffset <= 0.01 && !cliffRes.onCliff) {
+    if (!isFallenNow && input.jump && jumpOffset <= 0.01 && !cliffRes.onCliff) {
       jumpVel = 3.8;
+      engine.events.emit('game:jump', { surface: surfEval.surface, speedMs: state.speedMs });
     }
     if (jumpOffset > 0 || jumpVel !== 0) {
       jumpVel -= 14.5 * dtSim;
@@ -685,7 +764,7 @@ export function createGame(engine, terrain, trailData, world) {
     }
 
     // Technical terrain trip/fall when tired
-    const fallProb = fallProbabilityPerSec(phys, state.speedMs, surfEval.surfaceInfo.stumbleMul, state.grade);
+    const fallProb = isFallenNow ? 0 : fallProbabilityPerSec(phys, state.speedMs, surfEval.surfaceInfo.stumbleMul, state.grade);
     if (fallProb > 0 && Math.random() < fallProb * dtSim) {
       phys.falls++;
       phys.legs = Math.min(100, phys.legs + 0.5);
@@ -746,9 +825,20 @@ export function createGame(engine, terrain, trailData, world) {
     // Race update
     let nearAid = null;
     if (state.mode === 'race' && raceMgr.isActive()) {
-      // Off-course race time penalty warning if far off-course for long
       const raceRes = raceMgr.update(dtSim, state.x, state.z, state.speedMs, weatherState.clock.hour);
       nearAid = raceRes.nearAid;
+
+      // Off-course race time penalty if sustained shortcutting > 55m off-course while moving
+      if (raceMgr.getOffCourseM() > 55 && stepDist > 0.05) {
+        raceOffCourseS += dtSim;
+        if (raceOffCourseS >= 20) {
+          raceOffCourseS = 0;
+          raceMgr.addPenalty(30);
+          toast('Off-course shortcut (+30s race penalty). Return to the flagged route!', 'warn', 4.5);
+        }
+      } else {
+        raceOffCourseS = Math.max(0, raceOffCourseS - dtSim * 2);
+      }
 
       // Autopilot aid station auto-fuel
       if (autopilot && nearAid) {
@@ -760,8 +850,8 @@ export function createGame(engine, terrain, trailData, world) {
       for (const rev of raceRes.events) {
         if (rev.type === 'checkpoint') {
           state.checkpointIdx = rev.index;
+          // UI listens to 'game:checkpoint' and displays the checkpoint toast
           engine.events.emit('game:checkpoint', rev);
-          toast(`Aid Station: ${rev.name} (${formatDurationClock(rev.clockS)}${rev.timeDilated ? '*' : ''})`, 'ok', 4.5);
           persistRun();
         } else if (rev.type === 'ceremony_start') {
           toast('You made it to Silverton! Kissing the Hardrock...', 'ok', 4.0);
@@ -791,6 +881,7 @@ export function createGame(engine, terrain, trailData, world) {
             pb: rev.pb,
             isNewPb: rev.isNewPb,
             splits: rev.splits,
+            kissedRock: rev.isHardrock,
             ceremony: rev.isHardrock ? 'kiss_rock' : 'finish',
           });
         } else if (rev.type === 'dnf') {
@@ -811,6 +902,7 @@ export function createGame(engine, terrain, trailData, world) {
       }
     }
 
+    lastNearAid = nearAid;
     return { surfEval, weatherState, nearAid, nearStream };
   }
 
@@ -828,7 +920,9 @@ export function createGame(engine, terrain, trailData, world) {
     const paceSecPerKm = state.speedMs > 0.25 ? KM_M / state.speedMs : 0;
     const paceMinPerMi = paceSecPerMi > 0 ? paceSecPerMi / 60 : 0;
 
-    const rawRaceHud = state.mode === 'race' ? raceMgr.getHudSummary(state.speedMs) : null;
+    const rawRaceHud = state.mode === 'race'
+      ? raceMgr.getHudSummary(state.speedMs, lastLocalClock.epochMs)
+      : null;
     const raceHud = rawRaceHud ? {
       ...rawRaceHud,
       clockSec: rawRaceHud.clockS,
@@ -884,7 +978,7 @@ export function createGame(engine, terrain, trailData, world) {
       nearStream,
       autopilot,
       paceMode,
-      stormRisk: weather.isStormActive() ? 1 : (lastLocalClock.hour >= 12 && lastLocalClock.hour <= 17.5 ? 0.4 : 0),
+      stormRisk: weather.isStormActive() ? 1 : lastStormRisk,
       stormActive: weather.isStormActive(),
       localTimeStr: lastLocalClock.label,
       fallen: fallTimer > 0,
@@ -916,14 +1010,15 @@ export function createGame(engine, terrain, trailData, world) {
 
     const { isFp, bounce } = syncRunnerVisuals(dt, stepOut.weatherState.clock.isNight);
 
-    // Update camera rig (first-person adds subtle stride bob)
+    // Update camera pose scratch (and drive cameraRig unless main.js takes ownership)
     const camY = state.y + (isFp ? bounce * 0.7 : 0);
-    engine.cameraRig?.update?.(dt, {
-      x: state.x,
-      y: camY,
-      z: state.z,
-      heading: state.heading,
-    }, input);
+    camPoseScratch.x = state.x;
+    camPoseScratch.y = camY;
+    camPoseScratch.z = state.z;
+    camPoseScratch.heading = state.heading;
+    if (!engine.cameraRig?.externalUpdate) {
+      engine.cameraRig?.update?.(dt, camPoseScratch, input);
+    }
 
     emitHud(stepOut.nearAid, stepOut.nearStream);
 
@@ -936,85 +1031,120 @@ export function createGame(engine, terrain, trailData, world) {
   }
 
   // --- Event subscriptions ---
-  engine.events.on('input:autopilot-toggle', () => {
-    autopilot = !autopilot;
+  function setAutopilot(next) {
+    const enabled = Boolean(next);
+    if (enabled === autopilot) return;
+    autopilot = enabled;
     state.autopilot = autopilot;
     toast(autopilot ? 'Autopilot ON: following trail.' : 'Autopilot OFF: manual control.', 'info', 2.2);
-  });
+  }
 
-  engine.events.on('ui:autopilot', (e) => {
-    autopilot = typeof e?.enabled === 'boolean' ? e.enabled : !autopilot;
-    state.autopilot = autopilot;
-    toast(autopilot ? 'Autopilot ON: following trail.' : 'Autopilot OFF: manual control.', 'info', 2.2);
-  });
+  const unsubs = [
+    engine.events.on('input:autopilot-toggle', () => {
+      setAutopilot(!autopilot);
+    }),
 
-  engine.events.on('ui:paceMode', (e) => {
-    const m = e?.mode;
-    if (['auto', 'walk', 'hike', 'run', 'sprint'].includes(m)) {
-      paceMode = m;
-    }
-  });
+    engine.events.on('ui:autopilot', (e) => {
+      const next = typeof e?.enabled === 'boolean' ? e.enabled : !autopilot;
+      setAutopilot(next);
+    }),
 
-  engine.events.on('ui:eat', (e) => {
-    const key = e?.key || 'gel';
-    if (!FOODS[key]) return;
-    if (key === 'gel' && phys.gelsCarried > 0) {
-      phys.gelsCarried--;
-    }
-    const res = eatItem(phys, key, state.speedMs);
-    if (res.ok) {
-      const f = FOODS[key];
-      toast(`Ate ${f.name}${f.kcal ? ` (+${f.kcal} kcal)` : ''}${f.ml ? ` (+${f.ml} ml)` : ''}`, 'ok', 2.5);
-    }
-  });
+    engine.events.on('ui:paceMode', (e) => {
+      const m = e?.mode;
+      if (['auto', 'walk', 'hike', 'run', 'sprint'].includes(m)) {
+        paceMode = m;
+      }
+    }),
 
-  engine.events.on('ui:refill', () => {
-    if (prevNearStream || state.mode === 'race') {
-      const added = refillFlasks(phys, false);
-      toast(added > 20 ? 'Flasks refilled with cold San Juan water!' : 'Flasks already full.', 'ok', 2.5);
-    } else {
-      const sip = drinkFromFlask(phys, 200);
-      toast(sip.ok ? 'Took a sip from your soft flask.' : 'Flasks are empty! Find a stream or aid station.', sip.ok ? 'ok' : 'warn', 2.5);
-    }
-  });
+    engine.events.on('ui:eat', (e) => {
+      const key = e?.key || 'gel';
+      if (!FOODS[key]) return;
+      if (!lastNearAid) {
+        if (key !== 'gel') {
+          toast('Reach an aid station to grab hot food!', 'warn', 2.5);
+          return;
+        }
+        if (phys.gelsCarried <= 0) {
+          toast('Out of gels! Restock at the next aid station.', 'warn', 2.5);
+          return;
+        }
+        phys.gelsCarried--;
+      }
+      const res = eatItem(phys, key, state.speedMs);
+      if (res.ok) {
+        const f = FOODS[key];
+        toast(`Ate ${f.name}${f.kcal ? ` (+${f.kcal} kcal)` : ''}${f.ml ? ` (+${f.ml} ml)` : ''}`, 'ok', 2.5);
+      }
+    }),
 
-  engine.events.on('ui:getup', () => {
-    if (fallTimer > 0) fallTimer = 0.05;
-  });
+    engine.events.on('ui:refill', () => {
+      if (lastNearAid || prevNearStream) {
+        const atAid = Boolean(lastNearAid);
+        const added = refillFlasks(phys, atAid);
+        toast(
+          atAid
+            ? 'Flasks refilled & gels restocked at aid station!'
+            : (added > 20 ? 'Flasks refilled with cold San Juan water!' : 'Flasks already full.'),
+          'ok',
+          2.5
+        );
+      } else {
+        const sip = drinkFromFlask(phys, 200);
+        toast(sip.ok ? 'Took a sip from your soft flask.' : 'Flasks are empty! Find a stream or aid station.', sip.ok ? 'ok' : 'warn', 2.5);
+      }
+    }),
 
-  engine.events.on('ui:timeDilation', (e) => {
-    setTimeScale(e?.scale ?? 1);
-  });
+    engine.events.on('ui:getup', () => {
+      if (fallTimer > 0) fallTimer = 0.05;
+    }),
 
-  engine.events.on('ui:kissRock', () => {
-    raceMgr.triggerKissFinish();
-  });
+    engine.events.on('ui:timeDilation', (e) => {
+      setTimeScale(e?.scale ?? 1);
+    }),
 
-  engine.events.on('dev:skipRace', (e) => {
-    skipToRaceDistance(e?.meters ?? 0);
-  });
+    engine.events.on('ui:kissRock', () => {
+      raceMgr.triggerKissFinish();
+    }),
 
-  engine.events.on('dev:advanceCheckpoint', () => {
-    advanceCheckpoint();
-  });
+    engine.events.on('dev:skipRace', (e) => {
+      skipToRaceDistance(e?.meters ?? 0);
+    }),
 
-  engine.events.on('engine:visibility', ({ hidden }) => {
-    if (hidden) persistRun();
-  });
+    engine.events.on('dev:advanceCheckpoint', () => {
+      advanceCheckpoint();
+    }),
 
-  engine.events.on('app:state', ({ state: appState }) => {
-    if (appState === 'title' && state.mode !== 'idle') {
-      persistRun();
-      state.mode = 'idle';
-      state.paused = false;
-      hardrockRock.visible = false;
-      runner.root.visible = false;
-    }
-  });
+    engine.events.on('engine:visibility', ({ hidden }) => {
+      if (hidden) persistRun();
+    }),
 
-  window.addEventListener('beforeunload', () => {
+    engine.events.on('app:state', ({ state: appState }) => {
+      if (appState === 'title' && state.mode !== 'idle') {
+        persistRun();
+        state.mode = 'idle';
+        state.paused = false;
+        hardrockRock.visible = false;
+        runner.root.visible = false;
+      }
+    }),
+  ];
+
+  const onBeforeUnload = () => {
     persistRun();
-  });
+  };
+  window.addEventListener('beforeunload', onBeforeUnload);
+
+  function dispose() {
+    window.removeEventListener('beforeunload', onBeforeUnload);
+    for (const u of unsubs) u?.();
+    engine.scene.remove(runner.root);
+    engine.scene.remove(hardrockRock);
+    runner.dispose();
+    hardrockRock.traverse((obj) => {
+      if (obj.geometry) obj.geometry.dispose();
+      if (obj.material) obj.material.dispose();
+    });
+  }
 
   // --- Dev / Playtest helpers ---
   function skipToRaceDistance(meters) {
@@ -1075,5 +1205,7 @@ export function createGame(engine, terrain, trailData, world) {
     skipToRaceDistance,
     advanceCheckpoint,
     triggerStormNow: (dur) => weather.triggerStormNow(dur),
+    getCameraPose: () => camPoseScratch,
+    dispose,
   };
 }

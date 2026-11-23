@@ -2,32 +2,24 @@
  * Runner foley synthesizer:
  * - Cadence/gait-synced footsteps across 10 San Juan surfaces
  *   (road, track, trail, path, grass, forest, scree, talus, snow, creek)
- * - Jump takeoff / landing thud and fall impact
+ *   phase-matched to src/game/runner.js stride cadence
+ * - Airborne jump suppression + takeoff scuff + surface-aware landing impact
+ * - Fall impact thud & slide
  * - Effort-, altitude-, and fatigue-driven breathing bed
+ * - Zero graph node retention (all one-shot tails disconnect on ended)
  */
 
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 
-const GAIT_CADENCE_BASE = {
-  idle: 0,
-  fallen: 0,
-  ceremony: 0,
-  walk: 1.75,
-  hike: 2.0,
-  'power-hike': 2.05,
-  run: 2.7,
-  sprint: 3.35,
-  stumble: 3.4,
-};
-
-export function createFoleySystem(audioCtx, engine) {
-  let stepAccum = 0;
+export function createFoleySystem(audioCtx, engine, { terrain } = {}) {
+  let stepAccum = 0.65;
   let stepSide = 1; // -1 left, +1 right
   let prevFallen = false;
-  let prevJumpPressed = false;
+  let wasAirborne = false;
+  let peakAirborneH = 0;
   let lastHud = null;
 
-  // Breathing continuous graph (lazy-built on unlock)
+  // Breathing continuous graph (lazy-built once noise buffers finish slicing)
   let breathStarted = false;
   let breathSrc = null;
   let breathFilter = null;
@@ -35,7 +27,7 @@ export function createFoleySystem(audioCtx, engine) {
   let breathPhase = 0;
 
   function ensureBreathNodes() {
-    if (breathStarted || !audioCtx.isUnlocked || !audioCtx.context) return;
+    if (breathStarted || !audioCtx.isUnlocked || !audioCtx.hasNoiseBuffers || !audioCtx.context) return;
     const ctx = audioCtx.context;
     const pink = audioCtx.getNoiseBuffer('pink');
     if (!pink) return;
@@ -70,6 +62,7 @@ export function createFoleySystem(audioCtx, engine) {
     gain = 0.2,
     pan = 0,
     attack = 0.004,
+    onEnded = null,
   }) {
     const src = ctx.createBufferSource();
     src.buffer = buf;
@@ -100,7 +93,13 @@ export function createFoleySystem(audioCtx, engine) {
     filter.connect(env);
     tail.connect(audioCtx.sfxGain);
 
-    src.start(startTime, offset % Math.max(0.1, buf.duration - duration - 0.05), duration + 0.02);
+    src.onended = () => {
+      try { tail.disconnect(); } catch {}
+      onEnded?.();
+    };
+
+    const maxOff = Math.max(0.05, buf.duration - duration - 0.04);
+    src.start(startTime, offset % maxOff, duration + 0.02);
     src.stop(startTime + duration + 0.03);
     return src;
   }
@@ -117,21 +116,25 @@ export function createFoleySystem(audioCtx, engine) {
     env.gain.linearRampToValueAtTime(gain, startTime + 0.005);
     env.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
 
+    let tail = env;
     if (ctx.createStereoPanner) {
       const panner = ctx.createStereoPanner();
       panner.pan.value = clamp(pan, -0.95, 0.95);
       env.connect(panner);
-      panner.connect(audioCtx.sfxGain);
-    } else {
-      env.connect(audioCtx.sfxGain);
+      tail = panner;
     }
+    tail.connect(audioCtx.sfxGain);
     osc.connect(env);
+
+    osc.onended = () => {
+      try { tail.disconnect(); } catch {}
+    };
     osc.start(startTime);
     osc.stop(startTime + duration + 0.01);
   }
 
-  function triggerFootstep(surface, gait, speedMs, camMode) {
-    if (!audioCtx.isReady) return;
+  function triggerFootstep(surface, gait, speedMs, camMode, impactBoost = 1.0) {
+    if (!audioCtx.isReady || !audioCtx.hasNoiseBuffers) return;
     const release = audioCtx.acquireVoice('footstep', 320);
     if (!release) return;
 
@@ -149,9 +152,17 @@ export function createFoleySystem(audioCtx, engine) {
     const pan = stepSide * 0.13;
     const pitchJit = (stepSide > 0 ? 1.04 : 0.96) * (0.94 + Math.random() * 0.12);
 
-    const gaitWeight = gait === 'sprint' ? 1.2 : gait === 'run' ? 1.0 : gait === 'power-hike' ? 0.92 : 0.72;
+    const gaitWeight = gait === 'sprint' ? 1.2 : gait === 'run' ? 1.0 : gait === 'power-hike' ? 0.92 : 0.74;
     const camMul = camMode === 'first-person' ? 1.15 : camMode === 'orbit' ? 0.65 : 0.85;
-    const vol = clamp((0.14 + speedMs * 0.025) * gaitWeight * camMul, 0.08, 0.38);
+    const vol = clamp((0.14 + speedMs * 0.025) * gaitWeight * camMul * impactBoost, 0.08, 0.44);
+
+    let releasedOnEnd = false;
+    const releaseOnce = () => {
+      if (!releasedOnEnd) {
+        releasedOnEnd = true;
+        release();
+      }
+    };
 
     // Base low heel/sole thump present on solid ground
     if (surface !== 'creek') {
@@ -168,7 +179,6 @@ export function createFoleySystem(audioCtx, engine) {
 
     switch (surface) {
       case 'road': {
-        // Crisp packed-dirt / asphalt tap
         playNoiseBurst(ctx, pink, {
           startTime: now,
           duration: 0.055,
@@ -178,11 +188,11 @@ export function createFoleySystem(audioCtx, engine) {
           q: 1.5,
           gain: vol * 0.62,
           pan,
+          onEnded: releaseOnce,
         });
         break;
       }
       case 'track': {
-        // Dry jeep-road gravel crunch
         playNoiseBurst(ctx, pink, {
           startTime: now,
           duration: 0.095,
@@ -192,11 +202,11 @@ export function createFoleySystem(audioCtx, engine) {
           q: 1.3,
           gain: vol * 0.72,
           pan,
+          onEnded: releaseOnce,
         });
         break;
       }
       case 'scree': {
-        // Loose scree: boot plant + granular pebble slide
         playNoiseBurst(ctx, white, {
           startTime: now,
           duration: 0.11,
@@ -215,11 +225,11 @@ export function createFoleySystem(audioCtx, engine) {
           q: 1.1,
           gain: vol * 0.42,
           pan: pan + (Math.random() - 0.5) * 0.12,
+          onEnded: releaseOnce,
         });
         break;
       }
       case 'talus': {
-        // Resonant granite boot clack + tiny rock tick
         playNoiseBurst(ctx, pink, {
           startTime: now,
           duration: 0.065,
@@ -229,6 +239,7 @@ export function createFoleySystem(audioCtx, engine) {
           q: 3.4,
           gain: vol * 0.85,
           pan,
+          onEnded: releaseOnce,
         });
         if (Math.random() < 0.35) {
           playSineBlip(ctx, {
@@ -243,7 +254,6 @@ export function createFoleySystem(audioCtx, engine) {
         break;
       }
       case 'snow': {
-        // Signature cold alpine snow squeak + muffled compression crunch
         playNoiseBurst(ctx, white, {
           startTime: now,
           duration: 0.11,
@@ -254,11 +264,11 @@ export function createFoleySystem(audioCtx, engine) {
           gain: vol * 0.58,
           pan,
           attack: 0.012,
+          onEnded: releaseOnce,
         });
         break;
       }
       case 'creek': {
-        // Bright cold stream splash + water droplets
         playNoiseBurst(ctx, white, {
           startTime: now,
           duration: 0.19,
@@ -269,6 +279,7 @@ export function createFoleySystem(audioCtx, engine) {
           gain: vol * 0.88,
           pan,
           attack: 0.008,
+          onEnded: releaseOnce,
         });
         playSineBlip(ctx, {
           startTime: now + 0.04,
@@ -289,7 +300,6 @@ export function createFoleySystem(audioCtx, engine) {
         break;
       }
       case 'forest': {
-        // Soft pine duff + occasional dry twig snap
         playNoiseBurst(ctx, pink, {
           startTime: now,
           duration: 0.11,
@@ -298,6 +308,7 @@ export function createFoleySystem(audioCtx, engine) {
           q: 1.0,
           gain: vol * 0.45,
           pan,
+          onEnded: releaseOnce,
         });
         if (Math.random() < 0.25) {
           playNoiseBurst(ctx, white, {
@@ -313,7 +324,6 @@ export function createFoleySystem(audioCtx, engine) {
         break;
       }
       case 'grass': {
-        // Soft tundra turf + dry grass swish
         playNoiseBurst(ctx, pink, {
           startTime: now,
           duration: 0.10,
@@ -323,13 +333,13 @@ export function createFoleySystem(audioCtx, engine) {
           q: 1.2,
           gain: vol * 0.36,
           pan,
+          onEnded: releaseOnce,
         });
         break;
       }
       case 'path':
       case 'trail':
       default: {
-        // Singletrack dirt grit + subtle toe push-off
         playNoiseBurst(ctx, pink, {
           startTime: now,
           duration: 0.08,
@@ -339,6 +349,7 @@ export function createFoleySystem(audioCtx, engine) {
           q: 1.4,
           gain: vol * 0.58,
           pan,
+          onEnded: releaseOnce,
         });
         break;
       }
@@ -359,7 +370,7 @@ export function createFoleySystem(audioCtx, engine) {
   }
 
   function triggerFallImpact() {
-    if (!audioCtx.isReady) return;
+    if (!audioCtx.isReady || !audioCtx.hasNoiseBuffers) return;
     const release = audioCtx.acquireVoice('sfx', 450);
     if (!release) return;
     const ctx = audioCtx.context;
@@ -386,17 +397,23 @@ export function createFoleySystem(audioCtx, engine) {
         freqEnd: 650,
         q: 1.2,
         gain: 0.22,
+        onEnded: release,
       });
+    } else {
+      release();
     }
   }
 
   function triggerJumpScuff() {
-    if (!audioCtx.isReady) return;
+    if (!audioCtx.isReady || !audioCtx.hasNoiseBuffers) return;
     const release = audioCtx.acquireVoice('footstep', 200);
     if (!release) return;
     const ctx = audioCtx.context;
     const pink = audioCtx.getNoiseBuffer('pink');
-    if (!pink) return;
+    if (!pink) {
+      release();
+      return;
+    }
     playNoiseBurst(ctx, pink, {
       startTime: ctx.currentTime,
       duration: 0.07,
@@ -405,6 +422,7 @@ export function createFoleySystem(audioCtx, engine) {
       freqEnd: 2200,
       q: 1.3,
       gain: 0.16,
+      onEnded: release,
     });
   }
 
@@ -450,7 +468,6 @@ export function createFoleySystem(audioCtx, engine) {
     const camMode = engine.cameraRig?.getMode?.() || 'chase';
     const camMul = camMode === 'first-person' ? 1.35 : camMode === 'orbit' ? 0.55 : 0.85;
 
-    // Only clearly audible when working above a relaxed idle
     const audibleAmt = clamp((intensity - 0.16) / 0.84, 0, 1);
     const breathHz = 0.24 + intensity * 0.58; // 14 -> 49 breaths/min
     breathPhase = (breathPhase + dt * breathHz) % 1;
@@ -461,11 +478,11 @@ export function createFoleySystem(audioCtx, engine) {
     if (breathPhase < 0.42) {
       const p = breathPhase / 0.42;
       env = Math.sin(p * Math.PI) * 0.78;
-      targetFreq = 860 + intensity * 380; // airy inhale
+      targetFreq = 860 + intensity * 380;
     } else if (breathPhase >= 0.46 && breathPhase < 0.92) {
       const p = (breathPhase - 0.46) / 0.46;
       env = Math.sin(p * Math.PI);
-      targetFreq = 480 + intensity * 210; // deeper exhale
+      targetFreq = 480 + intensity * 210;
     }
 
     const targetGain = audibleAmt * audibleAmt * 0.085 * camMul * env;
@@ -479,41 +496,62 @@ export function createFoleySystem(audioCtx, engine) {
 
     if (appState !== 'playing' || !hud || hud.paused || !audioCtx.isReady) {
       prevFallen = Boolean(hud?.fallen);
+      wasAirborne = false;
+      peakAirborneH = 0;
       return;
     }
 
-    // Fall & jump one-shots
+    // Fall one-shot
     const fallen = Boolean(hud.fallen);
     if (fallen && !prevFallen) {
       triggerFallImpact();
     }
     prevFallen = fallen;
 
-    const jumpPressed = Boolean(engine.input?.jump);
-    if (jumpPressed && !prevJumpPressed && !fallen) {
-      triggerJumpScuff();
+    // Airborne jump mid-air suppression & landing detection (takeoff handled by 'game:jump' event)
+    const camMode = engine.cameraRig?.getMode?.() || 'chase';
+    let airborne = false;
+    if (terrain?.getHeight && Number.isFinite(hud.x) && Number.isFinite(hud.z) && Number.isFinite(hud.y)) {
+      const groundY = terrain.getHeight(hud.x, hud.z);
+      if (Number.isFinite(groundY)) {
+        const clearance = hud.y - groundY;
+        if (clearance > 0.08) {
+          airborne = true;
+          wasAirborne = true;
+          if (clearance > peakAirborneH) peakAirborneH = clearance;
+        } else if (wasAirborne && clearance <= 0.04) {
+          wasAirborne = false;
+          const landBoost = clamp(1.15 + peakAirborneH * 0.55, 1.15, 1.55);
+          peakAirborneH = 0;
+          triggerFootstep(hud.surface || 'trail', hud.gait || 'run', hud.speedMs || 2.5, camMode, landBoost);
+          stepAccum = 0.25;
+        }
+      }
     }
-    prevJumpPressed = jumpPressed;
 
-    // Cadence-synced footsteps
+    // Cadence-synced footsteps (matching src/game/runner.js stride cadence)
     const speedMs = hud.speedMs || 0;
     const gait = hud.gait || 'idle';
-    if (speedMs > 0.18 && !fallen && gait !== 'idle' && gait !== 'ceremony') {
-      const baseCadence = GAIT_CADENCE_BASE[gait] ?? 2.2;
-      // Modulate gently by actual speed so uphill power-hiking feels deliberate
-      const cadence = clamp(baseCadence * (0.72 + clamp(speedMs / 3.2, 0.15, 0.55)), 1.45, 4.1);
+    if (!airborne && speedMs > 0.16 && !fallen && gait !== 'idle' && gait !== 'ceremony') {
+      const baseCadence = clamp(1.3 + speedMs * 0.55, 1.4, 3.6);
+      const stumbleMul = gait === 'stumble' ? 1.2 : 1.0;
+      const cadence = clamp(baseCadence * stumbleMul, 1.4, 3.9);
       stepAccum += dt * cadence;
       if (stepAccum >= 1) {
         stepAccum -= Math.floor(stepAccum);
-        const camMode = engine.cameraRig?.getMode?.() || 'chase';
-        triggerFootstep(hud.surface || 'trail', gait, speedMs, camMode);
+        triggerFootstep(hud.surface || 'trail', gait, speedMs, camMode, 1.0);
       }
-    } else {
-      stepAccum = 0.65; // next step triggers promptly when movement resumes
+    } else if (!airborne) {
+      stepAccum = 0.65;
     }
   }
 
+  const unsubJump = engine?.events?.on?.('game:jump', () => {
+    triggerJumpScuff();
+  });
+
   function dispose() {
+    unsubJump?.();
     if (breathSrc) {
       try { breathSrc.stop(); } catch {}
       breathSrc.disconnect();

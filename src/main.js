@@ -13,21 +13,22 @@ async function bootstrap() {
 
   const terrain = createTerrain(engine);
   engine.cameraRig.setTerrain(terrain);
+  engine.cameraRig.externalUpdate = true;
 
   const trailData = await loadTrailData(engine);
   const world = createWorld(engine, terrain, trailData);
   const game = createGame(engine, terrain, trailData, world);
-  const audio = createAudio(engine, { game, world, trailData, terrain });
-  const ui = createUI(engine, { trailData, game, terrain });
 
-  performance.mark('tt:title-ready');
+  // Start Title screen in crisp sunlit mid-July Telluride morning (9:00 AM MDT)
+  // so first impression is never pitch-dark November dusk. Starting a run overrides this.
+  world.setTimeOfDay?.(9.0);
 
-  // Wire UI state transitions if UI emits standard events without calling game directly
+  // Wire UI/input pause transitions defensively (avoid double-calling if UI already called game)
   engine.events.on('ui:resume', () => {
-    game.resume?.();
+    if (game.state?.paused) game.resume?.();
   });
   engine.events.on('ui:pause', () => {
-    game.pause?.();
+    if (game.state && !game.state.paused && game.state.mode !== 'idle') game.pause?.();
   });
   engine.events.on('input:pause', () => {
     const s = engine.getAppState();
@@ -35,14 +36,55 @@ async function bootstrap() {
     else if (s === 'paused') game.resume?.();
   });
 
-  engine.onUpdate((dt) => {
+  // Reusable scratch objects (zero per-frame allocations)
+  const _playerPose = { x: 0, y: 0, z: 0, heading: 0 };
+  const _activePos = { x: 0, y: 0, z: 0 };
+
+  // Canonical main-loop ordering:
+  // input (engine) -> game -> camera (+updateMatrixWorld) -> terrain -> world -> audio (registered below) -> scheduler -> render
+  engine.onUpdate((dt, t) => {
+    const appState = engine.getAppState();
     game.update(dt);
-    const pos = game.state
-      ? { x: game.state.x, y: game.state.y, z: game.state.z }
-      : engine.camera.position;
-    terrain.update(pos);
-    world.update(dt, pos);
+
+    if (engine.cameraRig.isFlythrough()) {
+      engine.cameraRig.update(dt, null, engine.input);
+    } else if (appState === 'title') {
+      engine.cameraRig.updateTitleScenic(dt, t);
+    } else if (game.state && game.state.mode !== 'idle') {
+      const pose = typeof game.getCameraPose === 'function' ? game.getCameraPose() : null;
+      if (pose) {
+        engine.cameraRig.update(dt, pose, engine.input);
+      } else {
+        _playerPose.x = game.state.x;
+        _playerPose.y = game.state.y;
+        _playerPose.z = game.state.z;
+        _playerPose.heading = game.state.heading;
+        engine.cameraRig.update(dt, _playerPose, engine.input);
+      }
+    }
+
+    engine.camera.updateMatrixWorld();
+
+    const useCameraFocus = appState === 'title' || engine.cameraRig.isFlythrough();
+    if (!useCameraFocus && game.state && game.state.mode !== 'idle') {
+      _activePos.x = game.state.x;
+      _activePos.y = game.state.y;
+      _activePos.z = game.state.z;
+    } else {
+      _activePos.x = engine.camera.position.x;
+      _activePos.y = engine.camera.position.y;
+      _activePos.z = engine.camera.position.z;
+    }
+
+    terrain.update(_activePos);
+    world.update(dt, _activePos);
   });
+
+  // Register audio AFTER main loop so audio.update reads fresh game/camera/world state
+  const audio = createAudio(engine, { game, world, trailData, terrain });
+  const ui = createUI(engine, { trailData, game, terrain });
+
+  performance.mark('tt:title-ready');
 
   function teleportWorld(x, z, heading = 0) {
     const y = terrain.getHeight(x, z);
@@ -62,7 +104,8 @@ async function bootstrap() {
     const z = opts.z ?? 0;
     const heading = opts.heading ?? 0;
     const startTime = opts.startTime ?? 'morning';
-    const startHour = opts.startHour ?? 8;
+    // Preserve explicit null (realtime) rather than coalescing to 8
+    const startHour = opts.startHour !== undefined ? opts.startHour : 8;
     engine.setAppState('loading');
     await terrain.preload(x, z, 1200);
     await trailData.loadArea(x, z, 1500);
@@ -119,7 +162,8 @@ async function bootstrap() {
           date = hourOrDate;
           hour = date.getHours() + date.getMinutes() / 60;
         } else {
-          hour = Number(hourOrDate) || 12;
+          const parsed = Number(hourOrDate);
+          hour = Number.isFinite(parsed) ? parsed : 12;
           date = new Date();
           date.setHours(Math.floor(hour), Math.round((hour % 1) * 60), 0, 0);
         }
@@ -164,7 +208,8 @@ async function bootstrap() {
     const x = params.has('x') ? Number(params.get('x')) : startPoi.x;
     const z = params.has('z') ? Number(params.get('z')) : startPoi.z;
     const heading = params.has('heading') ? Number(params.get('heading')) : (startPoi.heading || 0);
-    const startHour = params.has('hour') ? Number(params.get('hour')) : 8;
+    const parsedHour = params.has('hour') ? Number(params.get('hour')) : 8;
+    const startHour = Number.isFinite(parsedHour) ? parsedHour : 8;
     await startFreeRunSafe({ x, z, heading, startTime: 'morning', startHour });
     if (params.get('autopilot') === '1') {
       engine.events.emit('ui:autopilot', { enabled: true });

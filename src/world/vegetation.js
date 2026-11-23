@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { tileBoundsWorld } from '../core/geo.js';
 import { hash2i, mulberry32, fbm2D } from './noise.js';
 import { patchSanJuanMaterial } from './materialFog.js';
 
@@ -12,7 +13,7 @@ const TIER_CONFIG = {
   ultra: { nearRadius: 250, farRadius: 5200, grassRadius: 88, density: 1.0, maxNear: 1800, maxImp: 16000, maxGrass: 7200 },
 };
 
-// UV rects [u0, v0, uScale, vScale] for 2x2 atlases with 2-texel inset to prevent mipmap bleeding
+// UV rects [u0, v0, uScale, vScale] with 2-texel inset to prevent mipmap bleeding
 const ATLAS_RECTS = [
   [0.008, 0.508, 0.484, 0.484], // Q0 top-left: Spruce / Tussock Grass
   [0.508, 0.508, 0.484, 0.484], // Q1 top-right: Fir / Golden Sedge
@@ -20,12 +21,16 @@ const ATLAS_RECTS = [
   [0.508, 0.008, 0.484, 0.484], // Q3 bottom-right: Krummholz-Willow / Paintbrush
 ];
 
-/**
- * Merge an array of non-indexed or indexed geometries (having position, normal, color) into one BufferGeometry.
- */
 function mergeColoredGeometries(parts) {
   let totalVerts = 0;
-  const nonIndexed = parts.map((g) => (g.index ? g.toNonIndexed() : g));
+  const nonIndexed = parts.map((g) => {
+    if (g.index) {
+      const ni = g.toNonIndexed();
+      g.dispose(); // dispose indexed source geometry immediately so nothing leaks
+      return ni;
+    }
+    return g;
+  });
   for (const g of nonIndexed) totalVerts += g.attributes.position.count;
 
   const pos = new Float32Array(totalVerts * 3);
@@ -34,12 +39,9 @@ function mergeColoredGeometries(parts) {
   let offset = 0;
 
   for (const g of nonIndexed) {
-    const p = g.attributes.position.array;
-    const n = g.attributes.normal.array;
-    const c = g.attributes.color.array;
-    pos.set(p, offset * 3);
-    norm.set(n, offset * 3);
-    col.set(c, offset * 3);
+    pos.set(g.attributes.position.array, offset * 3);
+    norm.set(g.attributes.normal.array, offset * 3);
+    col.set(g.attributes.color.array, offset * 3);
     offset += g.attributes.position.count;
     g.dispose();
   }
@@ -51,7 +53,7 @@ function mergeColoredGeometries(parts) {
   return out;
 }
 
-function colorizeGeometry(geo, r, g, b, shadeBottom = 0.72) {
+function colorizeGeometry(geo, r, g, b, shadeBottom = 0.74) {
   const count = geo.attributes.position.count;
   const pos = geo.attributes.position.array;
   const colors = new Float32Array(count * 3);
@@ -75,77 +77,82 @@ function colorizeGeometry(geo, r, g, b, shadeBottom = 0.72) {
 }
 
 /**
- * Unit-height (y in [0, 1]) 3D Engelmann Spruce or Subalpine Fir geometry.
+ * Unit-height (y in [0, 1]) fuller multi-tier Engelmann Spruce / Subalpine Fir.
  */
 function buildConiferGeometry(isFir) {
   const parts = [];
-  const trunk = new THREE.CylinderGeometry(0.012, 0.042, 0.85, 6);
-  trunk.translate(0, 0.425, 0);
-  parts.push(colorizeGeometry(trunk, 0.25, 0.16, 0.11, 0.8));
+  const trunk = new THREE.CylinderGeometry(0.012, 0.038, 0.86, 6);
+  trunk.translate(0, 0.43, 0);
+  parts.push(colorizeGeometry(trunk, 0.28, 0.19, 0.13, 0.82));
 
-  const layers = isFir ? 9 : 8;
-  const maxRad = isFir ? 0.14 : 0.18;
+  const layers = isFir ? 10 : 9;
+  const maxRad = isFir ? 0.15 : 0.19;
   for (let i = 0; i < layers; i++) {
-    const t = i / (layers - 1); // 0 bottom -> 1 top
-    const yBase = 0.16 + t * 0.72;
-    const h = 0.24 - t * 0.09;
-    const rad = maxRad * (1 - t * 0.78);
-    const cone = new THREE.ConeGeometry(rad, h, 8, 1);
+    const t = i / (layers - 1);
+    const yBase = 0.14 + t * 0.74;
+    const h = 0.23 - t * 0.08;
+    const rad = maxRad * (1 - t * 0.76);
+    const cone = new THREE.ConeGeometry(rad, h, 9, 1);
     const pos = cone.attributes.position;
     for (let v = 0; v < pos.count; v++) {
       const py = pos.getY(v);
       if (py < 0) {
         const ang = Math.atan2(pos.getZ(v), pos.getX(v));
-        const j = 0.85 + 0.28 * Math.sin(ang * 3 + i * 1.9);
+        const j = 0.84 + 0.28 * Math.sin(ang * 4 + i * 2.1);
         pos.setX(v, pos.getX(v) * j);
         pos.setZ(v, pos.getZ(v) * j);
-        pos.setY(v, py - 0.015 * Math.cos(ang * 4 + i));
+        pos.setY(v, py - 0.018 * Math.cos(ang * 3 + i));
       }
     }
     cone.computeVertexNormals();
-    cone.rotateY(i * 0.55);
+    cone.rotateY(i * 0.62);
     cone.translate(0, yBase + h * 0.45, 0);
-    const r = isFir ? 0.09 : 0.10;
-    const g = isFir ? 0.22 : 0.25;
-    const b = isFir ? 0.12 : 0.13;
-    parts.push(colorizeGeometry(cone, r, g, b, 0.55));
+    const r = isFir ? 0.13 : 0.15;
+    const g = isFir ? 0.30 : 0.34;
+    const b = isFir ? 0.16 : 0.18;
+    parts.push(colorizeGeometry(cone, r, g, b, 0.72));
   }
   return mergeColoredGeometries(parts);
 }
 
 /**
- * Unit-height (y in [0, 1]) 3D Quaking Aspen geometry (white trunk + airy crown lobes).
+ * Unit-height (y in [0, 1]) airy Quaking Aspen geometry (slender white trunk + soft rounded crown lobes).
  */
 function buildAspenGeometry() {
   const parts = [];
-  const trunk = new THREE.CylinderGeometry(0.012, 0.032, 0.78, 6);
-  trunk.translate(0, 0.39, 0);
-  parts.push(colorizeGeometry(trunk, 0.86, 0.84, 0.78, 0.72));
+  const trunk = new THREE.CylinderGeometry(0.011, 0.028, 0.80, 6);
+  trunk.translate(0, 0.40, 0);
+  parts.push(colorizeGeometry(trunk, 0.88, 0.86, 0.80, 0.78));
 
-  const fork = new THREE.CylinderGeometry(0.007, 0.014, 0.30, 5);
-  fork.rotateZ(0.38);
-  fork.translate(-0.06, 0.56, 0.02);
-  parts.push(colorizeGeometry(fork, 0.84, 0.82, 0.76, 0.85));
+  const fork1 = new THREE.CylinderGeometry(0.006, 0.013, 0.30, 5);
+  fork1.rotateZ(0.36);
+  fork1.translate(-0.055, 0.57, 0.02);
+  parts.push(colorizeGeometry(fork1, 0.86, 0.84, 0.78, 0.85));
+
+  const fork2 = new THREE.CylinderGeometry(0.006, 0.012, 0.26, 5);
+  fork2.rotateZ(-0.34);
+  fork2.translate(0.05, 0.62, -0.02);
+  parts.push(colorizeGeometry(fork2, 0.86, 0.84, 0.78, 0.85));
 
   const lobes = [
-    [0.0, 0.80, 0.0, 0.21],
-    [-0.12, 0.67, 0.05, 0.17],
-    [0.12, 0.70, -0.04, 0.16],
-    [0.02, 0.58, 0.10, 0.15],
-    [-0.04, 0.90, -0.02, 0.14],
+    [0.0, 0.82, 0.0, 0.16],
+    [-0.11, 0.69, 0.05, 0.135],
+    [0.11, 0.72, -0.04, 0.13],
+    [0.03, 0.59, 0.09, 0.12],
+    [-0.04, 0.62, -0.08, 0.12],
+    [0.07, 0.84, 0.04, 0.115],
+    [-0.08, 0.81, -0.03, 0.115],
+    [0.0, 0.92, 0.0, 0.105],
   ];
   for (const [lx, ly, lz, lr] of lobes) {
-    const ico = new THREE.IcosahedronGeometry(lr, 0);
-    ico.scale(1.0, 1.15, 1.0);
+    const ico = new THREE.IcosahedronGeometry(lr, 1);
+    ico.scale(1.05, 0.92, 1.05);
     ico.translate(lx, ly, lz);
-    parts.push(colorizeGeometry(ico, 0.62, 0.74, 0.25, 0.68));
+    parts.push(colorizeGeometry(ico, 0.64, 0.76, 0.27, 0.76));
   }
   return mergeColoredGeometries(parts);
 }
 
-/**
- * Crossed vertical quad geometry (y in [0, 1]) for far tree impostors & krummholz/willow.
- */
 function buildCrossedQuadGeometry(planes = 2, width = 0.88) {
   const positions = [];
   const normals = [];
@@ -157,13 +164,13 @@ function buildCrossedQuadGeometry(planes = 2, width = 0.88) {
     const hw = width * 0.5;
     const dx = Math.cos(ang) * hw;
     const dz = Math.sin(ang) * hw;
-    const nx = -Math.sin(ang) * 0.35;
-    const nz = Math.cos(ang) * 0.35;
-    const nl = Math.hypot(nx, 0.87, nz);
+    const nx = -Math.sin(ang) * 0.25;
+    const nz = Math.cos(ang) * 0.25;
+    const nl = Math.hypot(nx, 0.94, nz);
     const base = i * 4;
 
     positions.push(-dx, 0, -dz, dx, 0, dz, dx, 1, dz, -dx, 1, -dz);
-    for (let v = 0; v < 4; v++) normals.push(nx / nl, 0.87 / nl, nz / nl);
+    for (let v = 0; v < 4; v++) normals.push(nx / nl, 0.94 / nl, nz / nl);
     uvs.push(0, 0, 1, 0, 1, 1, 0, 1);
     indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
   }
@@ -176,45 +183,31 @@ function buildCrossedQuadGeometry(planes = 2, width = 0.88) {
   return geo;
 }
 
-/**
- * Determine species & scale from San Juan elevation, slope, cover mask, and noise.
- * Returns { kind: 0 spruce | 1 fir | 2 aspen | 3 krummholz/willow, height, widthScale, tint } or null.
- */
 function pickTreeAt(x, z, y, normalY, surface, rng) {
-  // Too steep for trees
-  if (normalY < 0.64) return null;
-
-  // Water exclusion
-  if (surface.water > 0.25) return null;
+  if (normalY < 0.64 || surface.water > 0.25 || y > 3680) return null;
 
   const hasCoverData =
-    (surface.forest + surface.rock + surface.water + surface.snow + surface.grass) > 0.05;
+    surface.forest + surface.rock + surface.water + surface.snow + surface.grass > 0.05;
 
   const forestWeight = hasCoverData
     ? surface.forest
-    : (y < 3620 ? Math.max(0, (fbm2D(x * 0.0022, z * 0.0022, 3, 19) - 0.32) * 1.45) : 0);
+    : y < 3620 ? Math.max(0, (fbm2D(x * 0.0022, z * 0.0022, 3, 19) - 0.32) * 1.45) : 0;
 
-  // Above San Juan treeline (~12,000 ft = 3,660m) -> no trees
-  if (y > 3680) return null;
-
-  // Treeline krummholz zone (3,430m - 3,680m)
   if (y > 3430) {
     const treelineFade = 1 - (y - 3430) / 250;
     const chance = Math.max(forestWeight, 0.22) * treelineFade * 0.65;
     if (rng() > chance || normalY < 0.68) return null;
     const h = 1.1 + rng() * 1.6;
     return {
-      kind: 3, // Krummholz
+      kind: 3,
       height: h,
-      widthScale: h * (1.2 + rng() * 0.6),
-      r: 0.78 + rng() * 0.22,
-      g: 0.85 + rng() * 0.20,
-      b: 0.72 + rng() * 0.18,
+      widthScale: h * (1.2 + rng() * 0.5),
+      r: 0.84 + rng() * 0.16,
+      g: 0.90 + rng() * 0.14,
+      b: 0.78 + rng() * 0.14,
     };
   }
 
-  // Valley & subalpine forest (below 3,430m)
-  // Riparian willows in flat low valley floors (< 2,820m) where forest isn't dense
   if (y < 2820 && normalY > 0.92 && forestWeight < 0.35 && surface.grass > 0.2) {
     if (rng() < 0.14) {
       const h = 1.6 + rng() * 1.8;
@@ -222,43 +215,40 @@ function pickTreeAt(x, z, y, normalY, surface, rng) {
         kind: 3,
         height: h,
         widthScale: h * 1.15,
-        r: 0.62,
-        g: 0.88,
-        b: 0.52,
+        r: 0.72,
+        g: 0.92,
+        b: 0.62,
       };
     }
   }
 
   if (forestWeight < 0.16 || rng() > forestWeight * 1.12) return null;
 
-  // Aspen grove clustering (2,550m - 3,360m, gentler slopes, warm patches)
   const groveNoise = fbm2D(x * 0.0042, z * 0.0042, 3, 503);
   const inAspenZone = y >= 2500 && y <= 3360 && normalY > 0.76;
   if (inAspenZone && groveNoise > 0.53 && rng() < (groveNoise - 0.45) * 1.9) {
     const h = 7.5 + rng() * 6.5;
-    // Slight golden-autumn to bright-green variation across groves
     const gold = fbm2D(x * 0.0028, z * 0.0028, 2, 709);
     const isGold = gold > 0.48;
     return {
-      kind: 2, // Quaking Aspen
+      kind: 2,
       height: h,
-      widthScale: h * (0.85 + rng() * 0.25),
-      r: isGold ? 0.92 + rng() * 0.08 : 0.78 + rng() * 0.14,
-      g: isGold ? 0.84 + rng() * 0.10 : 0.88 + rng() * 0.10,
-      b: isGold ? 0.42 + rng() * 0.12 : 0.52 + rng() * 0.14,
+      widthScale: h * (0.85 + rng() * 0.22),
+      r: isGold ? 0.92 + rng() * 0.08 : 0.80 + rng() * 0.14,
+      g: isGold ? 0.84 + rng() * 0.10 : 0.90 + rng() * 0.10,
+      b: isGold ? 0.44 + rng() * 0.12 : 0.54 + rng() * 0.14,
     };
   }
 
-  // Engelmann Spruce (0) vs Subalpine Fir (1)
   const isFir = y > 3050 ? rng() < 0.52 : rng() < 0.28;
   const elevShrink = y > 3200 ? 1 - ((y - 3200) / 300) * 0.42 : 1.0;
   const h = (9.0 + rng() * 9.5) * Math.max(0.45, elevShrink);
-  const shade = 0.80 + rng() * 0.32;
+  const shade = 0.84 + rng() * 0.28;
   return {
     kind: isFir ? 1 : 0,
     height: h,
-    widthScale: h * (0.70 + rng() * 0.18),
-    r: shade * 0.95,
+    widthScale: h * (0.72 + rng() * 0.18),
+    r: shade * 0.96,
     g: shade * 1.02,
     b: shade * 0.96,
   };
@@ -268,7 +258,6 @@ export function createVegetation(engine, terrain, trailData, atmosphere) {
   const { scene, events } = engine;
   const textures = engine.worldTextures;
 
-  // Materials (patched with San Juan height fog + GPU wind)
   const spruceGeo = buildConiferGeometry(false);
   const firGeo = buildConiferGeometry(true);
   const aspenGeo = buildAspenGeometry();
@@ -278,7 +267,7 @@ export function createVegetation(engine, terrain, trailData, atmosphere) {
   const solidTreeMat = patchSanJuanMaterial(
     new THREE.MeshLambertMaterial({ vertexColors: true }),
     atmosphere.uniforms,
-    { wind: true, windStrength: 0.032 }
+    { wind: true, windStrength: 0.032, foliage: true }
   );
 
   const impostorMat = patchSanJuanMaterial(
@@ -288,21 +277,23 @@ export function createVegetation(engine, terrain, trailData, atmosphere) {
       side: THREE.DoubleSide,
     }),
     atmosphere.uniforms,
-    { wind: true, windStrength: 0.026, atlasUv: true }
+    { wind: true, windStrength: 0.026, foliage: true, atlasUv: true }
   );
 
   const grassMat = patchSanJuanMaterial(
     new THREE.MeshLambertMaterial({
       map: textures.grassFlower,
-      alphaTest: 0.38,
+      alphaTest: 0.36,
       side: THREE.DoubleSide,
     }),
     atmosphere.uniforms,
-    { wind: true, windStrength: 0.085, atlasUv: true, fadeStart: 28, fadeEnd: 88 }
+    { wind: true, windStrength: 0.085, foliage: true, atlasUv: true, fadeStart: 28, fadeEnd: 88 }
   );
 
-  // Global pooled InstancedMeshes (5 draw calls max across entire mountain range!)
   let tierCfg = TIER_CONFIG[engine.quality.tier] || TIER_CONFIG.medium;
+  let lastTier = engine.quality.tier;
+  let lastShadows = Boolean(engine.quality.shadows);
+  let lastGrass = Boolean(engine.quality.grass);
 
   function makeInstancedPool(geo, mat, maxCount, castShadow, receiveShadow, hasAtlasRect) {
     const capacity = Math.max(1, maxCount);
@@ -315,7 +306,6 @@ export function createVegetation(engine, terrain, trailData, atmosphere) {
     mesh.frustumCulled = false;
     mesh.castShadow = castShadow;
     mesh.receiveShadow = receiveShadow;
-    // Initialize instanceColor buffer
     const dummyColor = new THREE.Color(1, 1, 1);
     for (let i = 0; i < capacity; i++) mesh.setColorAt(i, dummyColor);
     mesh.instanceColor.needsUpdate = true;
@@ -350,13 +340,12 @@ export function createVegetation(engine, terrain, trailData, atmosphere) {
       ? makeInstancedPool(aspenGeo, solidTreeMat, Math.ceil(tierCfg.maxNear * 0.65), allowShadow, true, false)
       : null;
     impostorMesh = makeInstancedPool(impostorGeo, impostorMat, tierCfg.maxImp, false, false, true);
-    grassMesh = (engine.quality.grass && tierCfg.maxGrass > 0)
+    grassMesh = engine.quality.grass && tierCfg.maxGrass > 0
       ? makeInstancedPool(grassGeo, grassMat, tierCfg.maxGrass, false, true, true)
       : null;
   }
   rebuildPools();
 
-  // Chunk caches: key = `${cx},${cz}`
   const treeChunks = new Map();
   const grassChunks = new Map();
   let lastPackX = 1e9;
@@ -370,19 +359,29 @@ export function createVegetation(engine, terrain, trailData, atmosphere) {
     const items = [];
     const x0 = cx * TREE_CELL_M;
     const z0 = cz * TREE_CELL_M;
+    const bldgMask = engine.worldBuildingMask;
 
     for (let i = 0; i < baseCount; i++) {
       const x = x0 + rng() * TREE_CELL_M;
       const z = z0 + rng() * TREE_CELL_M;
+
+      // Never spawn forest trees inside historic downtown blocks or near OSM buildings
+      if (bldgMask) {
+        if (bldgMask.isInTownCorridor(x, z) || bldgMask.isNearBuilding(x, z, 12.0)) continue;
+      }
+
+      // Generous road/street/trail clearance (15m off town roads, 6.5m off 4x4 tracks, 4m off trails)
+      const near = trailData?.nearest?.(x, z, 16.0);
+      if (near) {
+        const minClear = near.kind === 'road' ? 15.0 : near.kind === 'track' ? 6.5 : 4.0;
+        if (near.dist < minClear) continue;
+      }
+
       const y = terrain.getHeight(x, z);
       const norm = terrain.getNormal(x, z);
       const surf = terrain.getSurface(x, z);
       const spec = pickTreeAt(x, z, y, norm.y, surf, rng);
       if (!spec) continue;
-
-      // Never place trees on trails or roads
-      const near = trailData?.nearest?.(x, z, 4.2);
-      if (near && near.dist < (near.kind === 'road' ? 5.5 : 3.2)) continue;
 
       items.push({
         x,
@@ -404,20 +403,32 @@ export function createVegetation(engine, terrain, trailData, atmosphere) {
       cz,
       centerH: terrain.getHeight(x0 + TREE_CELL_M * 0.5, z0 + TREE_CELL_M * 0.5),
       items,
-      lastUsed: performance.now(),
     };
   }
 
   function buildGrassChunk(cx, cz) {
     const rng = mulberry32(hash2i(cx, cz, 307));
-    const count = Math.round(55 * tierCfg.density);
+    const count = Math.round(52 * tierCfg.density);
     const items = [];
     const x0 = cx * GRASS_CELL_M;
     const z0 = cz * GRASS_CELL_M;
+    const bldgMask = engine.worldBuildingMask;
 
     for (let i = 0; i < count; i++) {
       const x = x0 + rng() * GRASS_CELL_M;
       const z = z0 + rng() * GRASS_CELL_M;
+
+      // Keep wild tussock grass off town streets and building footprints
+      if (bldgMask) {
+        if (bldgMask.isInTownCorridor(x, z) || bldgMask.isNearBuilding(x, z, 10.0)) continue;
+      }
+
+      const near = trailData?.nearest?.(x, z, 10.5);
+      if (near) {
+        const minClear = near.kind === 'road' ? 9.5 : near.kind === 'track' ? 3.5 : 1.8;
+        if (near.dist < minClear) continue;
+      }
+
       const y = terrain.getHeight(x, z);
       if (y > 4180) continue;
 
@@ -427,17 +438,13 @@ export function createVegetation(engine, terrain, trailData, atmosphere) {
       const surf = terrain.getSurface(x, z);
       if (surf.water > 0.2 || surf.snow > 0.45 || surf.rock > 0.72) continue;
 
-      const near = trailData?.nearest?.(x, z, 2.0);
-      if (near && near.dist < 1.3) continue;
-
-      // In alpine tundra (> 3450m) & meadows, add Colorado Blue Columbine + Indian Paintbrush!
-      const flowerChance = y > 3350 ? 0.24 : 0.11;
-      let kind = rng() < 0.62 ? 0 : 1; // grass or golden sedge
+      const flowerChance = y > 3350 ? 0.24 : 0.12;
+      let kind = rng() < 0.62 ? 0 : 1;
       if (rng() < flowerChance) {
-        kind = rng() < 0.65 ? 2 : 3; // Blue Columbine or Indian Paintbrush
+        kind = rng() < 0.65 ? 2 : 3;
       }
 
-      const scale = kind >= 2 ? (0.34 + rng() * 0.22) : (0.38 + rng() * 0.35);
+      const scale = kind >= 2 ? 0.34 + rng() * 0.22 : 0.38 + rng() * 0.35;
       items.push({
         x,
         y: y - 0.03,
@@ -445,7 +452,7 @@ export function createVegetation(engine, terrain, trailData, atmosphere) {
         rot: rng() * Math.PI,
         kind,
         scale,
-        shade: 0.82 + rng() * 0.32,
+        shade: 0.88 + rng() * 0.24,
       });
     }
 
@@ -455,7 +462,6 @@ export function createVegetation(engine, terrain, trailData, atmosphere) {
       cz,
       centerH: terrain.getHeight(x0 + GRASS_CELL_M * 0.5, z0 + GRASS_CELL_M * 0.5),
       items,
-      lastUsed: performance.now(),
     };
   }
 
@@ -477,55 +483,59 @@ export function createVegetation(engine, terrain, trailData, atmosphere) {
     const farR2 = tierCfg.farRadius * tierCfg.farRadius;
     const impAttr = impostorMesh.geometry.attributes.aAtlasRect;
 
-    for (const chunk of treeChunks.values()) {
-      const cdx = (chunk.cx + 0.5) * TREE_CELL_M - px;
-      const cdz = (chunk.cz + 0.5) * TREE_CELL_M - pz;
-      const cDist2 = cdx * cdx + cdz * cdz;
-      if (cDist2 > (tierCfg.farRadius + TREE_CELL_M) ** 2) continue;
+    const treeRing = Math.ceil(tierCfg.farRadius / TREE_CELL_M);
+    const pcx = Math.floor(px / TREE_CELL_M);
+    const pcz = Math.floor(pz / TREE_CELL_M);
 
-      const items = chunk.items;
-      for (let i = 0; i < items.length; i++) {
-        const t = items[i];
-        const dx = t.x - px;
-        const dz = t.z - pz;
-        const d2 = dx * dx + dz * dz;
-        if (d2 > farR2) continue;
+    for (let dz = -treeRing; dz <= treeRing; dz++) {
+      for (let dx = -treeRing; dx <= treeRing; dx++) {
+        const chunk = treeChunks.get(`${pcx + dx},${pcz + dz}`);
+        if (!chunk) continue;
 
-        _pos.set(t.x, t.y, t.z);
-        _quat.setFromAxisAngle(_yAxis, t.rot);
-        _col.setRGB(t.r, t.g, t.b);
+        const items = chunk.items;
+        for (let i = 0; i < items.length; i++) {
+          const t = items[i];
+          const ddx = t.x - px;
+          const ddz = t.z - pz;
+          const d2 = ddx * ddx + ddz * ddz;
+          if (d2 > farR2) continue;
 
-        if (d2 < nearR2 && t.kind !== 3) {
-          _scale.set(t.w, t.h, t.w);
-          _mat.compose(_pos, _quat, _scale);
-          if (t.kind === 0 && spruceMesh && spCount < spruceMesh.instanceMatrix.count) {
-            spruceMesh.setMatrixAt(spCount, _mat);
-            spruceMesh.setColorAt(spCount, _col);
-            spCount++;
-            continue;
+          _pos.set(t.x, t.y, t.z);
+          _quat.setFromAxisAngle(_yAxis, t.rot);
+          _col.setRGB(t.r, t.g, t.b);
+
+          if (d2 < nearR2 && t.kind !== 3) {
+            _scale.set(t.w, t.h, t.w);
+            _mat.compose(_pos, _quat, _scale);
+            if (t.kind === 0 && spruceMesh && spCount < spruceMesh.instanceMatrix.count) {
+              spruceMesh.setMatrixAt(spCount, _mat);
+              spruceMesh.setColorAt(spCount, _col);
+              spCount++;
+              continue;
+            }
+            if (t.kind === 1 && firMesh && fiCount < firMesh.instanceMatrix.count) {
+              firMesh.setMatrixAt(fiCount, _mat);
+              firMesh.setColorAt(fiCount, _col);
+              fiCount++;
+              continue;
+            }
+            if (t.kind === 2 && aspenMesh && asCount < aspenMesh.instanceMatrix.count) {
+              aspenMesh.setMatrixAt(asCount, _mat);
+              aspenMesh.setColorAt(asCount, _col);
+              asCount++;
+              continue;
+            }
           }
-          if (t.kind === 1 && firMesh && fiCount < firMesh.instanceMatrix.count) {
-            firMesh.setMatrixAt(fiCount, _mat);
-            firMesh.setColorAt(fiCount, _col);
-            fiCount++;
-            continue;
-          }
-          if (t.kind === 2 && aspenMesh && asCount < aspenMesh.instanceMatrix.count) {
-            aspenMesh.setMatrixAt(asCount, _mat);
-            aspenMesh.setColorAt(asCount, _col);
-            asCount++;
-            continue;
-          }
-        }
 
-        if (impCount < impostorMesh.instanceMatrix.count) {
-          _scale.set(t.w, t.h, t.w);
-          _mat.compose(_pos, _quat, _scale);
-          impostorMesh.setMatrixAt(impCount, _mat);
-          impostorMesh.setColorAt(impCount, _col);
-          const rect = ATLAS_RECTS[t.kind];
-          impAttr.setXYZW(impCount, rect[0], rect[1], rect[2], rect[3]);
-          impCount++;
+          if (impCount < impostorMesh.instanceMatrix.count) {
+            _scale.set(t.w, t.h, t.w);
+            _mat.compose(_pos, _quat, _scale);
+            impostorMesh.setMatrixAt(impCount, _mat);
+            impostorMesh.setColorAt(impCount, _col);
+            const rect = ATLAS_RECTS[t.kind];
+            impAttr.setXYZW(impCount, rect[0], rect[1], rect[2], rect[3]);
+            impCount++;
+          }
         }
       }
     }
@@ -553,27 +563,32 @@ export function createVegetation(engine, terrain, trailData, atmosphere) {
     if (grassMesh) {
       const grR2 = tierCfg.grassRadius * tierCfg.grassRadius;
       const grAttr = grassMesh.geometry.attributes.aAtlasRect;
-      for (const chunk of grassChunks.values()) {
-        const cdx = (chunk.cx + 0.5) * GRASS_CELL_M - px;
-        const cdz = (chunk.cz + 0.5) * GRASS_CELL_M - pz;
-        if (cdx * cdx + cdz * cdz > (tierCfg.grassRadius + GRASS_CELL_M) ** 2) continue;
+      const grassRing = Math.ceil(tierCfg.grassRadius / GRASS_CELL_M);
+      const gcx = Math.floor(px / GRASS_CELL_M);
+      const gcz = Math.floor(pz / GRASS_CELL_M);
 
-        const items = chunk.items;
-        for (let i = 0; i < items.length && grCount < grassMesh.instanceMatrix.count; i++) {
-          const g = items[i];
-          const dx = g.x - px;
-          const dz = g.z - pz;
-          if (dx * dx + dz * dz > grR2) continue;
-          _pos.set(g.x, g.y, g.z);
-          _quat.setFromAxisAngle(_yAxis, g.rot);
-          _scale.set(g.scale, g.scale, g.scale);
-          _mat.compose(_pos, _quat, _scale);
-          _col.setRGB(g.shade, g.shade, g.shade);
-          grassMesh.setMatrixAt(grCount, _mat);
-          grassMesh.setColorAt(grCount, _col);
-          const rect = ATLAS_RECTS[g.kind];
-          grAttr.setXYZW(grCount, rect[0], rect[1], rect[2], rect[3]);
-          grCount++;
+      for (let dz = -grassRing; dz <= grassRing; dz++) {
+        for (let dx = -grassRing; dx <= grassRing; dx++) {
+          const chunk = grassChunks.get(`${gcx + dx},${gcz + dz}`);
+          if (!chunk) continue;
+
+          const items = chunk.items;
+          for (let i = 0; i < items.length && grCount < grassMesh.instanceMatrix.count; i++) {
+            const g = items[i];
+            const ddx = g.x - px;
+            const ddz = g.z - pz;
+            if (ddx * ddx + ddz * ddz > grR2) continue;
+            _pos.set(g.x, g.y, g.z);
+            _quat.setFromAxisAngle(_yAxis, g.rot);
+            _scale.set(g.scale, g.scale, g.scale);
+            _mat.compose(_pos, _quat, _scale);
+            _col.setRGB(g.shade, g.shade, g.shade);
+            grassMesh.setMatrixAt(grCount, _mat);
+            grassMesh.setColorAt(grCount, _col);
+            const rect = ATLAS_RECTS[g.kind];
+            grAttr.setXYZW(grCount, rect[0], rect[1], rect[2], rect[3]);
+            grCount++;
+          }
         }
       }
       grassMesh.count = grCount;
@@ -583,30 +598,65 @@ export function createVegetation(engine, terrain, trailData, atmosphere) {
     }
   }
 
-  const unsubQuality = events.on('quality:changed', () => {
-    treeChunks.clear();
-    grassChunks.clear();
+  // Guarded quality listener: ignore pure renderScale adaptive adjustments!
+  const unsubQuality = events.on('quality:changed', (q) => {
+    const nextTier = q?.tier ?? engine.quality.tier;
+    const nextShadows = Boolean(engine.quality.shadows);
+    const nextGrass = Boolean(engine.quality.grass);
+    if (nextTier === lastTier && nextShadows === lastShadows && nextGrass === lastGrass) return;
+
+    const tierChanged = nextTier !== lastTier;
+    lastTier = nextTier;
+    lastShadows = nextShadows;
+    lastGrass = nextGrass;
+    if (tierChanged) {
+      treeChunks.clear();
+      grassChunks.clear();
+    }
     rebuildPools();
     poolsDirty = true;
   });
 
-  // Invalidate nearby chunks when new terrain or vector data finishes streaming
-  const unsubTerrain = events.on('terrain:tile', () => {
-    poolsDirty = true;
+  // Invalidate overlapping vegetation cells when new road/trail/building vector chunks stream in!
+  const unsubChunk = events.on('data:chunk', (payload) => {
+    if (typeof payload?.tx === 'number' && typeof payload?.ty === 'number') {
+      const b = tileBoundsWorld(13, payload.tx, payload.ty);
+      const pad = 20;
+      const tcx0 = Math.floor((b.minX - pad) / TREE_CELL_M);
+      const tcx1 = Math.floor((b.maxX + pad) / TREE_CELL_M);
+      const tcz0 = Math.floor((b.minZ - pad) / TREE_CELL_M);
+      const tcz1 = Math.floor((b.maxZ + pad) / TREE_CELL_M);
+      for (let cz = tcz0; cz <= tcz1; cz++) {
+        for (let cx = tcx0; cx <= tcx1; cx++) {
+          if (treeChunks.delete(`${cx},${cz}`)) poolsDirty = true;
+        }
+      }
+      const gcx0 = Math.floor((b.minX - pad) / GRASS_CELL_M);
+      const gcx1 = Math.floor((b.maxX + pad) / GRASS_CELL_M);
+      const gcz0 = Math.floor((b.minZ - pad) / GRASS_CELL_M);
+      const gcz1 = Math.floor((b.maxZ + pad) / GRASS_CELL_M);
+      for (let cz = gcz0; cz <= gcz1; cz++) {
+        for (let cx = gcx0; cx <= gcx1; cx++) {
+          if (grassChunks.delete(`${cx},${cz}`)) poolsDirty = true;
+        }
+      }
+    }
   });
 
   function update(dt, playerPos) {
+    const appState = engine.getAppState?.();
+    if (appState === 'title' || appState === 'loading') return;
+
     const px = playerPos?.x ?? engine.camera.position.x;
     const pz = playerPos?.z ?? engine.camera.position.z;
-    const now = performance.now();
+    const t0 = performance.now();
 
-    // Time-sliced chunk streaming (at most 2 tree chunks + 2 grass chunks per frame)
     const treeRing = Math.ceil(tierCfg.farRadius / TREE_CELL_M);
     const pcx = Math.floor(px / TREE_CELL_M);
     const pcz = Math.floor(pz / TREE_CELL_M);
 
     let builtTrees = 0;
-    outerTree: for (let r = 0; r <= treeRing && builtTrees < 2; r++) {
+    outerTree: for (let r = 0; r <= treeRing; r++) {
       for (let dz = -r; dz <= r; dz++) {
         for (let dx = -r; dx <= r; dx++) {
           if (Math.abs(dx) !== r && Math.abs(dz) !== r) continue;
@@ -616,51 +666,47 @@ export function createVegetation(engine, terrain, trailData, atmosphere) {
           if (dist > tierCfg.farRadius + TREE_CELL_M) continue;
 
           const key = `${cx},${cz}`;
-          const existing = treeChunks.get(key);
-          if (existing) {
-            existing.lastUsed = now;
-            continue;
-          }
+          if (treeChunks.has(key)) continue;
+
           treeChunks.set(key, buildTreeChunk(cx, cz));
           poolsDirty = true;
           builtTrees++;
-          if (builtTrees >= 2) break outerTree;
+          if (builtTrees >= 2 || performance.now() - t0 > 1.4) break outerTree;
         }
       }
     }
 
-    // Grass streaming
-    if (grassMesh && tierCfg.grassRadius > 0) {
+    if (grassMesh && tierCfg.grassRadius > 0 && performance.now() - t0 < 1.6) {
       const grassRing = Math.ceil(tierCfg.grassRadius / GRASS_CELL_M);
       const gcx = Math.floor(px / GRASS_CELL_M);
       const gcz = Math.floor(pz / GRASS_CELL_M);
       let builtGrass = 0;
-      outerGrass: for (let r = 0; r <= grassRing && builtGrass < 2; r++) {
+      outerGrass: for (let r = 0; r <= grassRing; r++) {
         for (let dz = -r; dz <= r; dz++) {
           for (let dx = -r; dx <= r; dx++) {
             if (Math.abs(dx) !== r && Math.abs(dz) !== r) continue;
             const cx = gcx + dx;
             const cz = gcz + dz;
             const key = `${cx},${cz}`;
-            const existing = grassChunks.get(key);
-            if (existing) {
-              existing.lastUsed = now;
-              continue;
-            }
+            if (grassChunks.has(key)) continue;
+
             grassChunks.set(key, buildGrassChunk(cx, cz));
             poolsDirty = true;
             builtGrass++;
-            if (builtGrass >= 2) break outerGrass;
+            if (builtGrass >= 2 || performance.now() - t0 > 1.8) break outerGrass;
           }
         }
       }
     }
 
-    // Periodic height-refinement check: if higher-LOD terrain changed elevation under a chunk, rebuild it
-    if (treeChunks.size > 0) {
-      const keys = Array.from(treeChunks.keys());
-      const key = keys[checkCursor % keys.length];
-      checkCursor++;
+    const span = treeRing * 2 + 1;
+    const totalRingCells = span * span;
+    if (totalRingCells > 0) {
+      const idx = checkCursor % totalRingCells;
+      checkCursor = (checkCursor + 1) | 0;
+      const dx = (idx % span) - treeRing;
+      const dz = Math.floor(idx / span) - treeRing;
+      const key = `${pcx + dx},${pcz + dz}`;
       const ch = treeChunks.get(key);
       if (ch) {
         const newH = terrain.getHeight((ch.cx + 0.5) * TREE_CELL_M, (ch.cz + 0.5) * TREE_CELL_M);
@@ -671,22 +717,19 @@ export function createVegetation(engine, terrain, trailData, atmosphere) {
       }
     }
 
-    // Prune stale chunks beyond cache limits
-    if (treeChunks.size > 480) {
-      for (const [k, ch] of treeChunks) {
-        if (now - ch.lastUsed > 20000) treeChunks.delete(k);
-        if (treeChunks.size <= 360) break;
-      }
+    while (treeChunks.size > 420) {
+      const oldestKey = treeChunks.keys().next().value;
+      if (oldestKey === undefined) break;
+      treeChunks.delete(oldestKey);
     }
-    if (grassChunks.size > 140) {
-      for (const [k, ch] of grassChunks) {
-        if (now - ch.lastUsed > 12000) grassChunks.delete(k);
-        if (grassChunks.size <= 90) break;
-      }
+    while (grassChunks.size > 110) {
+      const oldestKey = grassChunks.keys().next().value;
+      if (oldestKey === undefined) break;
+      grassChunks.delete(oldestKey);
     }
 
     const moveDist = Math.hypot(px - lastPackX, pz - lastPackZ);
-    if (poolsDirty || moveDist > 12) {
+    if (poolsDirty || moveDist > 14) {
       packPools(px, pz);
       lastPackX = px;
       lastPackZ = pz;
@@ -696,7 +739,7 @@ export function createVegetation(engine, terrain, trailData, atmosphere) {
 
   function dispose() {
     unsubQuality();
-    unsubTerrain();
+    unsubChunk();
     for (const m of [spruceMesh, firMesh, aspenMesh, impostorMesh, grassMesh]) {
       if (m) {
         scene.remove(m);

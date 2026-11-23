@@ -26,27 +26,28 @@ Startup-loaded array of curated free-run starts, trailheads, viewpoints, peaks, 
 `heading` follows `src/core/camera.js` convention where forward is `(-sin(heading), -cos(heading))` (`heading = atan2(-tx, -tz)`).
 
 ### `races.json`
-Startup-loaded array of real San Juan trail races reconstructed by A* routing over the OSM trail graph:
+Startup-loaded array of 11 real San Juan trail races reconstructed from official CalTopo/OSM geometries and resampled at 15 m over z14 Terrarium elevation:
 ```json
 {
   "id": "hardrock-100-cw",
   "name": "Hardrock 100 (Clockwise)",
   "blurb": "...",
-  "distanceMi": 101.9,
-  "officialDistanceMi": 102.5,
-  "gainFt": 33280,
+  "distanceMi": 99.0,
+  "officialDistanceMi": 102.0,
+  "gainFt": 34359,
   "officialGainFt": 33441,
   "cutoffH": 48,
   "startTimeLocal": "06:00",
   "start": { "x": ..., "z": ..., "heading": ... },
   "finish": { "x": ..., "z": ..., "heading": ... },
   "checkpoints": [
-    { "name": "KT", "d": 18507.4, "x": ..., "z": ..., "cutoffH": 6.5 }
+    { "name": "KT Aid Station", "d": 18118.5, "x": ..., "z": ..., "y": 3263.8, "cutoffH": 7.5 }
   ],
+  "elevations": [2839.5, ...],
   "line": [x0, z0, cumDist0, x1, z1, cumDist1, ...]
 }
 ```
-At runtime `src/data/index.js` wraps `race.line` in a `Float32Array` (stride 3).
+At runtime `src/data/index.js` wraps `race.line` in a `Float32Array` (stride 3). `elevations` provides a 128-sample USGS 3DEP profile (with pinned global extrema) for instant title-screen SVG rendering.
 
 ### `manifest.json` & `chunks/{tx}_{ty}.json`
 Vector features are chunked by Web Mercator zoom `13` tile (`~3.76 km × 3.76 km`). Features whose bounding box overlaps multiple tiles appear in each overlapping tile and are deduplicated by `id` on load in `src/data/index.js`.

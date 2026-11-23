@@ -3,20 +3,15 @@
  * Exports createAudio(engine, { game, world, trailData, terrain }).
  *
  * Features:
- * - Lazy Web Audio initialization + iOS silent-buffer gesture unlock
+ * - Lazy Web Audio initialization + iOS silent-buffer gesture unlock + interruption recovery
  * - Automatic visibilitychange / engine:visibility suspend & resume
- * - Voice-capped, zero-jank procedural synthesis (0 KB external audio assets)
- * - Surface-dependent footsteps synced to gait/cadence (10 San Juan surfaces)
+ * - Voice-capped, zero-jank, zero-retention procedural synthesis (0 KB external audio assets)
+ * - Surface-dependent footsteps synced to gait/cadence (10 San Juan surfaces) + jump landing
  * - Effort/altitude/fatigue breathing
- * - Contextual ambient beds (ridge wind, aspen leaves, birds, crickets, town murmur)
- * - Positional rivers/waterfalls, gondola hum, monsoon rain + delayed canyon thunder
- * - UI clicks, toast/checkpoint/achievement chimes, Hardrock rock kiss & finish fanfare
+ * - Contextual ambient beds (ridge wind, aspen leaves, mid-July day birds, night crickets, town murmur)
+ * - O(1) spatial-grid positional rivers/waterfalls, 3D gondola hum, monsoon rain + delayed canyon thunder
+ * - UI clicks, de-duplicated toast/checkpoint/achievement chimes, Hardrock rock kiss & finish fanfare
  * - Gentle procedural menu music loop
- *
- * Events listened:
- * - 'ui:audio'    { master?: number, music?: number, sfx?: number, muted?: boolean }
- * - 'ui:settings' { audio?: boolean, volume?: number, musicVolume?: number, sfxVolume?: number }
- * - 'hud', 'app:state', 'game:*', 'world:*', 'ui:*', 'data:chunk', 'engine:visibility'
  */
 
 import { createAudioContextManager } from './context.js';
@@ -29,14 +24,8 @@ const AUDIO_STORAGE_KEY = 'telluride_trails_audio_v1';
 const UI_SETTINGS_KEY = 'telluride_trails_settings_v1';
 
 function readInitialSettings() {
-  const out = { master: 0.75, music: 0.55, sfx: 0.85, muted: false };
+  const out = { master: 0.75, music: 0.65, sfx: 0.85, muted: false };
   try {
-    const rawUi = localStorage.getItem(UI_SETTINGS_KEY);
-    if (rawUi) {
-      const u = JSON.parse(rawUi);
-      if (typeof u.audio === 'boolean') out.muted = !u.audio;
-      if (typeof u.volume === 'number') out.master = u.volume;
-    }
     const rawAudio = localStorage.getItem(AUDIO_STORAGE_KEY);
     if (rawAudio) {
       const a = JSON.parse(rawAudio);
@@ -44,6 +33,14 @@ function readInitialSettings() {
       if (typeof a.music === 'number') out.music = a.music;
       if (typeof a.sfx === 'number') out.sfx = a.sfx;
       if (typeof a.muted === 'boolean') out.muted = a.muted;
+    }
+    const rawUi = localStorage.getItem(UI_SETTINGS_KEY);
+    if (rawUi) {
+      const u = JSON.parse(rawUi);
+      if (typeof u.audio === 'boolean') out.muted = !u.audio;
+      if (typeof u.volume === 'number') out.master = u.volume;
+      if (typeof u.musicVolume === 'number') out.music = u.musicVolume;
+      if (typeof u.sfxVolume === 'number') out.sfx = u.sfxVolume;
     }
   } catch {
     // ignore storage failures
@@ -63,7 +60,7 @@ export function createAudio(engine, { game, world, trailData, terrain } = {}) {
   const audioCtx = createAudioContextManager(engine);
   audioCtx.setSettings(readInitialSettings());
 
-  const foley = createFoleySystem(audioCtx, engine);
+  const foley = createFoleySystem(audioCtx, engine, { terrain });
   const ambient = createAmbientSystem(audioCtx, engine, { terrain, trailData, world });
   const menuMusic = createMenuMusic(audioCtx);
   const uiSfx = createUiSfxSystem(audioCtx, engine);
@@ -84,13 +81,13 @@ export function createAudio(engine, { game, world, trailData, terrain } = {}) {
     if (persist) saveAudioSettings(audioCtx.getSettings());
   }
 
-  // Dedicated audio settings event (e.g. from UI audio controls)
+  // Dedicated audio settings event (emitted by UI on init & slider/toggle updates)
   const unsubUiAudio = engine?.events?.on?.('ui:audio', (payload) => {
     if (!payload || typeof payload !== 'object') return;
     applyAudioPatch(payload, true);
   });
 
-  // Compatibility with UI's existing Settings dialog (`audio`, `volume`)
+  // Compatibility with UI's general settings event
   const unsubUiSettings = engine?.events?.on?.('ui:settings', (s) => {
     if (!s || typeof s !== 'object') return;
     const patch = {};
@@ -126,7 +123,8 @@ export function createAudio(engine, { game, world, trailData, terrain } = {}) {
     ambient.update(safeDt, latestHud, appState);
   }
 
-  const unsubUpdate = engine?.onUpdate?.(update);
+  // Register onLateUpdate so audio reads same-frame HUD/clearance after game & world update
+  const unsubUpdate = (engine?.onLateUpdate || engine?.onUpdate)?.(update);
 
   function dispose() {
     if (disposed) return;
@@ -151,10 +149,12 @@ export function createAudio(engine, { game, world, trailData, terrain } = {}) {
     getState: () => ({
       unlocked: audioCtx.isUnlocked,
       ready: audioCtx.isReady,
+      hasNoiseBuffers: audioCtx.hasNoiseBuffers,
       contextState: audioCtx.context?.state || 'uninitialized',
       activeVoices: audioCtx.activeVoices,
       appState,
       settings: audioCtx.getSettings(),
+      spatial: ambient.getSpatialStats(),
     }),
     triggerThunderNow: (p) => ambient.triggerThunderNow(p),
     game,

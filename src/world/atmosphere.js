@@ -3,7 +3,7 @@ import { getCelestialPositions } from './astro.js';
 
 /**
  * Shared GLSL height-fog + aerial-perspective snippet.
- * Shared with @terrain so terrain, vegetation, water, and structures blend seamlessly into the sky.
+ * Shared with @terrain2 so terrain, vegetation, water, and structures blend seamlessly into the sky.
  */
 export const SAN_JUAN_FOG_GLSL = /* glsl */ `
 uniform vec3 uSunDir;
@@ -33,12 +33,12 @@ vec3 applySanJuanAtmosphere(vec3 color, vec3 worldPos, vec3 camPos) {
     : exp(-clamp(h0 * falloff, -10.0, 10.0));
 
   float opticalDepth = uFogDensity * dist * avgExp;
-  float fogAmt = 1.0 - exp(-opticalDepth - dist * (0.000016 + uRainAmount * 0.00016) * uAerialScatter);
+  float fogAmt = 1.0 - exp(-opticalDepth - dist * (0.000016 + uRainAmount * 0.00018) * uAerialScatter);
   fogAmt = clamp(fogAmt, 0.0, 1.0);
 
   float sunCos = max(dot(viewDir, uSunDir), 0.0);
   float mieGlow = pow(sunCos, 6.0) * 0.42 + pow(sunCos, 32.0) * 0.35;
-  vec3 scatterColor = mix(uFogColor, uHorizonColor + uSunColor * 0.32, mieGlow * (1.0 - uRainAmount * 0.85));
+  vec3 scatterColor = mix(uFogColor, uHorizonColor + uSunColor * 0.32, mieGlow * (1.0 - uRainAmount * 0.88));
 
   return mix(color, scatterColor, fogAmt);
 }
@@ -109,27 +109,26 @@ void main() {
   float y = dir.y;
   float horizonMask = pow(1.0 - clamp(abs(y), 0.0, 1.0), 4.5);
 
-  // Day/twilight/night blend from sun elevation
   float sunElev = uSunDir.y;
   float dayFactor = smoothstep(-0.08, 0.25, sunElev);
-  float twilight = smoothstep(-0.22, 0.02, sunElev) * (1.0 - smoothstep(0.0, 0.28, sunElev));
+  float goldenBand = smoothstep(-0.20, 0.04, sunElev) * (1.0 - smoothstep(0.08, 0.44, sunElev));
 
-  // Rayleigh gradient: deep San Juan high-altitude cobalt zenith -> pale azure/gold horizon
-  vec3 zenithDay = mix(vec3(0.07, 0.22, 0.52), vec3(0.16, 0.20, 0.26), uRainAmount * 0.85);
+  // Rayleigh gradient: deep San Juan high-altitude cobalt zenith -> storm charcoal in monsoon
+  vec3 zenithDay = mix(vec3(0.07, 0.22, 0.52), vec3(0.045, 0.058, 0.085), uRainAmount * 0.92);
   vec3 zenithNight = vec3(0.008, 0.014, 0.032);
   vec3 zenith = mix(zenithNight, zenithDay, dayFactor);
 
   float skyPow = pow(max(y, 0.0), 0.55);
   vec3 skyCol = mix(uHorizonColor, zenith, skyPow);
 
-  // Alpenglow band near horizon opposite or near sun at sunrise/sunset
+  // Golden hour & twilight warm alpenglow near horizon
   float sunCos = max(dot(dir, uSunDir), 0.0);
-  vec3 twilightTint = vec3(0.95, 0.36, 0.16) * twilight * pow(1.0 - max(y, 0.0), 3.0) * (0.4 + 0.6 * pow(sunCos, 2.0));
-  skyCol += twilightTint;
+  vec3 twilightTint = vec3(0.96, 0.38, 0.14) * goldenBand * pow(1.0 - max(y, 0.0), 2.8) * (0.35 + 0.65 * pow(sunCos, 1.8));
+  skyCol += twilightTint * (1.0 - uRainAmount * 0.85);
 
   // Solar corona & crisp solar disc (suppressed by heavy storm clouds)
-  float sunVisibility = dayFactor * (1.0 - uRainAmount * 0.9);
-  float corona = pow(sunCos, 10.0) * 0.28 + pow(sunCos, 96.0) * 0.75;
+  float sunVisibility = dayFactor * (1.0 - uRainAmount * 0.94);
+  float corona = pow(sunCos, 10.0) * 0.30 + pow(sunCos, 96.0) * 0.78;
   float sunDisc = smoothstep(0.99935, 0.99975, dot(dir, uSunDir));
   skyCol += uSunColor * (corona + sunDisc * 4.5) * sunVisibility;
 
@@ -146,7 +145,6 @@ void main() {
       skyCol += vec3(0.85, 0.90, 1.0) * starBright * twinkle * nightFactor * (1.0 - uRainAmount);
     }
 
-    // Moon disc
     float moonCos = dot(dir, uMoonDir);
     if (moonCos > 0.9994) {
       float moonEdge = smoothstep(0.9994, 0.99965, moonCos);
@@ -155,36 +153,33 @@ void main() {
     skyCol += vec3(0.35, 0.45, 0.65) * pow(max(moonCos, 0.0), 48.0) * 0.12 * nightFactor * (1.0 - uRainAmount);
   }
 
-  // Procedural volumetric-looking cumulus / monsoon clouds
+  // Procedural volumetric-looking cumulus / monsoon thunderhead clouds
   if (y > 0.01) {
     vec2 cloudUv = dir.xz / (y + 0.14) * 1.35 + vec2(uTime * 0.008, uTime * 0.004);
     float c1 = fbmClouds(cloudUv);
     float c2 = fbmClouds(cloudUv * 2.2 - vec2(uTime * 0.012, 0.0));
     float density = c1 * 0.68 + c2 * 0.32;
 
-    float coverage = mix(0.56, 0.25, clamp(uCloudCover + uRainAmount * 0.65, 0.0, 1.0));
-    float cloudAlpha = smoothstep(coverage, coverage + 0.22, density);
-    // Fade clouds neatly into horizon haze
-    cloudAlpha *= smoothstep(0.01, 0.18, y);
+    float coverage = mix(0.56, 0.14, clamp(uCloudCover + uRainAmount * 0.75, 0.0, 1.0));
+    float cloudAlpha = smoothstep(coverage, coverage + 0.20, density);
+    cloudAlpha *= smoothstep(0.01, 0.16, y);
 
-    // Self-shadowing approximation (bright sunlit tops / silver lining, darker storm bases)
     float lit = clamp((density - coverage) * 2.2, 0.0, 1.0);
-    float forwardLit = pow(sunCos, 4.0) * 0.55;
-    vec3 cloudLight = mix(uSkyAmbientColor * 1.15, vec3(1.0, 0.98, 0.94) * max(dayFactor, 0.06), 0.7) + uSunColor * forwardLit;
-    vec3 cloudDark = mix(vec3(0.18, 0.22, 0.29), vec3(0.08, 0.10, 0.14), uRainAmount) * max(dayFactor, 0.08);
-    vec3 cloudCol = mix(cloudDark, cloudLight, mix(0.65, 0.25, uRainAmount) * (1.0 - lit * 0.45));
+    float forwardLit = pow(sunCos, 4.0) * 0.55 * (1.0 - uRainAmount * 0.85);
+    vec3 clearCloudTop = mix(uSkyAmbientColor * 1.15, vec3(1.0, 0.97, 0.92) * max(dayFactor, 0.06), 0.7) + uSunColor * forwardLit;
+    vec3 stormCloudTop = vec3(0.09, 0.11, 0.15) * max(dayFactor, 0.12);
+    vec3 cloudLight = mix(clearCloudTop, stormCloudTop, uRainAmount * 0.88);
+    vec3 cloudDark = mix(vec3(0.18, 0.22, 0.29), vec3(0.032, 0.042, 0.062), uRainAmount) * max(dayFactor, 0.08);
+    vec3 cloudCol = mix(cloudDark, cloudLight, mix(0.68, 0.28, uRainAmount) * (1.0 - lit * 0.42));
 
-    // Lightning illumination inside storm clouds
-    cloudCol += vec3(0.75, 0.85, 1.0) * uLightningFlash * (0.5 + 0.8 * density);
+    cloudCol += vec3(0.78, 0.88, 1.0) * uLightningFlash * (0.6 + 0.9 * density);
 
-    skyCol = mix(skyCol, cloudCol, cloudAlpha * mix(0.82, 0.96, uRainAmount));
+    skyCol = mix(skyCol, cloudCol, cloudAlpha * mix(0.82, 0.98, uRainAmount));
   }
 
-  // Lightning sheet flash in sky
-  skyCol += vec3(0.65, 0.78, 1.0) * uLightningFlash * 0.45;
+  skyCol += vec3(0.68, 0.80, 1.0) * uLightningFlash * 0.48;
 
-  // Seamless horizon blend matching applySanJuanAtmosphere
-  vec3 horizonBlend = mix(uFogColor, uHorizonColor + uSunColor * 0.25, pow(sunCos, 6.0) * 0.35 * (1.0 - uRainAmount * 0.85));
+  vec3 horizonBlend = mix(uFogColor, uHorizonColor + uSunColor * 0.25, pow(sunCos, 6.0) * 0.35 * (1.0 - uRainAmount * 0.88));
   skyCol = mix(skyCol, horizonBlend, horizonMask * (y < 0.0 ? 1.0 : 0.72));
 
   gl_FragColor = vec4(skyCol, 1.0);
@@ -204,19 +199,20 @@ varying float vAlpha;
 #include <logdepthbuf_pars_vertex>
 
 void main() {
-  // Wrap rain box (44m x 26m x 44m) seamlessly around camera
-  vec3 boxSize = vec3(44.0, 26.0, 44.0);
+  vec3 boxSize = vec3(38.0, 24.0, 38.0);
   vec3 p = aOffset;
   p.y -= uTime * aSpeed;
-  p.x -= uTime * 2.4; // slight canyon breeze slant
+  p.x -= uTime * 3.2; // monsoon gust slant
 
   vec3 rel = mod(p - uCamPos + boxSize * 0.5, boxSize) - boxSize * 0.5;
   vec3 worldCenter = uCamPos + rel;
 
-  // Stretch streak vertically & tilt slightly with wind
-  vec3 vertexPos = worldCenter + vec3(position.x * 0.011 + position.y * 0.07, position.y * 0.62, position.z * 0.011);
-  float distFade = 1.0 - smoothstep(10.0, 22.0, length(rel.xz));
-  vAlpha = distFade * 0.28;
+  // Crisp wind-slanted rain streak with near-camera fade so drops never block the lens
+  vec3 vertexPos = worldCenter + vec3(position.x * 0.015 + position.y * 0.11, position.y * 0.85, position.z * 0.015);
+  float nearFade = smoothstep(1.2, 3.6, length(rel));
+  float farFade = 1.0 - smoothstep(9.0, 19.0, length(rel.xz));
+  float tipFade = 1.0 - abs(position.y) * 1.45;
+  vAlpha = nearFade * farFade * max(tipFade, 0.25) * 0.52;
 
   gl_Position = projectionMatrix * modelViewMatrix * vec4(vertexPos, 1.0);
   #include <logdepthbuf_vertex>
@@ -232,17 +228,16 @@ varying float vAlpha;
 
 void main() {
   #include <logdepthbuf_fragment>
-  gl_FragColor = vec4(0.80, 0.86, 0.94, vAlpha * smoothstep(0.05, 0.5, uRainAmount));
+  gl_FragColor = vec4(0.76, 0.84, 0.95, vAlpha * smoothstep(0.04, 0.42, uRainAmount));
 }
 `;
 
 /**
- * Create the complete atmosphere, lighting, sky dome, clouds, shadow rig, and monsoon weather system.
+ * Create the complete atmosphere, lighting, sky dome, clouds, shadow rig, headlamp, and monsoon system.
  */
-export function createAtmosphere(engine) {
+export function createAtmosphere(engine, terrain) {
   const { scene, renderer, events } = engine;
 
-  // Shared uniforms referenced by terrain, vegetation, water, and structures
   const uniforms = {
     uSunDir: { value: new THREE.Vector3(0.5, 0.6, 0.4).normalize() },
     uMoonDir: { value: new THREE.Vector3(-0.4, 0.4, -0.5).normalize() },
@@ -253,7 +248,7 @@ export function createAtmosphere(engine) {
     uHorizonColor: { value: new THREE.Color(0xaec8e4) },
     uFogColor: { value: new THREE.Color(0x9cb9d8) },
     uFogDensity: { value: 0.000024 },
-    uFogBaseHeight: { value: 2667.0 }, // Telluride town elevation (m)
+    uFogBaseHeight: { value: 2667.0 },
     uFogHeightFalloff: { value: 0.00085 },
     uAerialScatter: { value: 0.85 },
     uRainAmount: { value: 0.0 },
@@ -264,23 +259,23 @@ export function createAtmosphere(engine) {
   scene.userData.atmosphereUniforms = uniforms;
   engine.atmosphereUniforms = uniforms;
 
-  // Exponential fog fallback for standard Three.js materials
   const sceneFog = new THREE.FogExp2(0x9cb9d8, 0.000018);
   scene.fog = sceneFog;
 
-  // Sky dome (centered on camera every frame)
-  const skyGeo = new THREE.SphereGeometry(40000, 32, 20);
+  // Sky dome: radius 8000 + depthTest:false + renderOrder:-1000 so it NEVER clips on low tier's camera.far
+  const skyGeo = new THREE.SphereGeometry(8000, 32, 20);
   const skyMat = new THREE.ShaderMaterial({
     vertexShader: SKY_VERT,
     fragmentShader: SKY_FRAG,
     uniforms,
     side: THREE.BackSide,
+    depthTest: false,
     depthWrite: false,
     fog: false,
   });
   const skyMesh = new THREE.Mesh(skyGeo, skyMat);
   skyMesh.frustumCulled = false;
-  skyMesh.renderOrder = -100;
+  skyMesh.renderOrder = -1000;
   scene.add(skyMesh);
 
   // Lights
@@ -296,20 +291,57 @@ export function createAtmosphere(engine) {
   scene.add(sunLight);
   scene.add(sunLight.target);
 
-  // Runner headlamp (SpotLight on medium/high/ultra, cheap PointLight on low tier)
-  const headlampSpot = new THREE.SpotLight(0xfff4df, 0, 65, Math.PI * 0.26, 0.58, 1.25);
+  // Runner headlamp (SpotLight on medium+, cheap PointLight on low + terrain-draped light pool)
+  const headlampSpot = new THREE.SpotLight(0xfff4df, 0, 75, Math.PI * 0.28, 0.58, 1.15);
   headlampSpot.castShadow = false;
   headlampSpot.visible = false;
   scene.add(headlampSpot);
   scene.add(headlampSpot.target);
 
-  const headlampCheap = new THREE.PointLight(0xfff4df, 0, 34, 1.3);
+  const headlampCheap = new THREE.PointLight(0xfff4df, 0, 38, 1.2);
   headlampCheap.castShadow = false;
   headlampCheap.visible = false;
   scene.add(headlampCheap);
 
+  const poolSegX = 6;
+  const poolSegZ = 8;
+  const headlampPoolGeo = new THREE.PlaneGeometry(14, 24, poolSegX, poolSegZ);
+  headlampPoolGeo.rotateX(-Math.PI * 0.5);
+  const poolCount = headlampPoolGeo.attributes.position.count;
+  const poolColors = new Float32Array(poolCount * 3);
+  for (let i = 0; i < poolCount; i++) {
+    const lx = headlampPoolGeo.attributes.position.getX(i) / 7.0;
+    const lz = (headlampPoolGeo.attributes.position.getZ(i) + 12.0) / 24.0;
+    const coneWidth = 0.22 + (1.0 - lz) * 0.78;
+    const radial = Math.max(0, 1.0 - Math.pow(lx / coneWidth, 2.0));
+    const longi = Math.sin(Math.min(1, Math.max(0, lz)) * Math.PI);
+    const w = Math.pow(radial, 1.4) * Math.pow(longi, 0.85) * 0.34;
+    poolColors[i * 3] = w * 1.05;
+    poolColors[i * 3 + 1] = w * 0.96;
+    poolColors[i * 3 + 2] = w * 0.80;
+  }
+  headlampPoolGeo.setAttribute('color', new THREE.BufferAttribute(poolColors, 3));
+  const poolLocalXZ = new Float32Array(poolCount * 2);
+  for (let i = 0; i < poolCount; i++) {
+    poolLocalXZ[i * 2] = headlampPoolGeo.attributes.position.getX(i);
+    poolLocalXZ[i * 2 + 1] = 13.5 - headlampPoolGeo.attributes.position.getZ(i);
+  }
+  const headlampPoolMat = new THREE.MeshBasicMaterial({
+    vertexColors: true,
+    transparent: true,
+    opacity: 0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    fog: false,
+  });
+  const headlampPoolMesh = new THREE.Mesh(headlampPoolGeo, headlampPoolMat);
+  headlampPoolMesh.frustumCulled = false;
+  headlampPoolMesh.visible = false;
+  headlampPoolMesh.renderOrder = 5;
+  scene.add(headlampPoolMesh);
+
   // Rain streaks (GPU instanced, 1 draw call)
-  const rainCount = 900;
+  const rainCount = 1500;
   const quadGeo = new THREE.PlaneGeometry(1, 1);
   const rainGeo = new THREE.InstancedBufferGeometry();
   rainGeo.index = quadGeo.index;
@@ -317,10 +349,10 @@ export function createAtmosphere(engine) {
   const offsets = new Float32Array(rainCount * 3);
   const speeds = new Float32Array(rainCount);
   for (let i = 0; i < rainCount; i++) {
-    offsets[i * 3] = (Math.random() - 0.5) * 44;
-    offsets[i * 3 + 1] = Math.random() * 26;
-    offsets[i * 3 + 2] = (Math.random() - 0.5) * 44;
-    speeds[i] = 17 + Math.random() * 9;
+    offsets[i * 3] = (Math.random() - 0.5) * 38;
+    offsets[i * 3 + 1] = Math.random() * 24;
+    offsets[i * 3 + 2] = (Math.random() - 0.5) * 38;
+    speeds[i] = 18 + Math.random() * 9;
   }
   rainGeo.setAttribute('aOffset', new THREE.InstancedBufferAttribute(offsets, 3));
   rainGeo.setAttribute('aSpeed', new THREE.InstancedBufferAttribute(speeds, 1));
@@ -345,7 +377,7 @@ export function createAtmosphere(engine) {
   rainMesh.renderOrder = 20;
   scene.add(rainMesh);
 
-  // Distant lightning bolt mesh (shown briefly on strikes)
+  // Distant lightning bolt mesh
   const boltGeo = new THREE.BufferGeometry();
   const boltPositions = new Float32Array(12 * 3);
   boltGeo.setAttribute('position', new THREE.BufferAttribute(boltPositions, 3));
@@ -355,7 +387,7 @@ export function createAtmosphere(engine) {
   boltLine.visible = false;
   scene.add(boltLine);
 
-  // Environment PMREM reflection for high/ultra reflective water
+  // Environment PMREM reflection for high/ultra reflective water (radius 45 < PMREM far 100)
   let pmremGen = null;
   let envRT = null;
   let envScene = null;
@@ -377,7 +409,7 @@ export function createAtmosphere(engine) {
       pmremGen = new THREE.PMREMGenerator(renderer);
       pmremGen.compileEquirectangularShader();
       envScene = new THREE.Scene();
-      envSkyMesh = new THREE.Mesh(new THREE.SphereGeometry(100, 16, 10), skyMat);
+      envSkyMesh = new THREE.Mesh(new THREE.SphereGeometry(45, 16, 10), skyMat);
       envScene.add(envSkyMesh);
     }
     const nextRT = pmremGen.fromScene(envScene, 0.02);
@@ -387,6 +419,11 @@ export function createAtmosphere(engine) {
     lastEnvSunY = uniforms.uSunDir.value.y;
     lastEnvRain = uniforms.uRainAmount.value;
   }
+
+  let lastTier = engine.quality.tier;
+  let lastShadows = Boolean(engine.quality.shadows);
+  let lastShadowMapSize = engine.quality.shadowMapSize || 0;
+  let lastWaterMode = engine.quality.water;
 
   function configureShadows() {
     const tier = engine.quality.tier;
@@ -412,18 +449,7 @@ export function createAtmosphere(engine) {
   }
   configureShadows();
 
-  // Time & weather state
-  let overrideDate = null;
-  let overrideTimestampMs = 0;
-  let overrideSetAtPerf = 0;
-
-  let targetRain = 0.0;
-  let targetCloud = 0.25;
-  let monsoonRemaining = 0;
-  let lightningTimer = 4.0;
-  let lightningFlash = 0;
-  let boltVisibleTimer = 0;
-
+  // Mid-July Telluride clock state (zero per-frame Date/Intl allocations, freezes cleanly when paused)
   const denverFmt = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/Denver',
     hour12: false,
@@ -432,9 +458,8 @@ export function createAtmosphere(engine) {
     second: '2-digit',
   });
 
-  function projectToMidJulyTelluride(d) {
-    // Keep explicit July dates untouched; otherwise project Telluride local clock onto July 15 (MDT = UTC-6)
-    if (d.getUTCFullYear() === 2026 && d.getUTCMonth() === 6) return d;
+  function projectToMidJulyTellurideMs(d) {
+    if (d.getUTCFullYear() === 2026 && d.getUTCMonth() === 6) return d.getTime();
     const parts = denverFmt.formatToParts(d);
     let hh = 12, mm = 0, ss = 0;
     for (const p of parts) {
@@ -442,85 +467,137 @@ export function createAtmosphere(engine) {
       else if (p.type === 'minute') mm = Number(p.value);
       else if (p.type === 'second') ss = Number(p.value);
     }
-    return new Date(Date.UTC(2026, 6, 15, hh + 6, mm, ss, d.getMilliseconds()));
+    return Date.UTC(2026, 6, 15, hh + 6, mm, ss, d.getMilliseconds());
   }
 
+  let simEpochMs = projectToMidJulyTellurideMs(new Date());
+  let astroTimer = 999; // trigger immediate calculation on frame 0
+  let astroDirty = true;
+  const _astroScratch = { sunDir: { x: 0, y: 1, z: 0 }, moonDir: { x: 0, y: 1, z: 0 }, moonPhase: 0.75 };
+
+  let latestRunnerHeading = null;
+
+  let targetRain = 0.0;
+  let targetCloud = 0.25;
+  let monsoonRemaining = 0;
+  let lightningTimer = 4.0;
+  let lightningFlash = 0;
+  let boltVisibleTimer = 0;
+
   function setTimeOfDay(date) {
+    let nextMs = null;
     if (date instanceof Date && !Number.isNaN(date.getTime())) {
-      overrideDate = projectToMidJulyTelluride(date);
-      overrideTimestampMs = overrideDate.getTime();
-      overrideSetAtPerf = performance.now();
+      nextMs = projectToMidJulyTellurideMs(date);
     } else if (typeof date === 'number' && Number.isFinite(date)) {
       const hNorm = ((date % 24) + 24) % 24;
       const wholeH = Math.floor(hNorm);
       const mins = Math.floor((hNorm - wholeH) * 60);
       const secs = Math.round(((hNorm - wholeH) * 60 - mins) * 60);
-      overrideDate = new Date(Date.UTC(2026, 6, 15, wholeH + 6, mins, secs, 0));
-      overrideTimestampMs = overrideDate.getTime();
-      overrideSetAtPerf = performance.now();
-    } else {
-      overrideDate = null;
+      nextMs = Date.UTC(2026, 6, 15, wholeH + 6, mins, secs, 0);
+    } else if (date == null) {
+      nextMs = projectToMidJulyTellurideMs(new Date());
+    }
+    if (nextMs !== null) {
+      // Only force immediate celestial recalc when jumped by > 5 seconds
+      if (Math.abs(nextMs - simEpochMs) > 5000) {
+        astroDirty = true;
+      }
+      simEpochMs = nextMs;
     }
   }
 
   function setWeather({ monsoon, rain, cloudCover } = {}) {
     if (typeof monsoon === 'number') {
       targetRain = Math.max(0, Math.min(1, monsoon));
-      targetCloud = Math.max(targetCloud, 0.25 + targetRain * 0.72);
+      if (targetRain <= 0.01) monsoonRemaining = 0;
+      targetCloud = targetRain > 0.01 ? Math.max(targetCloud, 0.25 + targetRain * 0.72) : 0.25;
     }
-    if (typeof rain === 'number') targetRain = Math.max(0, Math.min(1, rain));
+    if (typeof rain === 'number') {
+      targetRain = Math.max(0, Math.min(1, rain));
+      if (targetRain <= 0.01) monsoonRemaining = 0;
+    }
     if (typeof cloudCover === 'number') targetCloud = Math.max(0, Math.min(1, cloudCover));
   }
 
   function triggerMonsoon(durationSec = 180, intensity = 0.9) {
     monsoonRemaining = Math.max(0, durationSec);
-    setWeather({ monsoon: intensity, cloudCover: 0.92 });
+    setWeather({ monsoon: intensity, cloudCover: 0.95 });
     events.emit('world:monsoon', { active: true, intensity, durationSec });
   }
 
-  const unsubWeather = events.on('world:weather', (payload) => setWeather(payload));
-  const unsubGameWeather = events.on('game:weather', (payload) => setWeather(payload));
   const unsubStorm = events.on('world:storm', (payload = {}) => {
     const active = payload.active !== false;
-    const intensity = active ? Math.max(0.2, Math.min(1, payload.intensity ?? 0.85)) : 0;
+    const intensity = active ? Math.max(0.25, Math.min(1, payload.intensity ?? 0.88)) : 0;
     setWeather({
       monsoon: intensity,
-      cloudCover: active ? Math.max(0.75, 0.35 + intensity * 0.65) : 0.25,
+      cloudCover: active ? Math.max(0.82, 0.40 + intensity * 0.60) : 0.25,
     });
     if (active && payload.lightning && lightningTimer > 1.5) {
       lightningTimer = 0.25;
     }
   });
-  const unsubMonsoon = events.on('world:triggerMonsoon', (p = {}) =>
-    triggerMonsoon(p.durationSec ?? 180, p.intensity ?? 0.9)
-  );
-  const unsubQuality = events.on('quality:changed', () => {
+
+  const unsubHud = events.on('hud', (hud) => {
+    if (hud && typeof hud.heading === 'number' && Number.isFinite(hud.heading)) {
+      latestRunnerHeading = hud.heading;
+    }
+  });
+
+  // Guarded quality listener: ignore pure renderScale adaptive ticks!
+  const unsubQuality = events.on('quality:changed', (q) => {
+    const nextTier = q?.tier ?? engine.quality.tier;
+    const nextShadows = Boolean(engine.quality.shadows);
+    const nextShadowSize = engine.quality.shadowMapSize || 0;
+    const nextWater = engine.quality.water;
+
+    if (nextTier !== lastTier || nextShadows !== lastShadows || nextShadowSize !== lastShadowMapSize) {
+      lastTier = nextTier;
+      lastShadows = nextShadows;
+      lastShadowMapSize = nextShadowSize;
+      configureShadows();
+    }
+    if (nextWater !== lastWaterMode) {
+      lastWaterMode = nextWater;
+      updateEnvMapIfNeeded(true);
+    }
+  });
+
+  const unsubContextRestored = events.on('engine:contextrestored', () => {
+    if (pmremGen) {
+      pmremGen.dispose();
+      pmremGen = null;
+    }
+    if (envRT) {
+      envRT.dispose();
+      envRT = null;
+    }
+    lastEnvSunY = -99;
     configureShadows();
     updateEnvMapIfNeeded(true);
   });
 
   // Scratch vectors/colors (zero per-frame allocations)
   const _daySun = new THREE.Color(0xfff3de);
-  const _goldSun = new THREE.Color(0xff8e47);
+  const _goldSun = new THREE.Color(0xff8430);
   const _moonCol = new THREE.Color(0x9cb8e8);
   const _daySky = new THREE.Color(0x74a3dc);
-  const _twilightSky = new THREE.Color(0x6c6596);
+  const _twilightSky = new THREE.Color(0x88688c);
   const _nightSky = new THREE.Color(0x2e436e);
-  const _stormSky = new THREE.Color(0x454f5e);
+  const _stormSky = new THREE.Color(0x283242);
   const _dayHorizon = new THREE.Color(0xb8d0e8);
-  const _goldHorizon = new THREE.Color(0xdf9570);
+  const _goldHorizon = new THREE.Color(0xe88a56);
   const _nightHorizon = new THREE.Color(0x26395c);
-  const _stormHorizon = new THREE.Color(0x525d6d);
+  const _stormHorizon = new THREE.Color(0x323d4e);
   const _dayFog = new THREE.Color(0xa6c1de);
-  const _stormFog = new THREE.Color(0x596472);
+  const _stormFog = new THREE.Color(0x384455);
   const _groundDay = new THREE.Color(0x444b39);
   const _groundNight = new THREE.Color(0x222c3f);
   const _lightDir = new THREE.Vector3();
-  const _camFwd = new THREE.Vector3();
+  const _headDir = new THREE.Vector3();
 
   function spawnLightningBolt(anchorPos) {
     const angle = Math.random() * Math.PI * 2;
-    const dist = 1600 + Math.random() * 2800;
+    const dist = 1400 + Math.random() * 2600;
     const bx = anchorPos.x + Math.cos(angle) * dist;
     const bz = anchorPos.z + Math.sin(angle) * dist;
     const topY = anchorPos.y + 1800 + Math.random() * 600;
@@ -538,7 +615,7 @@ export function createAtmosphere(engine) {
       cz += (Math.random() - 0.5) * 140;
     }
     boltGeo.attributes.position.needsUpdate = true;
-    boltVisibleTimer = 0.14;
+    boltVisibleTimer = 0.16;
     boltLine.visible = true;
     lightningFlash = 1.0;
 
@@ -546,18 +623,23 @@ export function createAtmosphere(engine) {
   }
 
   function update(dt, playerPos) {
-    uniforms.uTime.value += dt;
+    const isPaused = engine.getAppState?.() === 'paused';
+    const simDt = isPaused ? 0 : dt;
+    uniforms.uTime.value += simDt;
 
-    // Monsoon countdown & gentle transition
-    if (monsoonRemaining > 0) {
-      monsoonRemaining -= dt;
-      if (monsoonRemaining <= 0) {
-        targetRain = 0;
-        targetCloud = 0.28;
-        events.emit('world:monsoon', { active: false });
+    if (!isPaused) {
+      simEpochMs += simDt * 1000;
+      if (monsoonRemaining > 0) {
+        monsoonRemaining -= simDt;
+        if (monsoonRemaining <= 0) {
+          targetRain = 0;
+          targetCloud = 0.28;
+          events.emit('world:monsoon', { active: false });
+        }
       }
     }
-    const weatherLerp = Math.min(1, dt * 0.45);
+
+    const weatherLerp = Math.min(1, dt * 0.55);
     uniforms.uRainAmount.value = THREE.MathUtils.lerp(uniforms.uRainAmount.value, targetRain, weatherLerp);
     uniforms.uCloudCover.value = THREE.MathUtils.lerp(uniforms.uCloudCover.value, targetCloud, weatherLerp);
 
@@ -567,11 +649,10 @@ export function createAtmosphere(engine) {
       rainUniforms.uCamPos.value.copy(engine.camera.position);
     }
 
-    // Lightning in heavy monsoon
-    if (rainAmt > 0.35) {
-      lightningTimer -= dt;
+    if (rainAmt > 0.35 && !isPaused) {
+      lightningTimer -= simDt;
       if (lightningTimer <= 0) {
-        lightningTimer = 4 + Math.random() * 11;
+        lightningTimer = 4 + Math.random() * 10;
         spawnLightningBolt(playerPos || engine.camera.position);
       }
     }
@@ -584,23 +665,24 @@ export function createAtmosphere(engine) {
     }
     uniforms.uLightningFlash.value = lightningFlash;
 
-    // Real astronomical Sun + Moon for mid-July Telluride
-    const now = overrideDate
-      ? new Date(overrideTimestampMs + (performance.now() - overrideSetAtPerf))
-      : projectToMidJulyTelluride(new Date());
-    const astro = getCelestialPositions(now);
-
-    uniforms.uSunDir.value.set(astro.sunDir.x, astro.sunDir.y, astro.sunDir.z).normalize();
-    uniforms.uMoonDir.value.set(astro.moonDir.x, astro.moonDir.y, astro.moonDir.z).normalize();
-    uniforms.uMoonPhase.value = astro.moonPhase;
+    // 1 Hz throttled zero-GC astronomical Sun + Moon update
+    astroTimer += simDt;
+    if (astroDirty || astroTimer >= 1.0) {
+      astroTimer = 0;
+      astroDirty = false;
+      getCelestialPositions(simEpochMs, undefined, undefined, _astroScratch);
+      uniforms.uSunDir.value.set(_astroScratch.sunDir.x, _astroScratch.sunDir.y, _astroScratch.sunDir.z).normalize();
+      uniforms.uMoonDir.value.set(_astroScratch.moonDir.x, _astroScratch.moonDir.y, _astroScratch.moonDir.z).normalize();
+      uniforms.uMoonPhase.value = _astroScratch.moonPhase;
+    }
 
     const sunY = uniforms.uSunDir.value.y;
     const day = THREE.MathUtils.smoothstep(sunY, -0.06, 0.24);
-    const gold = THREE.MathUtils.smoothstep(sunY, -0.08, 0.06) * (1 - THREE.MathUtils.smoothstep(sunY, 0.05, 0.34));
+    // Warm golden hour starts around ~6:15 PM (sunY ~ 0.45) and peaks 6:45-8:15 PM
+    const gold = THREE.MathUtils.smoothstep(sunY, -0.06, 0.06) * (1 - THREE.MathUtils.smoothstep(sunY, 0.14, 0.46));
     const night = 1 - THREE.MathUtils.smoothstep(sunY, -0.10, 0.04);
 
-    // Sun & ambient palette
-    uniforms.uSunColor.value.copy(_daySun).lerp(_goldSun, gold);
+    uniforms.uSunColor.value.copy(_daySun).lerp(_goldSun, gold * 0.92);
     if (sunY < -0.02) {
       uniforms.uSunColor.value.lerp(_moonCol, night);
     }
@@ -608,26 +690,25 @@ export function createAtmosphere(engine) {
     uniforms.uSkyAmbientColor.value
       .copy(_nightSky)
       .lerp(_daySky, day)
-      .lerp(_twilightSky, gold * 0.65)
-      .lerp(_stormSky, rainAmt * 0.72);
+      .lerp(_twilightSky, gold * 0.62)
+      .lerp(_stormSky, rainAmt * 0.85);
 
     uniforms.uHorizonColor.value
       .copy(_nightHorizon)
       .lerp(_dayHorizon, day)
-      .lerp(_goldHorizon, gold * 0.75)
-      .lerp(_stormHorizon, rainAmt * 0.8);
+      .lerp(_goldHorizon, gold * 0.85)
+      .lerp(_stormHorizon, rainAmt * 0.88);
 
     uniforms.uFogColor.value
       .copy(_nightHorizon)
       .lerp(_dayFog, day)
-      .lerp(_goldHorizon, gold * 0.45)
-      .lerp(_stormFog, rainAmt * 0.82);
+      .lerp(_goldHorizon, gold * 0.55)
+      .lerp(_stormFog, rainAmt * 0.88);
 
     uniforms.uGroundAmbientColor.value.copy(_groundNight).lerp(_groundDay, day);
 
-    // Fog density scales gently with tier draw distance + monsoon mist
     const tierFogMult = engine.quality.tier === 'low' ? 1.55 : engine.quality.tier === 'medium' ? 1.15 : 1.0;
-    uniforms.uFogDensity.value = (0.000018 + rainAmt * 0.00018) * tierFogMult;
+    uniforms.uFogDensity.value = (0.000018 + rainAmt * 0.00024) * tierFogMult;
     uniforms.uAerialScatter.value = engine.quality.tier === 'low' ? 0.65 : 0.90;
 
     sceneFog.color.copy(uniforms.uFogColor.value);
@@ -636,52 +717,76 @@ export function createAtmosphere(engine) {
     // Update Three.js scene lights
     hemiLight.color.copy(uniforms.uSkyAmbientColor.value);
     hemiLight.groundColor.copy(uniforms.uGroundAmbientColor.value);
-    hemiLight.intensity = (0.62 + 0.40 * day + lightningFlash * 1.4) * (1 - rainAmt * 0.25);
+    hemiLight.intensity = (0.62 + 0.40 * day + lightningFlash * 1.4) * (1 - rainAmt * 0.35);
 
     const anchor = playerPos || engine.camera.position;
     if (sunY > -0.03) {
       _lightDir.copy(uniforms.uSunDir.value);
       sunLight.color.copy(uniforms.uSunColor.value);
-      sunLight.intensity = (0.28 + 2.4 * THREE.MathUtils.smoothstep(sunY, -0.03, 0.20)) * (1 - rainAmt * 0.72) + lightningFlash * 2.5;
+      sunLight.intensity = (0.28 + 2.4 * THREE.MathUtils.smoothstep(sunY, -0.03, 0.20)) * (1 - rainAmt * 0.78) + lightningFlash * 2.8;
     } else {
       _lightDir.copy(uniforms.uMoonDir.value);
       if (_lightDir.y < 0.28) _lightDir.y = 0.28;
       _lightDir.normalize();
       sunLight.color.copy(_moonCol);
-      sunLight.intensity = (0.48 + 0.32 * astro.moonPhase) * (1 - rainAmt * 0.55) + lightningFlash * 2.5;
+      sunLight.intensity = (0.48 + 0.32 * uniforms.uMoonPhase.value) * (1 - rainAmt * 0.55) + lightningFlash * 2.8;
     }
 
-    // Runner headlamp (auto at dusk/night, SpotLight on medium+, cheap PointLight on low tier)
+    // Runner headlamp aimed along runner heading (never backward into runner's face in orbit mode!)
     const headlampAmt = 1.0 - THREE.MathUtils.smoothstep(sunY, -0.04, 0.06);
     if (headlampAmt > 0.02) {
-      engine.camera.getWorldDirection(_camFwd);
-      _camFwd.y = 0;
-      if (_camFwd.lengthSq() < 0.001) _camFwd.set(0, 0, -1);
-      _camFwd.normalize();
+      const hdg = typeof playerPos?.heading === 'number' ? playerPos.heading : latestRunnerHeading;
+      if (typeof hdg === 'number' && Number.isFinite(hdg)) {
+        _headDir.set(-Math.sin(hdg), 0, -Math.cos(hdg));
+      } else {
+        engine.camera.getWorldDirection(_headDir);
+        _headDir.y = 0;
+        if (_headDir.lengthSq() < 0.001) _headDir.set(0, 0, -1);
+        _headDir.normalize();
+      }
 
       if (engine.quality.tier === 'low') {
         headlampSpot.visible = false;
         headlampCheap.visible = true;
-        headlampCheap.intensity = 2.6 * headlampAmt;
+        headlampCheap.intensity = 4.2 * headlampAmt;
         headlampCheap.position.set(
-          anchor.x + _camFwd.x * 3.5,
+          anchor.x + _headDir.x * 4.0,
           anchor.y + 1.8,
-          anchor.z + _camFwd.z * 3.5
+          anchor.z + _headDir.z * 4.0
         );
       } else {
         headlampCheap.visible = false;
         headlampSpot.visible = true;
-        headlampSpot.intensity = 5.5 * headlampAmt;
+        headlampSpot.intensity = 12.0 * headlampAmt;
         headlampSpot.position.set(anchor.x, anchor.y + 1.65, anchor.z);
         headlampSpot.target.position.set(
-          anchor.x + _camFwd.x * 16,
+          anchor.x + _headDir.x * 16,
           anchor.y - 1.2,
-          anchor.z + _camFwd.z * 16
+          anchor.z + _headDir.z * 16
         );
+      }
+
+      if (terrain?.getHeight) {
+        headlampPoolMesh.visible = true;
+        headlampPoolMat.opacity = headlampAmt;
+        const rx = -_headDir.z;
+        const rz = _headDir.x;
+        const posArr = headlampPoolGeo.attributes.position.array;
+        for (let i = 0; i < poolCount; i++) {
+          const lx = poolLocalXZ[i * 2];
+          const fwd = poolLocalXZ[i * 2 + 1];
+          const wx = anchor.x + rx * lx + _headDir.x * fwd;
+          const wz = anchor.z + rz * lx + _headDir.z * fwd;
+          posArr[i * 3] = wx;
+          posArr[i * 3 + 1] = terrain.getHeight(wx, wz) + 0.14;
+          posArr[i * 3 + 2] = wz;
+        }
+        headlampPoolGeo.attributes.position.needsUpdate = true;
       }
     } else {
       headlampSpot.visible = false;
       headlampCheap.visible = false;
+      headlampPoolMesh.visible = false;
     }
 
     // Snap directional shadow target to texel grid to eliminate shadow edge shimmer
@@ -689,7 +794,7 @@ export function createAtmosphere(engine) {
     let targetY = anchor.y;
     let targetZ = anchor.z;
     if (sunLight.castShadow && sunLight.shadow.mapSize.width > 0) {
-      const frustumWidth = (sunLight.shadow.camera.right - sunLight.shadow.camera.left);
+      const frustumWidth = sunLight.shadow.camera.right - sunLight.shadow.camera.left;
       const texelSize = frustumWidth / sunLight.shadow.mapSize.width;
       targetX = Math.round(targetX / texelSize) * texelSize;
       targetZ = Math.round(targetZ / texelSize) * texelSize;
@@ -701,18 +806,16 @@ export function createAtmosphere(engine) {
       targetZ + _lightDir.z * 220
     );
 
-    // Keep sky dome centered on camera
     skyMesh.position.copy(engine.camera.position);
 
     updateEnvMapIfNeeded(false);
   }
 
   function dispose() {
-    unsubWeather();
-    unsubGameWeather();
     unsubStorm();
-    unsubMonsoon();
+    unsubHud();
     unsubQuality();
+    unsubContextRestored();
     scene.remove(skyMesh);
     scene.remove(hemiLight);
     scene.remove(sunLight);
@@ -720,10 +823,13 @@ export function createAtmosphere(engine) {
     scene.remove(headlampSpot);
     scene.remove(headlampSpot.target);
     scene.remove(headlampCheap);
+    scene.remove(headlampPoolMesh);
     scene.remove(rainMesh);
     scene.remove(boltLine);
     skyGeo.dispose();
     skyMat.dispose();
+    headlampPoolGeo.dispose();
+    headlampPoolMat.dispose();
     rainGeo.dispose();
     rainMat.dispose();
     boltGeo.dispose();

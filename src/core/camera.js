@@ -2,7 +2,8 @@ import * as THREE from 'three';
 
 /**
  * Chase / orbit / first-person / photo camera rig with smooth damping,
- * terrain clearance (with lookahead), and scripted flythrough support.
+ * terrain clearance (with lookahead), scenic Telluride Box Canyon title overlook,
+ * and scripted flythrough support.
  */
 export function createCameraRig({ camera, events }) {
   const MODES = ['chase', 'orbit', 'first-person', 'photo'];
@@ -12,27 +13,37 @@ export function createCameraRig({ camera, events }) {
   let distance = 7.5;
   let invertY = false;
 
-  const targetPos = new THREE.Vector3(0, 2670, 0);
-  const currentPos = new THREE.Vector3(0, 2673, 8);
-  const currentLookAt = new THREE.Vector3(0, 2671, 0);
+  // Default scenic title overlook: west end of Telluride Valley looking east
+  // into the Box Canyon toward Ajax Peak, Ingram Falls, and Bridal Veil Falls.
+  const TITLE_BASE_POS = { x: -1250, y: 3040, z: -140 };
+  const TITLE_LOOK_AT = { x: 4800, y: 3240, z: 1050 };
+
+  const targetPos = new THREE.Vector3(0, 2680, 0);
+  const currentPos = new THREE.Vector3(TITLE_BASE_POS.x, TITLE_BASE_POS.y, TITLE_BASE_POS.z);
+  const currentLookAt = new THREE.Vector3(TITLE_LOOK_AT.x, TITLE_LOOK_AT.y, TITLE_LOOK_AT.z);
   const desiredPos = new THREE.Vector3();
   const desiredLook = new THREE.Vector3();
 
   let terrainRef = null;
-  let flythrough = null; // { waypoints: [{x,y,z,lookX,lookY,lookZ,duration}], elapsed, active }
+  let flythrough = null; // { waypoints, index, elapsed, active }
+  let updatedThisFrame = false;
 
-  events.on('input:camera-toggle', () => {
+  camera.position.copy(currentPos);
+  camera.lookAt(currentLookAt);
+  camera.updateMatrixWorld();
+
+  const unsubToggle = events.on('input:camera-toggle', () => {
     const cycle = ['chase', 'orbit', 'first-person'];
     const idx = cycle.indexOf(mode);
-    mode = cycle[(idx + 1) % cycle.length];
-    events.emit('camera:mode', { mode });
+    const next = cycle[(idx + 1) % cycle.length];
+    setMode(next);
   });
 
-  events.on('ui:cameraMode', (payload) => {
+  const unsubMode = events.on('ui:cameraMode', (payload) => {
     if (payload?.mode) setMode(payload.mode);
   });
 
-  events.on('ui:settings', (s) => {
+  const unsubSettings = events.on('ui:settings', (s) => {
     if (typeof s?.invertY === 'boolean') invertY = s.invertY;
   });
 
@@ -41,10 +52,13 @@ export function createCameraRig({ camera, events }) {
   }
 
   function setMode(nextMode) {
-    if (MODES.includes(nextMode)) {
-      mode = nextMode;
-      events.emit('camera:mode', { mode });
-    }
+    if (!MODES.includes(nextMode) || mode === nextMode) return;
+    mode = nextMode;
+    events.emit('camera:mode', { mode });
+  }
+
+  function beginFrame() {
+    updatedThisFrame = false;
   }
 
   function clampAboveTerrain(pos, clearance = 1.25) {
@@ -67,6 +81,7 @@ export function createCameraRig({ camera, events }) {
     currentLookAt.set(pos.x, pos.y + 1.5, pos.z);
     camera.position.copy(currentPos);
     camera.lookAt(currentLookAt);
+    camera.updateMatrixWorld();
   }
 
   function setFlythrough(waypoints) {
@@ -98,13 +113,12 @@ export function createCameraRig({ camera, events }) {
       currentLookAt.set(w.lookX, w.lookY, w.lookZ);
       camera.position.copy(currentPos);
       camera.lookAt(currentLookAt);
+      camera.updateMatrixWorld();
       return;
     }
-    const cur = wps[flythrough.index];
-    const next = wps[(flythrough.index + 1) % wps.length];
     flythrough.elapsed += dt;
-    while (flythrough.elapsed >= cur.duration) {
-      flythrough.elapsed -= cur.duration;
+    while (flythrough.elapsed >= wps[flythrough.index].duration) {
+      flythrough.elapsed -= wps[flythrough.index].duration;
       flythrough.index = (flythrough.index + 1) % wps.length;
     }
     const a = wps[flythrough.index];
@@ -124,9 +138,33 @@ export function createCameraRig({ camera, events }) {
     );
     camera.position.copy(currentPos);
     camera.lookAt(currentLookAt);
+    camera.updateMatrixWorld();
+  }
+
+  function updateTitleScenic(dt, elapsedSec = 0) {
+    updatedThisFrame = true;
+    if (flythrough?.active) {
+      updateFlythrough(Math.min(0.1, dt));
+      return;
+    }
+    const phase = elapsedSec * 0.08;
+    const x = TITLE_BASE_POS.x + Math.sin(phase) * 140;
+    const z = TITLE_BASE_POS.z + Math.cos(phase * 0.7) * 180;
+    const groundY = terrainRef ? terrainRef.getHeight(x, z) : 2680;
+    const y = Math.max(TITLE_BASE_POS.y, (Number.isFinite(groundY) ? groundY : 2680) + 180) + Math.sin(phase * 0.5) * 28;
+    currentPos.set(x, y, z);
+    currentLookAt.set(
+      TITLE_LOOK_AT.x,
+      TITLE_LOOK_AT.y + Math.sin(phase * 0.6) * 40,
+      TITLE_LOOK_AT.z + Math.sin(phase * 0.4) * 160
+    );
+    camera.position.copy(currentPos);
+    camera.lookAt(currentLookAt);
+    camera.updateMatrixWorld();
   }
 
   function update(dt, playerPose, input) {
+    updatedThisFrame = true;
     const clampedDt = Math.min(0.1, dt);
 
     if (flythrough?.active) {
@@ -198,15 +236,27 @@ export function createCameraRig({ camera, events }) {
 
     camera.position.copy(currentPos);
     camera.lookAt(currentLookAt);
+    camera.updateMatrixWorld();
+  }
+
+  function dispose() {
+    unsubToggle();
+    unsubMode();
+    unsubSettings();
   }
 
   return {
+    beginFrame,
+    hasUpdatedThisFrame: () => updatedThisFrame,
+    isFlythrough: () => Boolean(flythrough?.active),
     update,
+    updateTitleScenic,
     snapTo,
     setMode,
     setTerrain,
     setFlythrough,
     getMode: () => mode,
     getYaw: () => yaw,
+    dispose,
   };
 }

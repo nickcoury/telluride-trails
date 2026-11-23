@@ -14,8 +14,9 @@ export const TELLURIDE_LON = -107.8123;
  * @param {Date} date
  * @returns {number}
  */
-function toDaysJ2000(date) {
-  return date.getTime() / 86400000 - 10957.5;
+function toDaysJ2000(dateOrMs) {
+  const ms = typeof dateOrMs === 'number' ? dateOrMs : dateOrMs.getTime();
+  return ms / 86400000 - 10957.5;
 }
 
 /**
@@ -41,8 +42,8 @@ function azAltToDir(azimuthRad, altitudeRad, out = { x: 0, y: 1, z: 0 }) {
  * @param {number} [latDeg=TELLURIDE_LAT]
  * @param {number} [lonDeg=TELLURIDE_LON]
  */
-export function getCelestialPositions(date, latDeg = TELLURIDE_LAT, lonDeg = TELLURIDE_LON) {
-  const d = toDaysJ2000(date);
+export function getCelestialPositions(dateOrMs, latDeg = TELLURIDE_LAT, lonDeg = TELLURIDE_LON, out = null) {
+  const d = toDaysJ2000(dateOrMs);
   const phi = latDeg * DEG2RAD;
   const lw = -lonDeg * DEG2RAD; // west longitude positive in SunCalc convention
 
@@ -104,14 +105,13 @@ export function getCelestialPositions(date, latDeg = TELLURIDE_LAT, lonDeg = TEL
   );
   const moonPhase = 0.5 * (1 - Math.cos(sunMoonAngle));
 
-  return {
-    sunDir: azAltToDir(sunAz, sunAlt),
-    sunAltDeg: sunAlt * RAD2DEG,
-    sunAzDeg: ((sunAz * RAD2DEG) % 360 + 360) % 360,
-    moonDir: azAltToDir(moonAz, moonAlt),
-    moonAltDeg: moonAlt * RAD2DEG,
-    moonPhase,
-    // Approximate local hour in Telluride (Mountain Time UTC-7 / MDT UTC-6)
-    localSolarHour: (((sunH * RAD2DEG) / 15 + 12) % 24 + 24) % 24,
-  };
+  const res = out || { sunDir: { x: 0, y: 1, z: 0 }, moonDir: { x: 0, y: 1, z: 0 } };
+  azAltToDir(sunAz, sunAlt, res.sunDir);
+  azAltToDir(moonAz, moonAlt, res.moonDir);
+  res.sunAltDeg = sunAlt * RAD2DEG;
+  res.sunAzDeg = ((sunAz * RAD2DEG) % 360 + 360) % 360;
+  res.moonAltDeg = moonAlt * RAD2DEG;
+  res.moonPhase = moonPhase;
+  res.localSolarHour = (((sunH * RAD2DEG) / 15 + 12) % 24 + 24) % 24;
+  return res;
 }
