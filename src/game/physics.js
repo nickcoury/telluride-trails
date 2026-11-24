@@ -11,12 +11,14 @@ import {
 import { physiologySpeedFactor } from './physiology.js';
 
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const statNorm = (s) => (clamp(Number.isFinite(s) ? s : 80, 50, 99) - 80) / 20;
+const ROUGH_SURFACES = new Set(['scree', 'talus', 'forest', 'creek', 'snow']);
 
 /**
  * Ultrarunner grade multiplier (modified Tobler hiking/running function).
  * grade = rise / run (e.g. +0.20 = 20% climb, -0.15 = 15% descent).
  */
-export function gradeSpeedMultiplier(grade, surface = 'trail') {
+export function gradeSpeedMultiplier(grade, surface = 'trail', stats = null) {
   // Smooth Tobler base: peak slightly downhill (~ -0.05)
   const tobler = Math.exp(-3.2 * Math.abs(grade + 0.045));
   // Normalize so grade=0 gives 1.0
@@ -33,7 +35,14 @@ export function gradeSpeedMultiplier(grade, surface = 'trail') {
     mul = Math.max(mul, clamp(0.62 - (grade - 0.15) * 1.15, 0.20, 0.65));
   }
 
-  return clamp(mul, 0.18, 1.16);
+  // Proportional runner stats: climbing (>5% grade) and technical steep descents (<-10% grade)
+  if (grade > 0.05) {
+    mul *= 1 + statNorm(stats?.climbing) * 0.22;
+  } else if (grade < -0.10) {
+    mul *= 1 + statNorm(stats?.technical) * 0.18;
+  }
+
+  return clamp(mul, 0.14, 1.32);
 }
 
 /**
@@ -146,10 +155,15 @@ export function baseEffortSpeed(effort) {
 /**
  * Determine gait label & final target speed.
  */
-export function computeTargetSpeed({ effort, grade, surface = 'trail', surfaceInfo, phys }) {
+export function computeTargetSpeed({ effort, grade, surface = 'trail', surfaceInfo, phys, stats = null }) {
   if (effort === 'idle') return { speedMs: 0, gait: 'idle', isPowerHike: false };
 
-  let base = baseEffortSpeed(effort);
+  const nSpeed = statNorm(stats?.speed);
+  const nClimb = statNorm(stats?.climbing);
+  const nTech = statNorm(stats?.technical);
+
+  const speedScale = effort === 'walk' ? (1 + nSpeed * 0.06) : (1 + nSpeed * 0.16);
+  let base = baseEffortSpeed(effort) * speedScale;
 
   // Steep uphill automatically shifts running into power-hike unless sprinting on gentle pitch
   let isPowerHike = false;
@@ -157,14 +171,18 @@ export function computeTargetSpeed({ effort, grade, surface = 'trail', surfaceIn
   if (grade >= POWER_HIKE_GRADE && (effort === 'run' || effort === 'hike' || effort === 'sprint')) {
     isPowerHike = true;
     gait = 'power-hike';
-    base = Math.min(base, effort === 'sprint' ? 2.45 : 2.05);
+    const phCap = (effort === 'sprint' ? 2.45 : 2.05) * (1 + nClimb * 0.22);
+    base = Math.min(base, phCap);
   }
 
-  const gMul = gradeSpeedMultiplier(grade, surface);
-  const sMul = surfaceInfo.speedMul ?? 1.0;
+  const gMul = gradeSpeedMultiplier(grade, surface, stats);
+  let sMul = surfaceInfo.speedMul ?? 1.0;
+  if (ROUGH_SURFACES.has(surface)) {
+    sMul *= 1 + nTech * 0.18;
+  }
   const pMul = physiologySpeedFactor(phys);
 
-  const speedMs = Math.max(0.45, base * gMul * sMul * pMul);
+  const speedMs = Math.max(0.42, base * gMul * sMul * pMul);
   return { speedMs, gait, isPowerHike };
 }
 

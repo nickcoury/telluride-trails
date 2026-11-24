@@ -63,9 +63,11 @@ function applyWorldDeltaToBone(bone, qWorldDelta) {
   bone.quaternion.copy(_qLocal).normalize();
 }
 
-function measureFootSole(footBone, ballBone, leafBone, out) {
+function measureFootSole(footBone, ballBone, leafBone, out, scaleY = 1) {
   footBone.getWorldPosition(_vAnkle);
-  let soleY = _vAnkle.y - SOLE_BELOW_FOOT;
+  const footClear = SOLE_BELOW_FOOT * scaleY;
+  const ballClear = SOLE_BELOW_BALL * scaleY;
+  let soleY = _vAnkle.y - footClear;
   out.heelX = _vAnkle.x;
   out.heelZ = _vAnkle.z;
   out.ballX = _vAnkle.x;
@@ -75,12 +77,12 @@ function measureFootSole(footBone, ballBone, leafBone, out) {
     ballBone.getWorldPosition(_vBall);
     out.ballX = _vBall.x;
     out.ballZ = _vBall.z;
-    const ballSole = _vBall.y - SOLE_BELOW_BALL;
+    const ballSole = _vBall.y - ballClear;
     if (ballSole < soleY) soleY = ballSole;
   }
   if (leafBone) {
     leafBone.getWorldPosition(_vLeaf);
-    const leafSole = _vLeaf.y - SOLE_BELOW_BALL;
+    const leafSole = _vLeaf.y - ballClear;
     if (leafSole < soleY) soleY = leafSole;
   }
   out.soleY = soleY;
@@ -205,44 +207,63 @@ function mergeColoredParts(parts) {
   return merged;
 }
 
-function buildPlaceholder() {
-  const geo = mergeColoredParts([
-    { geo: new THREE.CapsuleGeometry(0.18, 0.52, 6, 10), pos: [0, 1.18, 0], color: 0xdd5226 },
-    { geo: new THREE.CapsuleGeometry(0.14, 0.56, 6, 10), pos: [0, 0.56, 0], color: 0x222a35 },
+const FALLBACK_KIT = {
+  jerseyHex: 0xdd5226,
+  shortsHex: 0x1e2530,
+  accentHex: 0x38bdf8,
+  capHex: 0x1d4e6b,
+  brimHex: 0xd95428,
+  hairStyle: 'short',
+  hairHex: 0x3b2618,
+  buildScale: [1, 1, 1],
+};
+
+function buildPlaceholderGeo(kit = FALLBACK_KIT) {
+  return mergeColoredParts([
+    { geo: new THREE.CapsuleGeometry(0.18, 0.52, 6, 10), pos: [0, 1.18, 0], color: kit.jerseyHex ?? 0xdd5226 },
+    { geo: new THREE.CapsuleGeometry(0.14, 0.56, 6, 10), pos: [0, 0.56, 0], color: kit.shortsHex ?? 0x222a35 },
     { geo: new THREE.SphereGeometry(0.115, 10, 8), pos: [0, 1.66, 0], color: 0xd8a480 },
-    { geo: new THREE.SphereGeometry(0.122, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.52), pos: [0, 1.68, 0], color: 0x1d4e6b },
+    { geo: new THREE.SphereGeometry(0.122, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.52), pos: [0, 1.68, 0], color: kit.capHex ?? 0x1d4e6b },
   ]);
+}
+
+function buildPlaceholder(kit = FALLBACK_KIT) {
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78 });
-  const mesh = new THREE.Mesh(geo, mat);
+  const mesh = new THREE.Mesh(buildPlaceholderGeo(kit), mat);
   mesh.name = 'runner-placeholder';
   mesh.castShadow = true;
   return mesh;
 }
 
-function buildHydrationVest() {
+function buildHydrationVestGeo(kit = FALLBACK_KIT) {
+  const packBase = kit.shortsHex ?? 0x183446;
+  const trimColor = kit.accentHex ?? 0xe85a2b;
   const parts = [
     // Contoured rear hydration pack (local -Z is behind chest in UAL/UBC bone space)
-    { geo: new THREE.BoxGeometry(0.24, 0.34, 0.095), pos: [0, 0.01, -0.155], color: 0x183446 },
-    { geo: new THREE.BoxGeometry(0.20, 0.14, 0.055), pos: [0, 0.06, -0.205], color: 0xe85a2b },
+    { geo: new THREE.BoxGeometry(0.24, 0.34, 0.095), pos: [0, 0.01, -0.155], color: packBase },
+    { geo: new THREE.BoxGeometry(0.20, 0.14, 0.055), pos: [0, 0.06, -0.205], color: trimColor },
     { geo: new THREE.BoxGeometry(0.16, 0.022, 0.012), pos: [0, -0.07, -0.206], color: 0xdbeafe },
     // Dual chest sternum straps
-    { geo: new THREE.BoxGeometry(0.15, 0.014, 0.014), pos: [0, 0.05, 0.135], color: 0xe85a2b },
-    { geo: new THREE.BoxGeometry(0.15, 0.014, 0.014), pos: [0, -0.03, 0.135], color: 0xe85a2b },
+    { geo: new THREE.BoxGeometry(0.15, 0.014, 0.014), pos: [0, 0.05, 0.135], color: trimColor },
+    { geo: new THREE.BoxGeometry(0.15, 0.014, 0.014), pos: [0, -0.03, 0.135], color: trimColor },
   ];
 
   for (const side of [-1, 1]) {
     parts.push(
-      { geo: new THREE.BoxGeometry(0.035, 0.18, 0.20), pos: [side * 0.145, -0.03, -0.04], color: 0x183446 },
-      { geo: new THREE.BoxGeometry(0.052, 0.035, 0.24), pos: [side * 0.10, 0.175, -0.02], color: 0x183446 },
-      { geo: new THREE.BoxGeometry(0.056, 0.28, 0.03), pos: [side * 0.095, 0.03, 0.125], color: 0x183446 },
+      { geo: new THREE.BoxGeometry(0.035, 0.18, 0.20), pos: [side * 0.145, -0.03, -0.04], color: packBase },
+      { geo: new THREE.BoxGeometry(0.052, 0.035, 0.24), pos: [side * 0.10, 0.175, -0.02], color: packBase },
+      { geo: new THREE.BoxGeometry(0.056, 0.28, 0.03), pos: [side * 0.095, 0.03, 0.125], color: packBase },
       // Front 500ml soft flask + bite valve
       { geo: new THREE.CylinderGeometry(0.025, 0.020, 0.145, 10), pos: [side * 0.095, 0.02, 0.148], color: 0x38bdf8 },
       { geo: new THREE.CylinderGeometry(0.014, 0.018, 0.024, 8), pos: [side * 0.095, 0.102, 0.148], color: 0x111827 },
     );
   }
+  return mergeColoredParts(parts);
+}
 
+function buildHydrationVest(kit = FALLBACK_KIT) {
   const mesh = new THREE.Mesh(
-    mergeColoredParts(parts),
+    buildHydrationVestGeo(kit),
     new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.68, metalness: 0.05 })
   );
   mesh.name = 'gear-hydration-vest';
@@ -250,62 +271,94 @@ function buildHydrationVest() {
   return mesh;
 }
 
-function buildHeadGear() {
+function buildHeadCapGeo(kit = FALLBACK_KIT) {
+  const capColor = kit.capHex ?? 0x1d4e6b;
+  const brimColor = kit.brimHex ?? 0xd95428;
+  const meshBackColor = kit.shortsHex ?? 0x2a3441;
+  return mergeColoredParts([
+    // Trucker trail cap crown snugged cleanly onto skull brow
+    {
+      geo: new THREE.SphereGeometry(0.113, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.56),
+      pos: [0, 0.104, -0.008],
+      rot: [-0.08, 0, 0],
+      scale: [0.95, 1.0, 1.04],
+      color: capColor,
+    },
+    // Rear dark mesh panel accent
+    {
+      geo: new THREE.SphereGeometry(0.114, 12, 8, Math.PI * 0.72, Math.PI * 1.56, 0.12, Math.PI * 0.44),
+      pos: [0, 0.104, -0.008],
+      rot: [-0.08, 0, 0],
+      scale: [0.95, 1.0, 1.04],
+      color: meshBackColor,
+    },
+    // Curved trail cap brim pointing +Z (forward in bone local space)
+    {
+      geo: new THREE.CylinderGeometry(0.098, 0.102, 0.011, 14, 1, false, -Math.PI * 0.42, Math.PI * 0.84),
+      pos: [0, 0.118, 0.055],
+      rot: [0.07, 0, 0],
+      scale: [1.02, 1, 1.42],
+      color: brimColor,
+    },
+    // Wraparound trail sunglasses
+    {
+      geo: new THREE.BoxGeometry(0.142, 0.032, 0.036),
+      pos: [0, 0.084, 0.095],
+      color: 0x111827,
+    },
+    // Headlamp elastic strap + compact forehead housing
+    {
+      geo: new THREE.TorusGeometry(0.108, 0.008, 6, 18),
+      pos: [0, 0.132, -0.006],
+      rot: [Math.PI / 2 - 0.08, 0, 0],
+      scale: [0.96, 1.05, 1],
+      color: 0x1f2937,
+    },
+    {
+      geo: new THREE.BoxGeometry(0.044, 0.025, 0.022),
+      pos: [0, 0.138, 0.108],
+      color: 0x374151,
+    },
+  ]);
+}
+
+function buildPonytailMesh(hairHex = 0x4a3120) {
+  // Single merged sculpted ponytail exiting the back of the trucker cap (local -Z)
+  const geo = mergeColoredParts([
+    { geo: new THREE.TorusGeometry(0.024, 0.007, 6, 12), pos: [0, 0.092, -0.115], rot: [0.25, 0, 0], color: 0x1e293b },
+    { geo: new THREE.CapsuleGeometry(0.028, 0.075, 5, 8), pos: [0, 0.068, -0.145], rot: [0.68, 0, 0], color: 0xffffff },
+    { geo: new THREE.ConeGeometry(0.028, 0.11, 8), pos: [0, -0.010, -0.185], rot: [2.72, 0, 0], color: 0xffffff },
+  ]);
+  const mat = new THREE.MeshStandardMaterial({
+    color: hairHex,
+    vertexColors: true,
+    roughness: 0.82,
+    metalness: 0.02,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.name = 'gear-ponytail';
+  mesh.castShadow = true;
+  mesh.visible = false;
+  return mesh;
+}
+
+function buildHeadGear(kit = FALLBACK_KIT) {
   const gear = new THREE.Group();
   gear.name = 'gear-head';
 
   // Merge all static cap + shades + headlamp housing parts into 1 draw call
   const staticMesh = new THREE.Mesh(
-    mergeColoredParts([
-      // Trucker trail cap crown snugged cleanly onto skull brow
-      {
-        geo: new THREE.SphereGeometry(0.113, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.56),
-        pos: [0, 0.104, -0.008],
-        rot: [-0.08, 0, 0],
-        scale: [0.95, 1.0, 1.04],
-        color: 0x1d4e6b,
-      },
-      // Rear dark mesh panel accent
-      {
-        geo: new THREE.SphereGeometry(0.114, 12, 8, Math.PI * 0.72, Math.PI * 1.56, 0.12, Math.PI * 0.44),
-        pos: [0, 0.104, -0.008],
-        rot: [-0.08, 0, 0],
-        scale: [0.95, 1.0, 1.04],
-        color: 0x2a3441,
-      },
-      // Curved trail cap brim pointing +Z (forward in bone local space)
-      {
-        geo: new THREE.CylinderGeometry(0.098, 0.102, 0.011, 14, 1, false, -Math.PI * 0.42, Math.PI * 0.84),
-        pos: [0, 0.118, 0.055],
-        rot: [0.07, 0, 0],
-        scale: [1.02, 1, 1.42],
-        color: 0xd95428,
-      },
-      // Wraparound trail sunglasses
-      {
-        geo: new THREE.BoxGeometry(0.142, 0.032, 0.036),
-        pos: [0, 0.084, 0.095],
-        color: 0x111827,
-      },
-      // Headlamp elastic strap + compact forehead housing
-      {
-        geo: new THREE.TorusGeometry(0.108, 0.008, 6, 18),
-        pos: [0, 0.132, -0.006],
-        rot: [Math.PI / 2 - 0.08, 0, 0],
-        scale: [0.96, 1.05, 1],
-        color: 0x1f2937,
-      },
-      {
-        geo: new THREE.BoxGeometry(0.044, 0.025, 0.022),
-        pos: [0, 0.138, 0.108],
-        color: 0x374151,
-      },
-    ]),
+    buildHeadCapGeo(kit),
     new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.72, metalness: 0.08 })
   );
   staticMesh.name = 'gear-head-cap';
   staticMesh.castShadow = true;
   gear.add(staticMesh);
+
+  // Merged ponytail mesh toggled via kit.hairStyle === 'ponytail'
+  const ponytailMesh = buildPonytailMesh(kit.hairHex ?? 0x4a3120);
+  ponytailMesh.visible = kit.hairStyle === 'ponytail';
+  gear.add(ponytailMesh);
 
   // Separate tiny emissive lens mesh (no shadow casting)
   const lampLensMat = new THREE.MeshStandardMaterial({
@@ -322,7 +375,7 @@ function buildHeadGear() {
   lampLens.userData.noShadow = true;
   gear.add(lampLens);
 
-  return { gear, lampLensMat };
+  return { gear, staticMesh, ponytailMesh, lampLensMat };
 }
 
 function buildGpsWatch() {
@@ -382,6 +435,17 @@ export function createRunnerCharacter(assetsBase = './') {
   let bones = {};
   let lampLensMat = null;
   let gltfScene = null;
+  let vestMesh = null;
+  let headCapMesh = null;
+  let ponytailMesh = null;
+  let bodyMaterial = null;
+  let origBodyMap = null;
+  let origBodyPixels = null; // { width, height, data: Uint8ClampedArray }
+  let tintCanvas = null;
+  let tintCtx = null;
+  let tintedBodyTex = null;
+  let activeKit = { ...FALLBACK_KIT, buildScale: [...FALLBACK_KIT.buildScale] };
+  let currentScaleY = 1.0;
 
   // Smooth locomotion blend weights
   const weights = {
@@ -419,6 +483,140 @@ export function createRunnerCharacter(assetsBase = './') {
     });
   }
 
+  function replaceMeshGeometry(mesh, nextGeo) {
+    if (!mesh || !nextGeo) return;
+    const prev = mesh.geometry;
+    mesh.geometry = nextGeo;
+    if (prev && prev !== nextGeo) prev.dispose();
+  }
+
+  function initBodyTextureCache(mat) {
+    if (!mat?.map?.image || typeof document === 'undefined') return;
+    bodyMaterial = mat;
+    origBodyMap = mat.map;
+    const img = origBodyMap.image;
+    const w = img.naturalWidth || img.width || 512;
+    const h = img.naturalHeight || img.height || 512;
+    if (!w || !h) return;
+
+    tintCanvas = document.createElement('canvas');
+    tintCanvas.width = w;
+    tintCanvas.height = h;
+    tintCtx = tintCanvas.getContext('2d', { willReadFrequently: true });
+    if (!tintCtx) return;
+    tintCtx.drawImage(img, 0, 0, w, h);
+    const snap = tintCtx.getImageData(0, 0, w, h);
+    origBodyPixels = { width: w, height: h, data: new Uint8ClampedArray(snap.data) };
+
+    tintedBodyTex = new THREE.CanvasTexture(tintCanvas);
+    tintedBodyTex.flipY = origBodyMap.flipY;
+    tintedBodyTex.colorSpace = origBodyMap.colorSpace;
+    tintedBodyTex.wrapS = origBodyMap.wrapS;
+    tintedBodyTex.wrapT = origBodyMap.wrapT;
+    tintedBodyTex.anisotropy = origBodyMap.anisotropy;
+    bodyMaterial.map = tintedBodyTex;
+    bodyMaterial.needsUpdate = true;
+  }
+
+  function updateTintedBodyTexture(kit) {
+    if (!origBodyPixels || !tintCtx || !tintedBodyTex) return;
+    const { width, height, data: src } = origBodyPixels;
+    const imgData = tintCtx.createImageData(width, height);
+    const dst = imgData.data;
+
+    const jHex = kit.jerseyHex ?? FALLBACK_KIT.jerseyHex;
+    const jR = (jHex >> 16) & 255;
+    const jG = (jHex >> 8) & 255;
+    const jB = jHex & 255;
+
+    const sHex = kit.shortsHex ?? FALLBACK_KIT.shortsHex;
+    const sR = (sHex >> 16) & 255;
+    const sG = (sHex >> 8) & 255;
+    const sB = sHex & 255;
+
+    const aHex = kit.accentHex ?? FALLBACK_KIT.accentHex;
+    const aR = (aHex >> 16) & 255;
+    const aG = (aHex >> 8) & 255;
+    const aB = aHex & 255;
+
+    for (let i = 0; i < src.length; i += 4) {
+      const r = src[i];
+      const g = src[i + 1];
+      const b = src[i + 2];
+      const a = src[i + 3];
+
+      // Coral/terracotta jersey pixels (clearly distinct from peach skin where b > 105 & r/g ~ 1.33)
+      if (r > 68 && r > 1.35 * g && r > 1.5 * b && b < 95) {
+        const lum = clamp((0.299 * r + 0.587 * g + 0.114 * b) / 98, 0.35, 1.35);
+        dst[i] = clamp(Math.round(jR * lum), 0, 255);
+        dst[i + 1] = clamp(Math.round(jG * lum), 0, 255);
+        dst[i + 2] = clamp(Math.round(jB * lum), 0, 255);
+      } else if (b > 110 && b > r * 1.35 && b > g * 1.15) {
+        // Blue shoe upper accents -> blend toward runner accent color
+        const lum = clamp((0.299 * r + 0.587 * g + 0.114 * b) / 118, 0.45, 1.3);
+        dst[i] = clamp(Math.round(aR * lum), 0, 255);
+        dst[i + 1] = clamp(Math.round(aG * lum), 0, 255);
+        dst[i + 2] = clamp(Math.round(aB * lum), 0, 255);
+      } else if (r < 62 && g < 68 && b < 78 && b >= r - 2 && (r + g + b) > 40) {
+        // Cool dark charcoal shorts -> subtle re-tint toward kit shortsHex preserving folds
+        const lum = clamp((0.299 * r + 0.587 * g + 0.114 * b) / 34, 0.55, 1.45);
+        dst[i] = clamp(Math.round(sR * lum), 0, 255);
+        dst[i + 1] = clamp(Math.round(sG * lum), 0, 255);
+        dst[i + 2] = clamp(Math.round(sB * lum), 0, 255);
+      } else {
+        dst[i] = r;
+        dst[i + 1] = g;
+        dst[i + 2] = b;
+      }
+      dst[i + 3] = a;
+    }
+
+    tintCtx.putImageData(imgData, 0, 0);
+    tintedBodyTex.needsUpdate = true;
+  }
+
+  function applyAppearanceToMeshes() {
+    const kit = activeKit;
+    const sc = Array.isArray(kit.buildScale) && kit.buildScale.length === 3
+      ? kit.buildScale
+      : FALLBACK_KIT.buildScale;
+    const sx = clamp(Number(sc[0]) || 1, 0.85, 1.12);
+    const sy = clamp(Number(sc[1]) || 1, 0.88, 1.12);
+    const sz = clamp(Number(sc[2]) || 1, 0.85, 1.12);
+    currentScaleY = sy;
+
+    modelPivot.scale.set(sx, sy, sz);
+    placeholder.scale.set(sx, sy, sz);
+    replaceMeshGeometry(placeholder, buildPlaceholderGeo(kit));
+
+    if (vestMesh) {
+      replaceMeshGeometry(vestMesh, buildHydrationVestGeo(kit));
+    }
+    if (headCapMesh) {
+      replaceMeshGeometry(headCapMesh, buildHeadCapGeo(kit));
+    }
+    if (ponytailMesh) {
+      ponytailMesh.visible = kit.hairStyle === 'ponytail';
+      ponytailMesh.material.color.setHex(kit.hairHex ?? FALLBACK_KIT.hairHex);
+    }
+    if (loaded) {
+      updateTintedBodyTexture(kit);
+    }
+    applyShadowSetting();
+  }
+
+  function setAppearance(kit) {
+    if (!kit || typeof kit !== 'object' || disposed) return;
+    activeKit = {
+      ...FALLBACK_KIT,
+      ...kit,
+      buildScale: Array.isArray(kit.buildScale) && kit.buildScale.length === 3
+        ? [...kit.buildScale]
+        : [...FALLBACK_KIT.buildScale],
+    };
+    applyAppearanceToMeshes();
+  }
+
   function applyActionWeight(act, weight, timeScale = null) {
     if (!act) return;
     if (weight < 0.002) {
@@ -451,12 +649,16 @@ export function createRunnerCharacter(assetsBase = './') {
         gltfScene = gltf.scene;
 
         // Ensure SkinnedMesh never flickers/culls near camera & map key bones
+        let bodyMatCandidate = null;
         gltfScene.traverse((obj) => {
           if (obj.isSkinnedMesh || obj.isMesh) {
             obj.frustumCulled = false;
             obj.castShadow = Boolean(shadowsEnabledState);
             if (obj.material) {
               obj.material.envMapIntensity = 0.65;
+              if (obj.name === 'SuperHero_Male' || obj.material.name === 'MI_Superhero_Male') {
+                bodyMatCandidate = obj.material;
+              }
             }
           }
           if (obj.isBone) {
@@ -464,15 +666,22 @@ export function createRunnerCharacter(assetsBase = './') {
           }
         });
 
-        // Attach merged trail-running gear directly to skeleton bones (4 meshes total)
+        if (bodyMatCandidate) {
+          initBodyTextureCache(bodyMatCandidate);
+        }
+
+        // Attach merged trail-running gear directly to skeleton bones
+        vestMesh = buildHydrationVest(activeKit);
         if (bones.spine_03) {
-          bones.spine_03.add(buildHydrationVest());
+          bones.spine_03.add(vestMesh);
         } else if (bones.spine_02) {
-          bones.spine_02.add(buildHydrationVest());
+          bones.spine_02.add(vestMesh);
         }
 
         if (bones.Head) {
-          const hg = buildHeadGear();
+          const hg = buildHeadGear(activeKit);
+          headCapMesh = hg.staticMesh;
+          ponytailMesh = hg.ponytailMesh;
           lampLensMat = hg.lampLensMat;
           bones.Head.add(hg.gear);
         }
@@ -527,7 +736,7 @@ export function createRunnerCharacter(assetsBase = './') {
         loaded = true;
         placeholder.visible = false;
         modelPivot.visible = true;
-        applyShadowSetting();
+        applyAppearanceToMeshes();
       },
       undefined,
       (err) => {
@@ -794,8 +1003,8 @@ export function createRunnerCharacter(assetsBase = './') {
           modelPivot.quaternion.copy(_qSlope).multiply(_qBasePivot);
         }
         root.updateMatrixWorld(true);
-        measureFootSole(bones.foot_l, bones.ball_l, bones.ball_leaf_l, footMeasureL);
-        measureFootSole(bones.foot_r, bones.ball_r, bones.ball_leaf_r, footMeasureR);
+        measureFootSole(bones.foot_l, bones.ball_l, bones.ball_leaf_l, footMeasureL, currentScaleY);
+        measureFootSole(bones.foot_r, bones.ball_r, bones.ball_leaf_r, footMeasureR, currentScaleY);
         const gL = Math.max(
           getGroundY(footMeasureL.heelX, footMeasureL.heelZ),
           getGroundY(footMeasureL.ballX, footMeasureL.ballZ)
@@ -816,8 +1025,8 @@ export function createRunnerCharacter(assetsBase = './') {
       } else {
         // Step 1: Measure animated feet at neutral pivot (y=0) to extract natural swing lift
         root.updateMatrixWorld(true);
-        measureFootSole(bones.foot_l, bones.ball_l, bones.ball_leaf_l, footMeasureL);
-        measureFootSole(bones.foot_r, bones.ball_r, bones.ball_leaf_r, footMeasureR);
+        measureFootSole(bones.foot_l, bones.ball_l, bones.ball_leaf_l, footMeasureL, currentScaleY);
+        measureFootSole(bones.foot_r, bones.ball_r, bones.ball_leaf_r, footMeasureR, currentScaleY);
 
         const animLiftL = Math.max(0, footMeasureL.soleY - rootY);
         const animLiftR = Math.max(0, footMeasureR.soleY - rootY);
@@ -844,8 +1053,8 @@ export function createRunnerCharacter(assetsBase = './') {
 
         // Step 3: Solve per-leg 2-bone analytical IK to lock stance soles to gL/gR and lift swing feet over uphill terrain
         if (!isAirborne && weights.getup < 0.25) {
-          measureFootSole(bones.foot_l, bones.ball_l, bones.ball_leaf_l, footMeasureL);
-          measureFootSole(bones.foot_r, bones.ball_r, bones.ball_leaf_r, footMeasureR);
+          measureFootSole(bones.foot_l, bones.ball_l, bones.ball_leaf_l, footMeasureL, currentScaleY);
+          measureFootSole(bones.foot_r, bones.ball_r, bones.ball_leaf_r, footMeasureR, currentScaleY);
 
           const deltaL = clamp((gL + animLiftL) - footMeasureL.soleY, -0.36, 0.50);
           const deltaR = clamp((gR + animLiftR) - footMeasureR.soleY, -0.36, 0.50);
@@ -862,8 +1071,8 @@ export function createRunnerCharacter(assetsBase = './') {
         }
 
         // Step 4: Guaranteed zero-penetration safety floor clamp (covers extreme >70% kinks & airborne uphill landings)
-        measureFootSole(bones.foot_l, bones.ball_l, bones.ball_leaf_l, footMeasureL);
-        measureFootSole(bones.foot_r, bones.ball_r, bones.ball_leaf_r, footMeasureR);
+        measureFootSole(bones.foot_l, bones.ball_l, bones.ball_leaf_l, footMeasureL, currentScaleY);
+        measureFootSole(bones.foot_r, bones.ball_r, bones.ball_leaf_r, footMeasureR, currentScaleY);
         const maxPen = Math.max(0, gL - footMeasureL.soleY, gR - footMeasureR.soleY);
         if (maxPen > 0.001) {
           modelPivot.position.y += Math.min(0.45, maxPen);
@@ -871,16 +1080,16 @@ export function createRunnerCharacter(assetsBase = './') {
         }
       }
     } else {
-      modelPivot.position.y = 0.025;
+      modelPivot.position.y = 0.025 * currentScaleY;
       root.updateMatrixWorld(true);
     }
 
     // Track exact visual head-top height relative to root.position.y for UI screen-bbox occlusion guard
     if (bones.Head) {
       bones.Head.getWorldPosition(_vTmp);
-      currentVisualHeight = clamp((_vTmp.y + 0.24) - root.position.y, 0.55, 1.95);
+      currentVisualHeight = clamp((_vTmp.y + 0.24 * currentScaleY) - root.position.y, 0.55, 2.05);
     } else {
-      currentVisualHeight = isFallen ? 0.55 : isKissingRock ? 1.25 : 1.74;
+      currentVisualHeight = (isFallen ? 0.55 : isKissingRock ? 1.25 : 1.74) * currentScaleY;
     }
 
     return fpBounce;
@@ -907,6 +1116,7 @@ export function createRunnerCharacter(assetsBase = './') {
     ensureLoaded,
     isLoaded: () => loaded,
     getVisualHeight: () => currentVisualHeight,
+    setAppearance,
     updatePose,
     setShadowsEnabled,
     dispose() {
@@ -915,6 +1125,14 @@ export function createRunnerCharacter(assetsBase = './') {
         mixer.stopAllAction();
         if (gltfScene) mixer.uncacheRoot(gltfScene);
       }
+      if (origBodyMap && origBodyMap !== bodyMaterial?.map) {
+        origBodyMap.dispose();
+      }
+      origBodyMap = null;
+      tintedBodyTex = null;
+      origBodyPixels = null;
+      tintCanvas = null;
+      tintCtx = null;
       disposeScene(root);
     },
   };

@@ -13,6 +13,7 @@ import {
   TRAIL_CLIFF_GRADE,
 } from './constants.js';
 import {
+  applyRunnerStatsToPhysiology,
   createPhysiology,
   drinkFromFlask,
   eatItem,
@@ -21,6 +22,13 @@ import {
   refillFlasks,
   stepPhysiology,
 } from './physiology.js';
+import {
+  CUSTOM_ARCHETYPES,
+  normalizeRunnerSelection,
+  rollRandomCustomRunner,
+  RUNNER_KIT_SWATCHES,
+  TELLURIDE_RUNNERS,
+} from './roster.js';
 import {
   applyTrailCenterPull,
   computeTargetSpeed,
@@ -47,7 +55,9 @@ import {
   loadAchievements,
   loadPersonalBests,
   loadSavedRun,
+  loadSelectedRunner,
   saveAchievement,
+  saveSelectedRunner,
   writeSavedRun,
 } from './save.js';
 import { createWeatherSystem } from './weather.js';
@@ -68,7 +78,21 @@ export function createGame(engine, terrain, trailData, world) {
   const params = new URLSearchParams(window.location.search);
   const initialTs = Math.max(1, Number(params.get('ts')) || 1);
 
-  let phys = createPhysiology();
+  let activeRunner = normalizeRunnerSelection(loadSelectedRunner());
+  runner.setAppearance(activeRunner.kit);
+
+  function runnerHudMeta(r = activeRunner) {
+    return {
+      id: r.id,
+      name: r.name,
+      hometown: r.hometown,
+      ovr: r.ovr,
+      isCustom: Boolean(r.isCustom),
+      statUncapped: Boolean(r.statUncapped),
+    };
+  }
+
+  let phys = createPhysiology(activeRunner.stats);
   let timeScale = initialTs;
   let paceMode = 'auto'; // 'auto' | 'walk' | 'hike' | 'run' | 'sprint'
   let autopilot = false;
@@ -154,6 +178,7 @@ export function createGame(engine, terrain, trailData, world) {
     timeScale,
     timeDilated: initialTs > 1,
     checkpointIdx: 0,
+    runner: runnerHudMeta(activeRunner),
   };
 
   function toast(text, tone = 'info', durationS = 4.0) {
@@ -232,8 +257,29 @@ export function createGame(engine, terrain, trailData, world) {
     return { isFp, bounce };
   }
 
+  function setRunner(selection, { persist = true, emit = true } = {}) {
+    activeRunner = normalizeRunnerSelection(selection);
+    if (persist) saveSelectedRunner(activeRunner);
+    runner.setAppearance(activeRunner.kit);
+    applyRunnerStatsToPhysiology(phys, activeRunner.stats);
+    state.runner = runnerHudMeta(activeRunner);
+    if (state.mode === 'race' && raceMgr.isActive()) {
+      raceMgr.setRunnerMeta(state.runner);
+    }
+    if (state.mode !== 'idle') {
+      syncRunnerVisuals(0, lastLocalClock.isNight, true);
+      emitHud(lastNearAid, prevNearStream);
+      if (persist) persistRun();
+    }
+    if (emit) {
+      engine.events.emit('game:runnerChanged', { runner: activeRunner });
+    }
+    return activeRunner;
+  }
+
   function resetRunMetrics(x, z, heading) {
-    phys = createPhysiology();
+    phys = createPhysiology(activeRunner.stats);
+    state.runner = runnerHudMeta(activeRunner);
     state.x = x;
     state.z = z;
     const groundY = sampleGroundHeight(x, z);
@@ -292,6 +338,8 @@ export function createGame(engine, terrain, trailData, world) {
       timeDilated: state.timeDilated,
       finished: state.finished,
       dnf: state.dnf,
+      runner: state.runner,
+      runnerProfile: activeRunner,
       phys,
       race: raceMgr.serialize(),
     });
@@ -372,6 +420,7 @@ export function createGame(engine, terrain, trailData, world) {
     weather.setStartTime(race.startTimeLocal || '06:00');
     lastLocalClock = weather.getDenverClock();
     raceMgr.initRace(race);
+    raceMgr.setRunnerMeta(state.runner);
     if (state.timeDilated) raceMgr.markTimeDilated();
 
     const isHardrock = (race.id || '').toLowerCase().includes('hardrock');
@@ -425,8 +474,17 @@ export function createGame(engine, terrain, trailData, world) {
       weather.advanceSimClock(elapsedRunS);
       weather.syncWorldClock(true);
     }
+    if (saved.runnerProfile || saved.runner) {
+      activeRunner = normalizeRunnerSelection(saved.runnerProfile || saved.runner);
+      runner.setAppearance(activeRunner.kit);
+      state.runner = runnerHudMeta(activeRunner);
+      engine.events.emit('game:runnerChanged', { runner: activeRunner });
+    }
     lastLocalClock = weather.getDenverClock();
-    phys = { ...createPhysiology(), ...(saved.phys || {}) };
+    phys = { ...createPhysiology(activeRunner.stats), ...(saved.phys || {}) };
+    if (!saved.phys?.energyMax) {
+      applyRunnerStatsToPhysiology(phys, activeRunner.stats);
+    }
 
     // Simulate resting physiology while away (real clock never stops!)
     if (awayS > 1) {
@@ -445,6 +503,7 @@ export function createGame(engine, terrain, trailData, world) {
           localHour: clock.hour,
           elapsedHours: elapsedRunS / 3600,
           isMoving: false,
+          stats: activeRunner.stats,
         });
         left -= ch;
       }
@@ -454,6 +513,7 @@ export function createGame(engine, terrain, trailData, world) {
       const race = trailData?.races?.find((r) => r.id === saved.raceId);
       if (race) {
         raceMgr.initRace(race, saved.race);
+        raceMgr.setRunnerMeta(state.runner);
         raceMgr.addWallGap(awayS);
         if (state.timeDilated) raceMgr.markTimeDilated();
         hardrockRock.visible = (race.id || '').toLowerCase().includes('hardrock');
@@ -693,13 +753,14 @@ export function createGame(engine, terrain, trailData, world) {
     const rawGrade = moveMag > 0.05 ? (hAhead - hHere) / aheadDist : 0;
     state.grade = clamp(rawGrade, -1.5, 1.5);
 
-    // Compute speed from grade, surface, altitude, and physiology
+    // Compute speed from grade, surface, altitude, physiology, and active runner stats
     const target = computeTargetSpeed({
       effort,
       grade: state.grade,
       surface: surfEval.surface,
       surfaceInfo: surfEval.surfaceInfo,
       phys,
+      stats: activeRunner.stats,
     });
 
     const desiredSpeed = target.speedMs * moveMag;
@@ -836,6 +897,7 @@ export function createGame(engine, terrain, trailData, world) {
       localHour: weatherState.clock.hour,
       elapsedHours: elapsedRunS / 3600,
       isMoving: state.speedMs > 0.2,
+      stats: activeRunner.stats,
     });
 
     for (const ev of physEvents) {
@@ -847,7 +909,9 @@ export function createGame(engine, terrain, trailData, world) {
     }
 
     // Technical terrain trip/fall when tired
-    const fallProb = isFallenNow ? 0 : fallProbabilityPerSec(phys, state.speedMs, surfEval.surfaceInfo.stumbleMul, state.grade);
+    const fallProb = isFallenNow
+      ? 0
+      : fallProbabilityPerSec(phys, state.speedMs, surfEval.surfaceInfo.stumbleMul, state.grade, activeRunner.stats);
     if (fallProb > 0 && Math.random() < fallProb * dtSim) {
       phys.falls++;
       phys.legs = Math.min(100, phys.legs + 0.5);
@@ -960,7 +1024,9 @@ export function createGame(engine, terrain, trailData, world) {
             mlDrunk: phys.mlDrunk,
             timeDilated: rev.timeDilated,
             timeDilation: rev.timeDilated,
-            asterisk: rev.timeDilated,
+            statUncapped: Boolean(rev.statUncapped || activeRunner.statUncapped),
+            asterisk: Boolean(rev.timeDilated || rev.statUncapped || activeRunner.statUncapped),
+            runner: rev.runner || state.runner,
             pb: rev.pb,
             isNewPb: rev.isNewPb,
             splits: rev.splits,
@@ -980,6 +1046,9 @@ export function createGame(engine, terrain, trailData, world) {
             clockS: raceMgr.getHudSummary(0)?.clockS ?? elapsedRunS,
             distM: state.distanceM,
             vertGainM: state.vertM,
+            runner: state.runner,
+            statUncapped: Boolean(activeRunner.statUncapped),
+            asterisk: Boolean(state.timeDilated || activeRunner.statUncapped),
           });
         }
       }
@@ -1060,6 +1129,7 @@ export function createGame(engine, terrain, trailData, world) {
       heading: state.heading,
       runnerHeight: runnerBoundsScratch.height,
       runnerRadius: runnerBoundsScratch.radius,
+      runner: state.runner,
       race: raceHud,
       nearAid,
       nearStream,
@@ -1193,6 +1263,10 @@ export function createGame(engine, terrain, trailData, world) {
       raceMgr.triggerKissFinish();
     }),
 
+    engine.events.on('ui:selectRunner', (sel) => {
+      setRunner(sel);
+    }),
+
     engine.events.on('dev:skipRace', (e) => {
       skipToRaceDistance(e?.meters ?? 0);
     }),
@@ -1290,6 +1364,16 @@ export function createGame(engine, terrain, trailData, world) {
     pause,
     update,
     state,
+    // Runner roster & custom builder API
+    getRoster: () => ({
+      presets: TELLURIDE_RUNNERS,
+      customArchetypes: CUSTOM_ARCHETYPES,
+      swatches: RUNNER_KIT_SWATCHES,
+      active: activeRunner,
+    }),
+    getActiveRunner: () => activeRunner,
+    setRunner: (sel) => setRunner(sel),
+    rollCustomRunner: (archetypeId) => rollRandomCustomRunner(archetypeId),
     // Save / PB / Achievement queries for UI
     getSavedRun: getSavedRunSummary,
     hasSavedRun,

@@ -90,9 +90,14 @@ export function getBestRecord(raceId, game) {
         : JSON.parse(localStorage.getItem('telluride_trails.pbs.v1') || '{}');
     const gpBest = pbs?.[raceId];
     if (gpBest && Number.isFinite(gpBest.clockS) && gpBest.clockS > 0) {
+      const timeDilated = Boolean(gpBest.timeDilated);
+      const statUncapped = Boolean(gpBest.statUncapped);
       return {
         elapsedSec: gpBest.clockS,
-        timeDilated: Boolean(gpBest.timeDilated),
+        timeDilated,
+        statUncapped,
+        asterisk: Boolean(gpBest.asterisk || timeDilated || statUncapped),
+        runnerName: gpBest.runnerName || gpBest.runner?.name || '',
       };
     }
   } catch {
@@ -101,9 +106,14 @@ export function getBestRecord(raceId, game) {
 
   const records = loadRecords().filter((r) => r.raceId === raceId && !r.dnf && r.elapsedSec > 0);
   if (!records.length) return null;
-  const clean = records.filter((r) => !r.timeDilated);
+  const clean = records.filter((r) => !r.timeDilated && !r.statUncapped && !r.asterisk);
   const pool = clean.length ? clean : records;
-  return pool.reduce((best, cur) => (cur.elapsedSec < best.elapsedSec ? cur : best), pool[0]);
+  const best = pool.reduce((b, cur) => (cur.elapsedSec < b.elapsedSec ? cur : b), pool[0]);
+  return {
+    ...best,
+    asterisk: Boolean(best.asterisk || best.timeDilated || best.statUncapped),
+    runnerName: best.runnerName || '',
+  };
 }
 
 /**

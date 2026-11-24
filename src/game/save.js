@@ -3,6 +3,7 @@
 const SAVE_KEY = 'telluride_trails.run.v1';
 const PB_KEY = 'telluride_trails.pbs.v1';
 const ACH_KEY = 'telluride_trails.achievements.v1';
+const RUNNER_KEY = 'telluride_trails.runner.v1';
 
 const store = {
   get(key) {
@@ -61,26 +62,57 @@ export function clearSavedRun() {
   store.del(SAVE_KEY);
 }
 
+export function loadSelectedRunner() {
+  return store.get(RUNNER_KEY);
+}
+
+export function saveSelectedRunner(profile) {
+  if (!profile) return false;
+  if (profile.isCustom || profile.id === 'custom') {
+    return store.set(RUNNER_KEY, {
+      id: 'custom',
+      isCustom: true,
+      name: profile.name,
+      hometown: profile.hometown,
+      specialty: profile.specialty,
+      stats: profile.stats,
+      kit: profile.kit,
+      uncapped: Boolean(profile.statUncapped || profile.uncapped),
+    });
+  }
+  return store.set(RUNNER_KEY, { id: profile.id });
+}
+
 export function loadPersonalBests() {
   return store.get(PB_KEY) || {};
 }
 
-export function recordPersonalBest(raceId, { clockS, timeDilated, dateIso }) {
+export function recordPersonalBest(raceId, { clockS, timeDilated, statUncapped, runnerId, runnerName, dateIso }) {
   if (!raceId) return { isNewPb: false, best: null };
   const pbs = loadPersonalBests();
   const prev = pbs[raceId];
-  // Clean (non-dilated) runs always beat dilated runs, or fastest within same category
+  const asterisk = Boolean(timeDilated || statUncapped);
+  const prevAsterisk = Boolean(prev && (prev.asterisk || prev.timeDilated || prev.statUncapped));
+  // Clean (non-asterisked) runs always beat asterisked runs, or fastest within same category
   let isNewPb = false;
   if (!prev) {
     isNewPb = true;
-  } else if (!timeDilated && prev.timeDilated) {
+  } else if (!asterisk && prevAsterisk) {
     isNewPb = true;
-  } else if (Boolean(timeDilated) === Boolean(prev.timeDilated) && clockS < prev.clockS) {
+  } else if (asterisk === prevAsterisk && clockS < prev.clockS) {
     isNewPb = true;
   }
 
   if (isNewPb) {
-    pbs[raceId] = { clockS, timeDilated: Boolean(timeDilated), dateIso: dateIso || new Date().toISOString() };
+    pbs[raceId] = {
+      clockS,
+      timeDilated: Boolean(timeDilated),
+      statUncapped: Boolean(statUncapped),
+      asterisk,
+      runnerId: runnerId || null,
+      runnerName: runnerName || null,
+      dateIso: dateIso || new Date().toISOString(),
+    };
     store.set(PB_KEY, pbs);
   }
   return { isNewPb, best: pbs[raceId] };

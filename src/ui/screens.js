@@ -10,6 +10,7 @@ import {
   getRaceDisclaimer,
 } from './format.js';
 import { createMap2D } from './map2d.js';
+import { escapeHtml, getActiveRunnerSummary } from './runnerSelect.js';
 import { getBestRecord, peekSavedRun } from './storage.js';
 
 const KIND_LABELS = {
@@ -41,6 +42,7 @@ export function createScreens({
   onResumeSaved,
   onOpenSettings,
   onOpenCredits,
+  onOpenRunnerSelect,
 }) {
   const root = document.createElement('div');
   root.className = 'screens-layer';
@@ -68,6 +70,15 @@ export function createScreens({
 
         <div class="resume-banner" hidden></div>
 
+        <div class="title-runner-bar">
+          <div class="title-runner-bar__info">
+            <span class="runner-swatch-dot" data-runner-dot></span>
+            <span class="title-runner-bar__text" data-runner-title-label>🏃 Willie Milam</span>
+            <span class="runner-ovr-pill" data-runner-title-ovr>OVR 94</span>
+          </div>
+          <button type="button" class="btn btn--ghost btn--sm title-runner-bar__btn" data-act="runner-select">Change / Custom ▸</button>
+        </div>
+
         <nav class="title-actions" aria-label="Main menu">
           <button type="button" class="btn btn--primary btn--lg" data-nav="freerun">
             <span>🏔 Free Run</span>
@@ -92,6 +103,10 @@ export function createScreens({
       <header class="screen-head">
         <button type="button" class="btn btn--ghost btn--sm" data-nav="title">← Back</button>
         <h1>Free Run</h1>
+        <button type="button" class="runner-chip-btn" data-act="runner-select" aria-label="Change active runner">
+          <span class="runner-swatch-dot" data-runner-dot></span>
+          <span data-runner-chip-label>🏃 Willie M. ▾</span>
+        </button>
         <div class="picker-mode-tabs" role="tablist" aria-label="Picker view">
           <button type="button" class="tab-btn is-active" role="tab" aria-selected="true" data-picker-tab="list">List</button>
           <button type="button" class="tab-btn" role="tab" aria-selected="false" data-picker-tab="map">2D Map</button>
@@ -125,12 +140,18 @@ export function createScreens({
           <p class="confirm-sheet__desc" data-confirm="desc" hidden></p>
         </div>
         <div class="confirm-sheet__controls">
-          <label class="confirm-sheet__time">
-            <span>Start time</span>
-            <select id="confirm-start-time" class="tt-select tt-select--sm">
-              ${START_TIME_OPTIONS.map((o) => `<option value="${o.id}">${o.label}</option>`).join('')}
-            </select>
-          </label>
+          <div class="confirm-sheet__row">
+            <label class="confirm-sheet__time">
+              <span>Start</span>
+              <select id="confirm-start-time" class="tt-select tt-select--sm">
+                ${START_TIME_OPTIONS.map((o) => `<option value="${o.id}">${o.label}</option>`).join('')}
+              </select>
+            </label>
+            <button type="button" class="runner-chip-btn" data-act="runner-select" aria-label="Change active runner">
+              <span class="runner-swatch-dot" data-runner-dot></span>
+              <span data-runner-chip-label>🏃 Willie M. ▾</span>
+            </button>
+          </div>
           <div class="confirm-sheet__actions">
             <button type="button" class="btn btn--ghost btn--sm" data-confirm="cancel">Cancel</button>
             <button type="button" class="btn btn--primary" data-confirm="go">Start Run →</button>
@@ -144,6 +165,10 @@ export function createScreens({
       <header class="screen-head">
         <button type="button" class="btn btn--ghost btn--sm" data-nav="title">← Back</button>
         <h1>San Juan Races</h1>
+        <button type="button" class="runner-chip-btn" data-act="runner-select" aria-label="Change active runner">
+          <span class="runner-swatch-dot" data-runner-dot></span>
+          <span data-runner-chip-label>🏃 Willie M. ▾</span>
+        </button>
         <span class="screen-head__tag">1s = 1s Real Time</span>
       </header>
       <div class="races-grid"></div>
@@ -367,7 +392,7 @@ export function createScreens({
       const gainM = (race.gainFt || 0) / 3.28084;
       const best = getBestRecord(race.id, game);
       const bestHtml = best
-        ? `<span class="race-pb">🏆 PB: ${fmtClock(best.elapsedSec)}${best.timeDilated ? ' *' : ''}</span>`
+        ? `<span class="race-pb">🏆 PB: ${fmtClock(best.elapsedSec)}${best.asterisk || best.timeDilated ? ' *' : ''}${best.runnerName ? ` · ${escapeHtml(best.runnerName)}` : ''}</span>`
         : '';
 
       const cps = Array.isArray(race.checkpoints) ? race.checkpoints : [];
@@ -436,6 +461,26 @@ export function createScreens({
     if (stageText) loadingStageEl.textContent = stageText;
   }
 
+  function refreshRunnerSummary() {
+    const sum = getActiveRunnerSummary(game);
+    const star = sum.statUncapped ? '*' : '';
+    const titleLbl = root.querySelector('[data-runner-title-label]');
+    const titleOvr = root.querySelector('[data-runner-title-ovr]');
+    if (titleLbl) {
+      titleLbl.textContent = `🏃 ${sum.name}`;
+    }
+    if (titleOvr) {
+      titleOvr.textContent = `OVR ${sum.ovr}${star}`;
+    }
+    root.querySelectorAll('[data-runner-chip-label]').forEach((el) => {
+      el.textContent = `${sum.shortName} ▾`;
+    });
+    root.querySelectorAll('[data-runner-dot]').forEach((dot) => {
+      dot.style.setProperty('--jersey', sum.jerseyCss);
+      dot.style.setProperty('--cap', sum.capCss);
+    });
+  }
+
   function showScreen(name) {
     activeScreen = name;
     titleEl.hidden = name !== 'title';
@@ -447,6 +492,8 @@ export function createScreens({
       clearInterval(triviaTimer);
       triviaTimer = null;
     }
+
+    refreshRunnerSummary();
 
     if (name === 'title') {
       refreshResumeBanner();
@@ -488,6 +535,7 @@ export function createScreens({
       if (act === 'settings') onOpenSettings?.();
       else if (act === 'credits') onOpenCredits?.();
       else if (act === 'resume-saved') onResumeSaved?.();
+      else if (act === 'runner-select') onOpenRunnerSelect?.();
       return;
     }
     const tabBtn = e.target.closest('[data-picker-tab]');
@@ -545,12 +593,15 @@ export function createScreens({
   });
 
   refreshResumeBanner();
+  refreshRunnerSummary();
 
   return {
     showScreen,
     getActiveScreen: () => activeScreen,
     setLoadingProgress,
+    refreshRunnerSummary,
     refresh() {
+      refreshRunnerSummary();
       if (activeScreen === 'title') refreshResumeBanner();
       else if (activeScreen === 'freerun') {
         renderPOIs();

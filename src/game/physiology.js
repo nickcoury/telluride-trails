@@ -15,10 +15,16 @@ export const STOMACH_CAP = 950;
 const KCAL_PER_METER = 108 / MILE_M; // ~108 kcal/mi baseline + vert cost
 
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const statNorm = (s) => (clamp(Number.isFinite(s) ? s : 80, 50, 99) - 80) / 20;
 
-export function createPhysiology() {
+export function createPhysiology(stats = null) {
+  const nEnd = statNorm(stats?.endurance);
+  const energyMax = Math.round(ENERGY_MAX * (1 + nEnd * 0.20));
+  const stomachCap = Math.round(STOMACH_CAP * (1 + nEnd * 0.18));
   return {
-    energy: 1900,        // kcal
+    energy: Math.round(1900 * (energyMax / ENERGY_MAX)), // kcal scaled proportionally to endurance
+    energyMax,
+    stomachCap,
     stamina: 100,        // 0..100 short-term effort reserve (sprinting, steep climbs, bushwhacking)
     stomachKcal: 0,
     stomachMl: 0,
@@ -33,12 +39,26 @@ export function createPhysiology() {
     trips: 0,
     kcalEaten: 0,
     mlDrunk: 0,
-    altitudeFactor: 1,   // 0.6..1.0
+    altitudeFactor: 1,   // 0.48..1.0
     drowsiness: 0,       // 0..1
     flasksMl: 1000,      // carried soft flasks (max 1000 ml)
     flaskMaxMl: 1000,
     gelsCarried: 3,
   };
+}
+
+/**
+ * Update dynamic physiology capacities when switching runners mid-session.
+ */
+export function applyRunnerStatsToPhysiology(p, stats = null) {
+  if (!p) return;
+  const nEnd = statNorm(stats?.endurance);
+  const prevMax = p.energyMax || ENERGY_MAX;
+  const nextMax = Math.round(ENERGY_MAX * (1 + nEnd * 0.20));
+  const ratio = prevMax > 0 ? p.energy / prevMax : 0.86;
+  p.energyMax = nextMax;
+  p.energy = clamp(ratio * nextMax, 0, nextMax);
+  p.stomachCap = Math.round(STOMACH_CAP * (1 + nEnd * 0.18));
 }
 
 export function stomachLoad(p) {
@@ -55,23 +75,26 @@ export function hydrationPct(p) {
 
 /**
  * Altitude performance multiplier.
- * No penalty below 11,000 ft; gradual hypoxia penalty above 11,000 ft down to ~0.68 at 14,150 ft.
+ * No penalty below 11,000 ft; gradual hypoxia penalty above 11,000 ft scaled by altitude stat.
  */
-export function computeAltitudeFactor(elevationM) {
+export function computeAltitudeFactor(elevationM, altitudeStat = 80) {
   const elevFt = elevationM * M_TO_FT;
   if (elevFt <= 11000) return 1.0;
   // ~4.5% per 1000 ft above 11,000 ft, steeper past 13,200 ft
   const aboveK = (elevFt - 11000) / 1000;
   const extra = elevFt > ALT_SEVERE_FT ? ((elevFt - ALT_SEVERE_FT) / 1000) * 0.04 : 0;
-  return clamp(1 - aboveK * 0.075 - extra, 0.62, 1.0);
+  const rawFactor = clamp(1 - aboveK * 0.075 - extra, 0.62, 1.0);
+  const penaltyScale = clamp(1 - statNorm(altitudeStat) * 0.38, 0.55, 1.55);
+  return clamp(1 - (1 - rawFactor) * penaltyScale, 0.48, 1.0);
 }
 
 /**
  * Circadian drowsiness given local hour (0..24) and continuous hours awake/running.
  */
-export function computeDrowsiness(p, localHour, elapsedHours) {
+export function computeDrowsiness(p, localHour, elapsedHours, stats = null) {
   const awake = 2 + elapsedHours;
-  const pressure = clamp((awake - 15) / 18, 0, 1);
+  const endScale = clamp(1 - statNorm(stats?.endurance) * 0.28, 0.58, 1.50);
+  const pressure = clamp((awake - 15) / 18, 0, 1) * endScale;
   const dh = ((localHour - 4 + 36) % 24) - 12; // distance from 4 AM circadian trough
   const circadian = 0.52 * Math.exp(-(dh * dh) / (2 * 2.5 * 2.5));
   const caf = Math.min(0.5, p.caffeineMg / 220);
@@ -82,6 +105,7 @@ export function computeDrowsiness(p, localHour, elapsedHours) {
  * Maximum physiological speed scale (0.25 .. 1.1) applied on top of terrain/grade speed.
  */
 export function physiologySpeedFactor(p) {
+  const stomachCap = p.stomachCap || STOMACH_CAP;
   let factor = 1 - 0.38 * (p.legs / 100);
 
   if (p.stamina < 20) factor *= 0.65 + 0.35 * (p.stamina / 20);
@@ -92,7 +116,7 @@ export function physiologySpeedFactor(p) {
     factor *= 1 - clamp((p.waterDeficitMl - 1400) / 3200, 0, 0.45);
   }
   if (p.waterDeficitMl < -1300) factor *= 0.82; // hyponatremic sloshing
-  if (stomachLoad(p) > 0.82 * STOMACH_CAP) factor *= 0.78;
+  if (stomachLoad(p) > 0.82 * stomachCap) factor *= 0.78;
   if (p.nauseaS > 0) factor *= 0.72;
   if (p.crampS > 0) factor = Math.min(factor, 0.45);
 
@@ -109,6 +133,7 @@ export function eatItem(p, key, speedMs = 0) {
   const f = FOODS[key];
   if (!f) return { ok: false, events: [] };
   const events = [];
+  const stomachCap = p.stomachCap || STOMACH_CAP;
 
   // Running hard while drinking risks spilling half on your vest
   let frac = 1;
@@ -127,7 +152,7 @@ export function eatItem(p, key, speedMs = 0) {
   p.stamina = clamp(p.stamina + (f.caf > 0 ? 14 : 7), 0, 100);
   events.push({ type: 'eat', key, name: f.name, kcal: Math.round(f.kcal * frac), ml: Math.round(f.ml * frac) });
 
-  if (stomachLoad(p) > STOMACH_CAP) {
+  if (stomachLoad(p) > stomachCap) {
     p.stomachKcal = 0;
     p.stomachMl = 0;
     p.stomachBulk = 0;
@@ -176,15 +201,21 @@ export function stepPhysiology(p, dt, ctx, rng = Math.random) {
     localHour = 10,
     elapsedHours = 0,
     isMoving = false,
+    stats = null,
   } = ctx;
+
+  const nClimb = statNorm(stats?.climbing);
+  const nTech = statNorm(stats?.technical);
+  const nEnd = statNorm(stats?.endurance);
+  const energyMax = p.energyMax || ENERGY_MAX;
 
   const distM = speedMs * dt;
   const prevEnergy = p.energy;
   const prevHydr = hydrationPct(p);
 
   // Altitude & circadian state
-  p.altitudeFactor = computeAltitudeFactor(elevationM);
-  p.drowsiness = computeDrowsiness(p, localHour, elapsedHours);
+  p.altitudeFactor = computeAltitudeFactor(elevationM, stats?.altitude ?? 80);
+  p.drowsiness = computeDrowsiness(p, localHour, elapsedHours, stats);
 
   // --- Stamina (short-term reserve) ---
   const elevPenalty = elevationM > ALT_PENALTY_START_M ? 1 + (1 - p.altitudeFactor) * 1.4 : 1;
@@ -196,7 +227,8 @@ export function stepPhysiology(p, dt, ctx, rng = Math.random) {
     else staminaDrain = -3.0; // walking recovers stamina
 
     if (grade > 0.08 && effort !== 'walk') {
-      const gradeEffort = effort === 'hike' || effort === 'power-hike' ? 0.8 : 2.2;
+      const climbDrainScale = clamp(1 - nClimb * 0.25, 0.60, 1.50);
+      const gradeEffort = (effort === 'hike' || effort === 'power-hike' ? 0.8 : 2.2) * climbDrainScale;
       staminaDrain += (grade - 0.08) * gradeEffort;
     }
     if (offTrail) staminaDrain += 1.1;
@@ -207,7 +239,7 @@ export function stepPhysiology(p, dt, ctx, rng = Math.random) {
   }
 
   // Low energy caps stamina recovery
-  const staminaCap = clamp(30 + (p.energy / ENERGY_MAX) * 70, 25, 100);
+  const staminaCap = clamp(30 + (p.energy / energyMax) * 70, 25, 100);
   p.stamina = clamp(p.stamina - staminaDrain * dt, 0, staminaCap);
 
   // --- Energy / Fuel ---
@@ -216,7 +248,8 @@ export function stepPhysiology(p, dt, ctx, rng = Math.random) {
   const offTrailKcal = offTrail ? 1.28 : 1.0;
   const burn = (72 / 3600) * dt + KCAL_PER_METER * distM * offTrailKcal * (1 + 0.14 * Math.max(0, speedMs - 3.0)) + climbKcal;
   const fatIncome = (195 / 3600) * dt * (speedMs < 3.8 ? 1 : 0.65);
-  const absorbMax = (820 / 3600) * dt * (1 - 0.25 * intensity) * (p.nauseaS > 0 ? 0.4 : 1);
+  const absorbScale = 1 + nEnd * 0.18;
+  const absorbMax = (820 / 3600) * dt * absorbScale * (1 - 0.25 * intensity) * (p.nauseaS > 0 ? 0.4 : 1);
   const absorbed = Math.min(p.stomachKcal, absorbMax);
 
   p.stomachKcal -= absorbed;
@@ -225,7 +258,7 @@ export function stepPhysiology(p, dt, ctx, rng = Math.random) {
   } else {
     p.stomachBulk = Math.max(0, p.stomachBulk - (absorbed / Math.max(1, absorbed + p.stomachKcal)) * p.stomachBulk);
   }
-  p.energy = clamp(p.energy - burn + fatIncome + absorbed, 0, ENERGY_MAX);
+  p.energy = clamp(p.energy - burn + fatIncome + absorbed, 0, energyMax);
 
   if (prevEnergy >= 380 && p.energy < 380) events.push({ type: 'low_energy' });
   if (prevEnergy >= 110 && p.energy < 110) events.push({ type: 'bonk' });
@@ -256,9 +289,11 @@ export function stepPhysiology(p, dt, ctx, rng = Math.random) {
   }
 
   // --- Legs / Muscle damage ---
-  // Steep downhills hammer quads!
-  const downhillHammer = grade < -0.08 ? 1 + Math.abs(grade) * 5.0 : 1.0;
-  const legRate = (distM / 1000) * 0.16 * Math.pow(Math.max(0.5, speedMs / 3.0), 1.45) * downhillHammer;
+  // Steep downhills hammer quads (mitigated by technical skill; cumulative wear mitigated by endurance)
+  const techDownhillScale = clamp(1 - nTech * 0.22, 0.65, 1.45);
+  const downhillHammer = grade < -0.08 ? 1 + Math.abs(grade) * 5.0 * techDownhillScale : 1.0;
+  const endLegScale = clamp(1 - nEnd * 0.30, 0.55, 1.55);
+  const legRate = (distM / 1000) * 0.16 * Math.pow(Math.max(0.5, speedMs / 3.0), 1.45) * downhillHammer * endLegScale;
   p.legs = clamp(p.legs + legRate, 0, 100);
   if (speedMs < 0.25) {
     p.legs = Math.max(0, p.legs - (1.8 / 3600) * dt);
@@ -283,12 +318,13 @@ export function stepPhysiology(p, dt, ctx, rng = Math.random) {
 /**
  * Probability per second of tripping/falling on technical terrain when tired.
  */
-export function fallProbabilityPerSec(p, speedMs, stumbleMul = 1.0, grade = 0) {
+export function fallProbabilityPerSec(p, speedMs, stumbleMul = 1.0, grade = 0, stats = null) {
   if (speedMs < 1.35) return 0;
   const fatigue = Math.pow(p.legs / 100, 2) * 0.012 + Math.pow(p.drowsiness, 2) * 0.015;
   const lowStam = p.stamina < 18 ? 0.012 : 0;
   const downhillRisk = grade < -0.10 ? 1 + Math.abs(grade) * 3 : 1;
   const speedRisk = speedMs > 3.6 ? 1.8 : speedMs > 2.4 ? 1.0 : 0.4;
+  const techFallScale = clamp(1 - statNorm(stats?.technical) * 0.45, 0.45, 1.75);
   // Base rate is tiny unless tired + technical + fast downhill
-  return (0.00015 + fatigue + lowStam) * stumbleMul * downhillRisk * speedRisk;
+  return (0.00015 + fatigue + lowStam) * stumbleMul * downhillRisk * speedRisk * techFallScale;
 }

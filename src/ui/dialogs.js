@@ -1,4 +1,5 @@
 import { fmtClock, fmtDist, fmtElev, fmtPace, fmtVert } from './format.js';
+import { escapeHtml, getActiveRunnerSummary } from './runnerSelect.js';
 import { saveRecord } from './storage.js';
 
 let supportsDisplayTransition;
@@ -77,7 +78,17 @@ function attachClosedByFallback(dialog, onCloseRequest) {
 /**
  * Create and manage modal dialogs: Pause, Settings, Credits, Results.
  */
-export function createDialogs({ container, engine, getSettings, onUpdateSettings, onResume, onQuitToTitle, onShowToast }) {
+export function createDialogs({
+  container,
+  engine,
+  game,
+  getSettings,
+  onUpdateSettings,
+  onOpenRunnerSelect,
+  onResume,
+  onQuitToTitle,
+  onShowToast,
+}) {
   // 1. PAUSE DIALOG
   const pauseDlg = document.createElement('dialog');
   pauseDlg.className = 'tt-dialog';
@@ -89,6 +100,10 @@ export function createDialogs({ container, engine, getSettings, onUpdateSettings
       <button type="button" class="tt-dialog__close" data-dlg-close aria-label="Resume run">✕</button>
     </div>
     <div class="tt-dialog__body">
+      <div class="pause-runner-row">
+        <span class="pause-runner-label" data-pause-runner>🏃 Runner: Willie Milam (OVR 94)</span>
+        <button type="button" class="btn btn--ghost btn--sm" data-pause-act="runner">Swap ▸</button>
+      </div>
       <p class="tt-dialog__note">Note: In true real-time mode, closing the tab keeps the race clock ticking. Pausing here freezes your legs while you catch your breath.</p>
 
       <div class="tt-btn-stack">
@@ -280,6 +295,8 @@ export function createDialogs({ container, engine, getSettings, onUpdateSettings
       } else if (act === 'settings') {
         syncSettingsControls();
         settingsDlg.showModal();
+      } else if (act === 'runner') {
+        onOpenRunnerSelect?.();
       } else if (act === 'quit') {
         closeDialogSmooth(pauseDlg);
         onQuitToTitle?.();
@@ -438,13 +455,19 @@ export function createDialogs({ container, engine, getSettings, onUpdateSettings
     const distM = result?.distM ?? result?.distanceM ?? 0;
     const vertM = result?.vertGainM ?? result?.vertM ?? 0;
     const dnf = Boolean(result?.dnf);
-    const dilated = Boolean(
-      result?.asterisk ||
-        result?.timeDilated ||
+    const activeR = getActiveRunnerSummary(game);
+    const rName = result?.runner?.name || result?.runnerName || activeR.name;
+    const rOvr = Number.isFinite(result?.runner?.ovr) ? result.runner.ovr : activeR.ovr;
+    const statUncapped = Boolean(
+      result?.statUncapped || result?.runner?.statUncapped || activeR.statUncapped
+    );
+    const timeDilated = Boolean(
+      result?.timeDilated ||
         result?.timeDilationUsed ||
         wasDilationUsed ||
         currentTimeScale > 1
     );
+    const hasAsterisk = Boolean(result?.asterisk || timeDilated || statUncapped);
     const raceName = result?.raceName || result?.name || 'San Juan Trail Run';
     const splits = Array.isArray(result?.splits) ? result.splits : [];
     const penalties = result?.penaltiesSec ?? result?.offTrailPenaltySec ?? 0;
@@ -462,12 +485,23 @@ export function createDialogs({ container, engine, getSettings, onUpdateSettings
         distM,
         vertM,
         dnf,
-        timeDilated: dilated,
+        timeDilated,
+        statUncapped,
+        asterisk: hasAsterisk,
+        runnerName: rName,
       });
     }
 
-    const timeStr = `${fmtClock(elapsedSec)}${dilated ? ' *' : ''}`;
-    const shareText = `Telluride Trails — ${raceName}: ${dnf ? 'DNF' : 'Finished'} in ${timeStr} (${fmtDist(distM, units, 1)}, ${fmtVert(vertM, units)} vert).`;
+    const timeStr = `${fmtClock(elapsedSec)}${hasAsterisk ? ' *' : ''}`;
+    const runnerLabel = `Runner: ${rName} (OVR ${rOvr}${statUncapped ? '*' : ''})`;
+    const shareText = `Telluride Trails — ${raceName}: ${dnf ? 'DNF' : 'Finished'} in ${timeStr} · ${runnerLabel} (${fmtDist(distM, units, 1)}, ${fmtVert(vertM, units)} vert).`;
+
+    const asteriskReason =
+      timeDilated && statUncapped
+        ? 'Time Dilation & Uncapped Custom Stats'
+        : statUncapped
+          ? 'Uncapped Custom Runner Stats'
+          : 'Time Dilation';
 
     const splitsRows = splits.length
       ? `<table class="results-table">
@@ -477,7 +511,7 @@ export function createDialogs({ container, engine, getSettings, onUpdateSettings
             ${splits
               .map(
                 (sp) =>
-                  `<tr><td>${sp.name || 'Checkpoint'}</td><td>${fmtClock(sp.splitSec ?? sp.splitS ?? 0)}</td><td>${fmtClock(sp.elapsedSec ?? sp.clockS ?? 0)}</td></tr>`
+                  `<tr><td>${escapeHtml(sp.name || 'Checkpoint')}</td><td>${fmtClock(sp.splitSec ?? sp.splitS ?? 0)}</td><td>${fmtClock(sp.elapsedSec ?? sp.clockS ?? 0)}</td></tr>`
               )
               .join('')}
           </tbody>
@@ -490,10 +524,11 @@ export function createDialogs({ container, engine, getSettings, onUpdateSettings
         <div class="results-badge ${dnf ? 'results-badge--dnf' : 'results-badge--fin'}">
           ${dnf ? '⛰ DNF — Mountains Win Today' : kissed ? '🪨 Hardrock Finisher!' : isNewPb ? '🏆 New Personal Best!' : '🏔 Finisher!'}
         </div>
-        <h2 id="results-dlg-title" tabindex="-1" autofocus>${raceName}</h2>
+        <h2 id="results-dlg-title" tabindex="-1" autofocus>${escapeHtml(raceName)}</h2>
+        <p class="results-runner">🏃 ${escapeHtml(runnerLabel)}</p>
         <div class="results-clock">${timeStr}</div>
-        ${dilated ? '<p class="results-asterisk">* Completed with Time Dilation (non-purist finish).</p>' : ''}
-        ${result?.dnfReason || result?.reason ? `<p class="results-dnf-reason">${result.dnfReason || result.reason}</p>` : ''}
+        ${hasAsterisk ? `<p class="results-asterisk">* Completed with ${asteriskReason} (non-purist finish).</p>` : ''}
+        ${result?.dnfReason || result?.reason ? `<p class="results-dnf-reason">${escapeHtml(result.dnfReason || result.reason)}</p>` : ''}
       </div>
 
       <dl class="results-grid">
@@ -548,11 +583,20 @@ export function createDialogs({ container, engine, getSettings, onUpdateSettings
     body.scrollTop = 0;
   }
 
+  const pauseRunnerEl = pauseDlg.querySelector('[data-pause-runner]');
+  function syncPauseRunner() {
+    if (!pauseRunnerEl) return;
+    const r = getActiveRunnerSummary(game);
+    pauseRunnerEl.textContent = `🏃 Runner: ${r.name} (OVR ${r.ovr}${r.statUncapped ? '*' : ''})`;
+  }
+
   return {
     openPause() {
       syncPauseCamera(engine.cameraRig?.getMode?.() || 'chase');
+      syncPauseRunner();
       if (!pauseDlg.open) pauseDlg.showModal();
     },
+    syncPauseRunner,
     closePause() {
       closeDialogSmooth(pauseDlg);
     },

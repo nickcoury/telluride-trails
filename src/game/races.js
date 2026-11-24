@@ -26,6 +26,8 @@ export function createRaceManager() {
   let clockS = 0;
   let startEpochMs = 0;
   let timeDilated = false;
+  let statUncapped = false;
+  let runnerMeta = null;
   let finished = false;
   let dnf = false;
   let dnfReason = null;
@@ -70,6 +72,8 @@ export function createRaceManager() {
       clockS = restored.clockS || 0;
       startEpochMs = restored.startEpochMs || Date.now();
       timeDilated = Boolean(restored.timeDilated);
+      statUncapped = Boolean(restored.statUncapped);
+      runnerMeta = restored.runnerMeta || null;
       finished = Boolean(restored.finished);
       dnf = Boolean(restored.dnf);
       dnfReason = restored.dnfReason || null;
@@ -86,6 +90,7 @@ export function createRaceManager() {
       clockS = 0;
       startEpochMs = Date.now();
       timeDilated = false;
+      statUncapped = false;
       finished = false;
       dnf = false;
       dnfReason = null;
@@ -292,9 +297,13 @@ export function createRaceManager() {
     if (finished) return;
     finished = true;
     const finalClockS = clockS + penaltyS;
+    const asterisk = Boolean(timeDilated || statUncapped);
     const { isNewPb, best } = recordPersonalBest(activeRace.id, {
       clockS: finalClockS,
       timeDilated,
+      statUncapped,
+      runnerId: runnerMeta?.id || null,
+      runnerName: runnerMeta?.name || null,
     });
     events.push({
       type: 'finish',
@@ -304,6 +313,9 @@ export function createRaceManager() {
       rawClockS: clockS,
       penaltyS,
       timeDilated,
+      statUncapped,
+      asterisk,
+      runner: runnerMeta ? { ...runnerMeta } : null,
       isNewPb,
       pb: best,
       splits: [...splits],
@@ -398,6 +410,11 @@ export function createRaceManager() {
     getPointAtDistance,
     getHudSummary,
     markTimeDilated() { timeDilated = true; },
+    markStatUncapped() { statUncapped = true; },
+    setRunnerMeta(meta) {
+      runnerMeta = meta ? { ...meta } : null;
+      if (meta?.statUncapped) statUncapped = true;
+    },
     addPenalty(sec) { penaltyS += sec; },
     addWallGap(sec) {
       if (activeRace && !finished && !dnf) clockS += sec;
@@ -427,6 +444,8 @@ export function createRaceManager() {
         clockS,
         startEpochMs,
         timeDilated,
+        statUncapped,
+        runnerMeta,
         finished,
         dnf,
         dnfReason,

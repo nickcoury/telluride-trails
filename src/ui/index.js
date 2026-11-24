@@ -7,6 +7,7 @@ import { createTouchControls } from './touchControls.js';
 import { createDialogs } from './dialogs.js';
 import { createScreens } from './screens.js';
 import { createRunnerGuard } from './runnerGuard.js';
+import { createRunnerSelect } from './runnerSelect.js';
 
 /**
  * Telluride Trails UI Entry Point (PLAN.md contract).
@@ -56,7 +57,9 @@ export function createUI(engine, { trailData, game, terrain } = {}) {
   const dialogs = createDialogs({
     container: root,
     engine,
+    game,
     getSettings,
+    onOpenRunnerSelect: () => runnerSelect.open(),
     onUpdateSettings: (patch) => {
       settings = saveSettings(patch);
       engine.events.emit('ui:settings', { ...settings });
@@ -225,6 +228,18 @@ export function createUI(engine, { trailData, game, terrain } = {}) {
     },
     onOpenSettings: () => dialogs.openSettings(),
     onOpenCredits: () => dialogs.openCredits(),
+    onOpenRunnerSelect: () => runnerSelect.open(),
+  });
+
+  const runnerSelect = createRunnerSelect({
+    container: root,
+    engine,
+    game,
+    onRunnerChanged: () => {
+      screens.refresh();
+      dialogs.syncPauseRunner?.();
+    },
+    onShowToast: (text, tone, ms) => hud.showToast(text, tone, ms),
   });
 
   // App state machine listener
@@ -355,6 +370,7 @@ export function createUI(engine, { trailData, game, terrain } = {}) {
       unsubDnf();
       unsubPreloadProg();
       runnerGuard.dispose();
+      runnerSelect.dispose();
       hud.dispose();
       touchControls.dispose();
       dialogs.dispose();
