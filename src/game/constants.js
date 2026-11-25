@@ -16,7 +16,8 @@ export const ALT_SEVERE_FT = 13200;
 export const CLIFF_GRADE = 0.90;
 // ~53.5 deg slope = 1.35 grade allowed on mapped trails/paths or official race lines (e.g. Original Rundola)
 export const TRAIL_CLIFF_GRADE = 1.35;
-export const POWER_HIKE_GRADE = 0.13; // >13% uphill -> hands-on-knees power hike
+export const POWER_HIKE_GRADE = 0.13; // legacy reference grade
+export const AUTO_POWER_HIKE_GRADE = 0.25; // >25% uphill auto-shifts cruise run into power-hike (32% if sprinting)
 
 // Trail keeping radii (meters)
 export const TRAIL_SNAP_RADIUS_M = {
@@ -28,8 +29,8 @@ export const TRAIL_SNAP_RADIUS_M = {
 
 // Surface movement multipliers and technical stumble factors
 export const SURFACES = {
-  road:   { label: 'Dirt / Town Road', speedMul: 1.06, staminaMul: 0.92, stumbleMul: 0.4, dustColor: 0xb8a389 },
-  track:  { label: '4x4 Jeep Road',    speedMul: 0.98, staminaMul: 1.00, stumbleMul: 0.9, dustColor: 0xa68e74 },
+  road:   { label: 'Dirt / Town Road', speedMul: 1.07, staminaMul: 0.92, stumbleMul: 0.4, dustColor: 0xb8a389 },
+  track:  { label: '4x4 Jeep Road',    speedMul: 1.04, staminaMul: 0.96, stumbleMul: 0.75, dustColor: 0xa68e74 },
   trail:  { label: 'Singletrack',      speedMul: 1.00, staminaMul: 1.00, stumbleMul: 1.0, dustColor: 0x9b8265 },
   path:   { label: 'Alpine Path',      speedMul: 0.95, staminaMul: 1.04, stumbleMul: 1.2, dustColor: 0x998877 },
   grass:  { label: 'Alpine Tundra',    speedMul: 0.78, staminaMul: 1.28, stumbleMul: 1.4, dustColor: 0x7d8a55, offTrail: true },

@@ -11,6 +11,7 @@ const MAX_GONDOLA_CABINS = 120;
 const MAX_LIFT_CHAIRS = 360;
 
 const MAIN_STREET_RE = /colorado ave|greene st|blair st|main st|glasgow ave|gunnison ave|silver st/i;
+const _pushOut = { x: 0, z: 0, pushed: false };
 
 /**
  * 1024x1024 4x4 Victorian & San Juan PBR Trimsheet Atlas UV Rects:
@@ -1184,8 +1185,12 @@ export function createStructures(engine, terrain, trailData, atmosphere) {
 
   let disposed = false;
 
-  // --- Fast O(1) Spatial Building & Town-Street Mask shared with vegetation/rocks ---
+  // --- Fast O(1) Spatial Building, Collider & Town-Street Mask shared with vegetation/rocks/gameplay ---
   const maskGrid = new Map();
+  const bldgColliderGrid = new Map(); // 64m integer hash -> array of building/ruin polygon colliders
+  const roadSegHash = new Map(); // 64m integer hash -> array of town street segment records
+  const animatedLifts = [];
+  let hasRealBridalVeilBldg = false;
   const townCorridors = HISTORIC_DOWNTOWN_CORRIDORS.map((c) => {
     const a = lonLatToWorld(c.lon0, c.lat0);
     const b = lonLatToWorld(c.lon1, c.lat1);
@@ -1209,6 +1214,73 @@ export function createStructures(engine, terrain, trailData, atmosphere) {
         arr.push(minX, minZ, maxX, maxZ);
       }
     }
+  }
+
+  function indexBuildingCollider(coords, minX, minZ, maxX, maxZ, isFallbackPlant = false) {
+    const rawPts = Math.floor((coords?.length || 0) / 3);
+    if (rawPts < 3) return;
+    let nPts = rawPts;
+    if (
+      nPts > 3 &&
+      Math.hypot(coords[(nPts - 1) * 3] - coords[0], coords[(nPts - 1) * 3 + 2] - coords[2]) < 0.12
+    ) {
+      nPts--;
+    }
+    if (nPts < 3) return;
+
+    // Precompute polygon winding sign so outward wall normals are exact with zero per-frame work
+    let signedArea2 = 0;
+    for (let i = 0; i < nPts; i++) {
+      const j = (i + 1) % nPts;
+      signedArea2 += coords[i * 3] * coords[j * 3 + 2] - coords[j * 3] * coords[i * 3 + 2];
+    }
+    if (Math.abs(signedArea2) < 1.0) return;
+
+    const rec = {
+      coords,
+      nPts,
+      minX,
+      minZ,
+      maxX,
+      maxZ,
+      outSign: signedArea2 < 0 ? 1 : -1,
+      isFallbackPlant,
+    };
+
+    const pad = 2.0;
+    const cx0 = Math.floor((minX - pad) / MASK_CELL_M);
+    const cx1 = Math.floor((maxX + pad) / MASK_CELL_M);
+    const cz0 = Math.floor((minZ - pad) / MASK_CELL_M);
+    const cz1 = Math.floor((maxZ + pad) / MASK_CELL_M);
+    for (let cz = cz0; cz <= cz1; cz++) {
+      for (let cx = cx0; cx <= cx1; cx++) {
+        const k = (cx + 4096) * 8192 + (cz + 4096);
+        let arr = bldgColliderGrid.get(k);
+        if (!arr) {
+          arr = [];
+          bldgColliderGrid.set(k, arr);
+        }
+        arr.push(rec);
+      }
+    }
+  }
+
+  function isInsideCrossStreet(x, z, selfId) {
+    const cx = Math.floor(x / ROAD_HASH_M);
+    const cz = Math.floor(z / ROAD_HASH_M);
+    const bucket = roadSegHash.get((cx + 4096) * 8192 + (cz + 4096));
+    if (!bucket) return false;
+    for (let i = 0; i < bucket.length; i++) {
+      const s = bucket[i];
+      if (s.roadId === selfId) continue;
+      let t = ((x - s.x0) * s.dx + (z - s.z0) * s.dz) * s.invLenSq;
+      if (t < 0) t = 0;
+      else if (t > 1) t = 1;
+      const ex = x - (s.x0 + s.dx * t);
+      const ez = z - (s.z0 + s.dz * t);
+      if (ex * ex + ez * ez <= s.halfW * s.halfW) return true;
+    }
+    return false;
   }
 
   const worldBuildingMask = {
@@ -1235,6 +1307,194 @@ export function createStructures(engine, terrain, trailData, atmosphere) {
         }
       }
       return false;
+    },
+    pushOutOfBuilding(x, z, radiusM = 0.48, out = _pushOut) {
+      let px = x;
+      let pz = z;
+      let pushed = false;
+      const pushDist = radiusM + 0.02;
+      const radSq = radiusM * radiusM;
+
+      // Up to 2 relaxation passes cleanly handle concave corners and adjacent party-wall buildings
+      for (let pass = 0; pass < 2; pass++) {
+        let passPushed = false;
+        const cx0 = Math.floor((px - radiusM) / MASK_CELL_M);
+        const cx1 = Math.floor((px + radiusM) / MASK_CELL_M);
+        const cz0 = Math.floor((pz - radiusM) / MASK_CELL_M);
+        const cz1 = Math.floor((pz + radiusM) / MASK_CELL_M);
+
+        for (let cz = cz0; cz <= cz1; cz++) {
+          for (let cx = cx0; cx <= cx1; cx++) {
+            const bucket = bldgColliderGrid.get((cx + 4096) * 8192 + (cz + 4096));
+            if (!bucket) continue;
+            for (let bi = 0; bi < bucket.length; bi++) {
+              const rec = bucket[bi];
+              if (rec.isFallbackPlant && hasRealBridalVeilBldg) continue;
+              if (
+                px < rec.minX - radiusM ||
+                px > rec.maxX + radiusM ||
+                pz < rec.minZ - radiusM ||
+                pz > rec.maxZ + radiusM
+              ) {
+                continue;
+              }
+
+              const c = rec.coords;
+              const nPts = rec.nPts;
+              const outSign = rec.outSign;
+              let inside = false;
+              let bestDSq = Infinity;
+              let bestQx = px;
+              let bestQz = pz;
+              let bestNx = 1;
+              let bestNz = 0;
+
+              for (let i = 0; i < nPts; i++) {
+                const j = i + 1 < nPts ? i + 1 : 0;
+                const ax = c[i * 3];
+                const az = c[i * 3 + 2];
+                const bx = c[j * 3];
+                const bz = c[j * 3 + 2];
+
+                // Even-odd point-in-polygon test in XZ
+                if ((az > pz) !== (bz > pz) && px < ((bx - ax) * (pz - az)) / (bz - az) + ax) {
+                  inside = !inside;
+                }
+
+                // Closest point on edge (a -> b)
+                const edx = bx - ax;
+                const edz = bz - az;
+                const lenSq = edx * edx + edz * edz;
+                if (lenSq < 1e-6) continue;
+                let t = ((px - ax) * edx + (pz - az) * edz) / lenSq;
+                if (t < 0) t = 0;
+                else if (t > 1) t = 1;
+                const qx = ax + edx * t;
+                const qz = az + edz * t;
+                const vx = px - qx;
+                const vz = pz - qz;
+                const dSq = vx * vx + vz * vz;
+                if (dSq < bestDSq) {
+                  bestDSq = dSq;
+                  bestQx = qx;
+                  bestQz = qz;
+                  const invLen = 1 / Math.sqrt(lenSq);
+                  bestNx = -edz * invLen * outSign;
+                  bestNz = edx * invLen * outSign;
+                }
+              }
+
+              if (inside) {
+                px = bestQx + bestNx * pushDist;
+                pz = bestQz + bestNz * pushDist;
+                pushed = true;
+                passPushed = true;
+              } else if (bestDSq < radSq) {
+                const dist = Math.sqrt(bestDSq);
+                let nx = bestNx;
+                let nz = bestNz;
+                if (dist > 1e-5) {
+                  nx = (px - bestQx) / dist;
+                  nz = (pz - bestQz) / dist;
+                }
+                px = bestQx + nx * pushDist;
+                pz = bestQz + nz * pushDist;
+                pushed = true;
+                passPushed = true;
+              }
+            }
+          }
+        }
+
+        // Gondola & chairlift tower pylons (0.65m tower half-width + runner radius)
+        const pylonClear = 0.65 + radiusM;
+        const pylonClearSq = pylonClear * pylonClear;
+        const pylonPush = pylonClear + 0.02;
+        for (let l = 0; l < animatedLifts.length; l++) {
+          const lift = animatedLifts[l];
+          if (
+            px < lift.minX - pylonClear ||
+            px > lift.maxX + pylonClear ||
+            pz < lift.minZ - pylonClear ||
+            pz > lift.maxZ + pylonClear
+          ) {
+            continue;
+          }
+          const pts = lift.pylonPts;
+          for (let i = 0; i < pts.length; i++) {
+            const p = pts[i];
+            const dx = px - p.x;
+            const dz = pz - p.z;
+            const dSq = dx * dx + dz * dz;
+            if (dSq < pylonClearSq) {
+              const dist = Math.sqrt(dSq);
+              const nx = dist > 1e-5 ? dx / dist : 1;
+              const nz = dist > 1e-5 ? dz / dist : 0;
+              px = p.x + nx * pylonPush;
+              pz = p.z + nz * pylonPush;
+              pushed = true;
+              passPushed = true;
+            }
+          }
+        }
+
+        if (!passPushed) break;
+      }
+
+      out.x = px;
+      out.z = pz;
+      out.pushed = pushed;
+      return out;
+    },
+    getWalkableDeckHeight(x, z) {
+      const cx = Math.floor(x / ROAD_HASH_M);
+      const cz = Math.floor(z / ROAD_HASH_M);
+      const bucket = roadSegHash.get((cx + 4096) * 8192 + (cz + 4096));
+      if (!bucket) return -Infinity;
+
+      let bestY = -Infinity;
+      for (let i = 0; i < bucket.length; i++) {
+        const s = bucket[i];
+        const rx = x - s.x0;
+        const rz = z - s.z0;
+        const tRaw = (rx * s.dx + rz * s.dz) * s.invLenSq;
+        let t = tRaw;
+        if (t < 0) t = 0;
+        else if (t > 1) t = 1;
+        const ex = x - (s.x0 + s.dx * t);
+        const ez = z - (s.z0 + s.dz * t);
+        const dSq = ex * ex + ez * ez;
+        if (dSq > s.walkOuterSq) continue;
+
+        // Avoid projecting ghost sidewalks past dead-end segment endpoints (keep miter margin <= 0.45m)
+        if (tRaw < 0 || tRaw > 1) {
+          const along = Math.abs(ex * s.tx + ez * s.tz);
+          if (along > 0.45) continue;
+        }
+
+        const dist = Math.sqrt(dSq);
+        const fbY = s.y0 + (s.y1 - s.y0) * t;
+        let offset;
+        if (dist <= s.halfRoad) {
+          // Crowned asphalt roadbed (+0.026m centerline -> +0.022m gutter edge)
+          offset = 0.026 - 0.004 * (dist / s.halfRoad);
+        } else {
+          // Suppress curb/sidewalk lift inside cross-street intersections (matching buildTownStreetPart)
+          if (isInsideCrossStreet(x, z, s.roadId)) continue;
+          const curbEdge = s.halfRoad + s.curbW;
+          if (dist <= curbEdge) {
+            // Granite curb ramp (+0.022m -> +0.132m)
+            offset = 0.022 + 0.11 * ((dist - s.halfRoad) / s.curbW);
+          } else {
+            // Sandstone sidewalk deck (+0.132m inner curb -> +0.105m outer edge)
+            offset = 0.132 - 0.027 * ((dist - curbEdge) / s.walkW);
+          }
+        }
+
+        const deckY = sampleElev(terrain, x, z, fbY) + offset;
+        if (deckY > bestY) bestY = deckY;
+      }
+      return bestY;
     },
   };
   engine.worldBuildingMask = worldBuildingMask;
@@ -1319,7 +1579,6 @@ export function createStructures(engine, terrain, trailData, atmosphere) {
   const seenMainStreets = new Set();
   const mainStreetSegs = [];
   const pendingTownRoads = [];
-  const roadSegHash = new Map(); // 64m hash -> array of { roadId, x0, z0, dx, dz, invLenSq, tx, tz, halfW }
 
   function indexMainStreets(trailsList) {
     if (!trailsList?.length) return;
@@ -1365,19 +1624,41 @@ export function createStructures(engine, terrain, trailData, atmosphere) {
     const c = road.coords;
     if (!c || c.length < 6) return;
     const isMain = MAIN_STREET_RE.test(road.name || '') || (road.widthM || 0) >= 7.0;
+    const halfRoad = isMain ? 3.85 : Math.max(2.65, Math.min(3.6, (road.widthM || 5.4) * 0.52));
+    const curbW = 0.16;
+    const walkW = isMain ? 1.95 : 1.35;
+    const walkOuter = halfRoad + curbW + walkW;
+    const walkOuterSq = walkOuter * walkOuter;
     const halfW = isMain ? 3.90 : Math.max(2.70, Math.min(3.65, (road.widthM || 5.4) * 0.53));
     for (let i = 0; i <= c.length - 6; i += 3) {
-      const x0 = c[i], z0 = c[i + 2];
-      const x1 = c[i + 3], z1 = c[i + 5];
+      const x0 = c[i], y0 = c[i + 1], z0 = c[i + 2];
+      const x1 = c[i + 3], y1 = c[i + 4], z1 = c[i + 5];
       const dx = x1 - x0, dz = z1 - z0;
       const lenSq = dx * dx + dz * dz;
       if (lenSq < 0.04) continue;
       const len = Math.sqrt(lenSq);
-      const rec = { roadId: road.id, x0, z0, dx, dz, invLenSq: 1 / lenSq, tx: dx / len, tz: dz / len, halfW };
-      const cx0 = Math.floor((Math.min(x0, x1) - halfW) / ROAD_HASH_M);
-      const cx1 = Math.floor((Math.max(x0, x1) + halfW) / ROAD_HASH_M);
-      const cz0 = Math.floor((Math.min(z0, z1) - halfW) / ROAD_HASH_M);
-      const cz1 = Math.floor((Math.max(z0, z1) + halfW) / ROAD_HASH_M);
+      const rec = {
+        roadId: road.id,
+        x0,
+        z0,
+        y0,
+        y1,
+        dx,
+        dz,
+        invLenSq: 1 / lenSq,
+        tx: dx / len,
+        tz: dz / len,
+        halfW,
+        halfRoad,
+        curbW,
+        walkW,
+        walkOuter,
+        walkOuterSq,
+      };
+      const cx0 = Math.floor((Math.min(x0, x1) - walkOuter) / ROAD_HASH_M);
+      const cx1 = Math.floor((Math.max(x0, x1) + walkOuter) / ROAD_HASH_M);
+      const cz0 = Math.floor((Math.min(z0, z1) - walkOuter) / ROAD_HASH_M);
+      const cz1 = Math.floor((Math.max(z0, z1) + walkOuter) / ROAD_HASH_M);
       for (let cz = cz0; cz <= cz1; cz++) {
         for (let cx = cx0; cx <= cx1; cx++) {
           const k = (cx + 4096) * 8192 + (cz + 4096);
@@ -1392,27 +1673,8 @@ export function createStructures(engine, terrain, trailData, atmosphere) {
     }
   }
 
-  function isInsideCrossStreet(x, z, selfId) {
-    const cx = Math.floor(x / ROAD_HASH_M);
-    const cz = Math.floor(z / ROAD_HASH_M);
-    const bucket = roadSegHash.get((cx + 4096) * 8192 + (cz + 4096));
-    if (!bucket) return false;
-    for (let i = 0; i < bucket.length; i++) {
-      const s = bucket[i];
-      if (s.roadId === selfId) continue;
-      let t = ((x - s.x0) * s.dx + (z - s.z0) * s.dz) * s.invLenSq;
-      if (t < 0) t = 0;
-      else if (t > 1) t = 1;
-      const ex = x - (s.x0 + s.dx * t);
-      const ez = z - (s.z0 + s.dz * t);
-      if (ex * ex + ez * ez <= s.halfW * s.halfW) return true;
-    }
-    return false;
-  }
-
   // --- OSM Buildings & Town Streets (grouped into 1000m cells, time-sliced) ---
   const { x: bvPlantX, z: bvPlantZ } = lonLatToWorld(BRIDAL_VEIL_PLANT.lon, BRIDAL_VEIL_PLANT.lat);
-  let hasRealBridalVeilBldg = false;
 
   const seenBuildings = new Set();
   const bldgCells = new Map();
@@ -1653,10 +1915,14 @@ export function createStructures(engine, terrain, trailData, atmosphere) {
       seenBuildings.add(id);
       if (!b.coords || b.coords.length < 9) continue;
 
+      let minX, minZ, maxX, maxZ;
       if (b.bbox && b.bbox.length === 4) {
-        indexBuildingBbox(b.bbox[0], b.bbox[1], b.bbox[2], b.bbox[3]);
+        minX = b.bbox[0];
+        minZ = b.bbox[1];
+        maxX = b.bbox[2];
+        maxZ = b.bbox[3];
       } else {
-        let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+        minX = Infinity; minZ = Infinity; maxX = -Infinity; maxZ = -Infinity;
         for (let k = 0; k < b.coords.length; k += 3) {
           const x = b.coords[k], z = b.coords[k + 2];
           if (x < minX) minX = x;
@@ -1664,8 +1930,9 @@ export function createStructures(engine, terrain, trailData, atmosphere) {
           if (z < minZ) minZ = z;
           if (z > maxZ) maxZ = z;
         }
-        indexBuildingBbox(minX, minZ, maxX, maxZ);
       }
+      indexBuildingBbox(minX, minZ, maxX, maxZ);
+      indexBuildingCollider(b.coords, minX, minZ, maxX, maxZ, Boolean(b.isFallbackPlant));
 
       buildQueue.push({ type: 'bldg', data: b });
     }
@@ -1714,7 +1981,6 @@ export function createStructures(engine, terrain, trailData, atmosphere) {
 
   // --- Aerialway Registry & Packing ---
   const seenAerialways = new Set();
-  const animatedLifts = [];
   const _mat = new THREE.Matrix4();
   const _pos = new THREE.Vector3();
   const _quat = new THREE.Quaternion();
@@ -1891,6 +2157,36 @@ export function createStructures(engine, terrain, trailData, atmosphere) {
       sub.rotateY(yaw);
       sub.translate(ox, baseY, oz);
       ruinParts.push(sub);
+
+      // Register rotated mining-ruin footprint (4.4m x 3.8m cabin + headframe base) in bldgColliderGrid
+      const cosY = Math.cos(yaw);
+      const sinY = Math.sin(yaw);
+      const rx0 = -2.2, rz0 = -1.7;
+      const rx1 = 2.2, rz1 = 2.4;
+      const rCoords = new Float32Array(12);
+      const corners = [
+        [rx0, rz0],
+        [rx1, rz0],
+        [rx1, rz1],
+        [rx0, rz1],
+      ];
+      let rMinX = Infinity, rMinZ = Infinity, rMaxX = -Infinity, rMaxZ = -Infinity;
+      for (let c = 0; c < 4; c++) {
+        const lx = corners[c][0];
+        const lz = corners[c][1];
+        // Three.js rotateY(yaw): x' = x*cos + z*sin, z' = -x*sin + z*cos
+        const wx = ox + lx * cosY + lz * sinY;
+        const wz = oz - lx * sinY + lz * cosY;
+        rCoords[c * 3] = wx;
+        rCoords[c * 3 + 1] = baseY;
+        rCoords[c * 3 + 2] = wz;
+        if (wx < rMinX) rMinX = wx;
+        if (wx > rMaxX) rMaxX = wx;
+        if (wz < rMinZ) rMinZ = wz;
+        if (wz > rMaxZ) rMaxZ = wz;
+      }
+      indexBuildingBbox(rMinX, rMinZ, rMaxX, rMaxZ);
+      indexBuildingCollider(rCoords, rMinX, rMinZ, rMaxX, rMaxZ, false);
     }
     const ruinsGeo = mergeColoredBoxes(ruinParts);
     disposables.add(ruinsGeo);
@@ -2141,6 +2437,7 @@ export function createStructures(engine, terrain, trailData, atmosphere) {
     cableMat.dispose();
     bldgCells.clear();
     maskGrid.clear();
+    bldgColliderGrid.clear();
     roadSegHash.clear();
     if (engine.worldBuildingMask === worldBuildingMask) {
       delete engine.worldBuildingMask;

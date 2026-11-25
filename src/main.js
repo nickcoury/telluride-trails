@@ -80,11 +80,29 @@ async function bootstrap() {
   const _playerPose = { x: 0, y: 0, z: 0, heading: 0 };
   const _activePos = { x: 0, y: 0, z: 0 };
 
-  // Canonical main-loop ordering:
-  // input (engine) -> game -> camera (+updateMatrixWorld) -> terrain -> world -> audio (registered below) -> scheduler -> render
+  // Canonical main-loop ordering (eliminates 1-frame terrain-vs-runner lag):
+  // input (engine) -> game.update -> terrain.update -> game.syncPostTerrain ->
+  // camera (+updateMatrixWorld) -> terrain.syncCameraUniforms -> world ->
+  // audio / lateUpdate (runnerGuard) -> scheduler -> render
   engine.onUpdate((dt, t) => {
     const appState = engine.getAppState();
     game.update(dt);
+
+    const useCameraFocus =
+      appState === 'title' || appState === 'loading' || engine.cameraRig.isFlythrough();
+    const hasActiveRunner = !useCameraFocus && Boolean(game.state && game.state.mode !== 'idle');
+    if (hasActiveRunner) {
+      _activePos.x = game.state.x;
+      _activePos.y = game.state.y;
+      _activePos.z = game.state.z;
+    } else {
+      _activePos.x = engine.camera.position.x;
+      _activePos.y = engine.camera.position.y;
+      _activePos.z = engine.camera.position.z;
+    }
+
+    terrain.update(_activePos);
+    game.syncPostTerrain?.();
 
     if (engine.cameraRig.isFlythrough()) {
       engine.cameraRig.update(dt, null, engine.input);
@@ -104,10 +122,9 @@ async function bootstrap() {
     }
 
     engine.camera.updateMatrixWorld();
+    terrain.syncCameraUniforms?.(engine.camera.position);
 
-    const useCameraFocus =
-      appState === 'title' || appState === 'loading' || engine.cameraRig.isFlythrough();
-    if (!useCameraFocus && game.state && game.state.mode !== 'idle') {
+    if (hasActiveRunner) {
       _activePos.x = game.state.x;
       _activePos.y = game.state.y;
       _activePos.z = game.state.z;
@@ -117,7 +134,6 @@ async function bootstrap() {
       _activePos.z = engine.camera.position.z;
     }
 
-    terrain.update(_activePos);
     world.update(dt, _activePos);
   });
 
@@ -128,7 +144,10 @@ async function bootstrap() {
   performance.mark('tt:title-ready');
 
   function teleportWorld(x, z, heading = 0) {
-    const y = terrain.getHeight(x, z);
+    const y =
+      typeof terrain.getRenderedHeight === 'function'
+        ? terrain.getRenderedHeight(x, z)
+        : terrain.getHeight(x, z);
     if (typeof game.teleport === 'function') {
       game.teleport(x, z, heading);
     } else if (game.state) {
@@ -137,7 +156,8 @@ async function bootstrap() {
       game.state.y = y;
       game.state.heading = heading;
     }
-    engine.cameraRig.snapTo({ x, y, z }, heading);
+    const snapY = Number.isFinite(game.state?.y) ? game.state.y : y;
+    engine.cameraRig.snapTo({ x, y: snapY, z }, heading);
   }
 
   async function startFreeRunSafe(opts = {}) {

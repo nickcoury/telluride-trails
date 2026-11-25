@@ -973,6 +973,78 @@
     gap: 0.75rem;
   }
 
+  .races-easter-divider {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    margin-block-start: 0.65rem;
+    color: #9ae6df;
+    font-size: clamp(0.64rem, 2.6vw, 0.76rem);
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .races-easter-divider::before,
+  .races-easter-divider::after {
+    content: '';
+    flex: 1 1 auto;
+    min-inline-size: 10px;
+    block-size: 1px;
+    background: linear-gradient(90deg, rgba(196, 206, 212, 0.08), rgba(0, 178, 169, 0.45), rgba(196, 206, 212, 0.08));
+  }
+
+  .races-easter-divider span {
+    padding: 0.24rem 0.65rem;
+    border-radius: var(--radius-pill);
+    background: rgba(0, 178, 169, 0.12);
+    border: 1px solid rgba(196, 206, 212, 0.28);
+    text-align: center;
+    max-inline-size: 100%;
+  }
+
+  .race-card--easter-egg {
+    border-color: rgba(0, 178, 169, 0.52);
+    background:
+      linear-gradient(155deg, rgba(0, 178, 169, 0.11) 0%, rgba(196, 206, 212, 0.05) 38%, var(--bg-panel-solid) 78%);
+    box-shadow: 0 0 0 1px rgba(196, 206, 212, 0.16), 0 10px 28px rgba(0, 0, 0, 0.34);
+  }
+
+  .race-card--easter-egg .race-stats {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.45fr) minmax(0, 0.8fr);
+  }
+
+  .race-card--easter-egg .race-stats dd {
+    font-size: clamp(0.78rem, 3.2vw, 0.92rem);
+    white-space: nowrap;
+  }
+
+  .race-easter-pill {
+    align-self: flex-start;
+    padding: 0.2rem 0.58rem;
+    border-radius: var(--radius-pill);
+    background: linear-gradient(90deg, rgba(0, 178, 169, 0.24), rgba(196, 206, 212, 0.18));
+    border: 1px solid rgba(0, 178, 169, 0.55);
+    color: #b2f5ea;
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .race-card--easter-egg .race-disclaimer {
+    background: rgba(0, 178, 169, 0.11);
+    border-color: rgba(0, 178, 169, 0.36);
+    color: #c8f7f3;
+  }
+
+  .race-card--easter-egg .race-start-btn {
+    background: linear-gradient(135deg, #00b2a9 0%, #0d9488 100%);
+    color: #051618;
+    border-color: rgba(196, 206, 212, 0.45);
+  }
+
   .race-card__head {
     display: flex;
     justify-content: space-between;
@@ -1300,6 +1372,10 @@
     border: 1px solid var(--border-subtle);
   }
 
+  .hud-stats__row {
+    display: contents;
+  }
+
   .hud-stat {
     display: flex;
     flex-direction: column;
@@ -1361,11 +1437,73 @@
     background: var(--accent-danger);
   }
 
-  .hud-gait-badge {
+  .hud-badges {
     grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.28rem 0.42rem;
+    margin-block-start: 0.1rem;
+  }
+
+  .hud-badges[hidden] {
+    display: none;
+  }
+
+  .hud-gait-badge {
+    display: inline-flex;
+    align-items: center;
     font-size: 0.72rem;
     font-weight: 800;
+    line-height: 1.2;
+    padding: 0.1rem 0.42rem;
+    border-radius: var(--radius-pill);
     color: var(--accent-gold);
+    background: rgba(244, 185, 66, 0.15);
+    border: 1px solid rgba(244, 185, 66, 0.36);
+    white-space: nowrap;
+  }
+
+  .hud-gait-badge[hidden] {
+    display: none;
+  }
+
+  .hud-gait-badge[data-gait='hike'] {
+    color: #ffd670;
+    background: rgba(244, 185, 66, 0.18);
+    border-color: rgba(244, 185, 66, 0.46);
+  }
+
+  .hud-gait-badge[data-gait='sprint'] {
+    color: #7bf1a8;
+    background: rgba(61, 220, 132, 0.16);
+    border-color: rgba(61, 220, 132, 0.44);
+  }
+
+  .hud-gait-badge[data-gait='winded'] {
+    color: #fca5a5;
+    background: rgba(239, 68, 68, 0.2);
+    border-color: rgba(248, 113, 113, 0.5);
+  }
+
+  .hud-gait-badge[data-gait='altitude'] {
+    color: #bae6fd;
+    background: rgba(56, 189, 248, 0.14);
+    border-color: rgba(56, 189, 248, 0.36);
+  }
+
+  .hud-sealevel-badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.72rem;
+    font-weight: 800;
+    line-height: 1.2;
+    color: #5eead4;
+    white-space: nowrap;
+  }
+
+  .hud-sealevel-badge[hidden] {
+    display: none;
   }
 
   /* RACE BAR */
@@ -1634,9 +1772,15 @@
   }
 
   .action-btn.is-active {
-    background: rgba(244, 185, 66, 0.88);
+    background: rgba(244, 185, 66, 0.92);
     color: #0b1218;
     border-color: #ffffff;
+    box-shadow: 0 0 0 2px rgba(244, 185, 66, 0.42), 0 4px 12px rgba(0, 0, 0, 0.4);
+  }
+
+  .action-btn--hike.is-active {
+    background: linear-gradient(145deg, #ffd166 0%, #f4b942 100%);
+    box-shadow: 0 0 0 2.5px rgba(244, 185, 66, 0.55), 0 4px 14px rgba(244, 185, 66, 0.35);
   }
 
   .context-actions {
@@ -1920,14 +2064,27 @@
       position: relative;
       overflow: hidden;
       display: inline-flex;
-      flex-wrap: nowrap;
-      align-items: center;
-      gap: 0;
-      padding: 0.2rem 0.55rem 0.34rem;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.1rem;
+      padding: 0.14rem 0.5rem 0.28rem;
       border-radius: var(--radius-pill);
       background: rgba(11, 18, 24, 0.54);
       backdrop-filter: blur(8px);
       max-inline-size: 100%;
+    }
+
+    .hud-stats:not(.is-expanded) .hud-stats__row {
+      display: inline-flex;
+      flex-wrap: nowrap;
+      align-items: center;
+      gap: 0;
+      max-inline-size: 100%;
+    }
+
+    .hud-stats:not(.is-expanded):has(.hud-badges:not([hidden])) {
+      border-radius: 10px;
+      padding-block-end: 0.32rem;
     }
 
     .hud-stats:not(.is-expanded) .hud-stat {
@@ -1938,21 +2095,37 @@
 
     .hud-stats:not(.is-expanded) .hud-stat + .hud-stat::before {
       content: '·';
-      margin-inline: 0.26rem;
+      margin-inline: 0.24rem;
       color: var(--ink-muted);
       font-weight: 600;
-      font-size: 0.72rem;
+      font-size: 0.7rem;
     }
 
     .hud-stats:not(.is-expanded) .hud-stat__label,
-    .hud-stats:not(.is-expanded) .hud-gait-badge,
     .hud-stats:not(.is-expanded) .hud-elev-grade {
       display: none !important;
     }
 
+    .hud-stats:not(.is-expanded) .hud-badges:not([hidden]) {
+      margin-block-start: 0;
+      gap: 0.18rem 0.3rem;
+      max-inline-size: 100%;
+    }
+
+    .hud-stats:not(.is-expanded) .hud-gait-badge:not([hidden]) {
+      font-size: 0.64rem;
+      line-height: 1.1;
+      padding: 0.05rem 0.34rem;
+    }
+
+    .hud-stats:not(.is-expanded) .hud-sealevel-badge:not([hidden]) {
+      font-size: 0.64rem;
+      line-height: 1.1;
+    }
+
     .hud-stats:not(.is-expanded) .hud-stat__val {
-      font-size: 0.73rem;
-      line-height: 1.15;
+      font-size: 0.72rem;
+      line-height: 1.12;
     }
 
     .hud-stats:not(.is-expanded) .hud-meters {
@@ -1984,8 +2157,8 @@
       text-align: start;
       display: inline-flex;
       align-items: center;
-      block-size: 24px;
-      padding: 0.14rem 0.55rem;
+      block-size: 21px;
+      padding: 0.1rem 0.5rem;
       border-radius: var(--radius-pill);
       background: rgba(11, 18, 24, 0.56);
       backdrop-filter: blur(8px);
@@ -2096,6 +2269,11 @@
   }
 
   @media (max-width: 560px) {
+    .joystick {
+      inline-size: 86px;
+      block-size: 86px;
+    }
+
     .joystick__ring {
       inline-size: 84px;
       block-size: 84px;
@@ -2706,12 +2884,31 @@
   }
 
   .runner-card__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.2rem 0.45rem;
     font-size: 0.75rem;
     color: var(--ink-secondary);
   }
 
   .runner-card__meta strong {
     color: var(--accent-blue);
+  }
+
+  .runner-dogs-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0.08rem 0.44rem;
+    border-radius: var(--radius-pill);
+    background: rgba(61, 220, 132, 0.14);
+    border: 1px solid rgba(61, 220, 132, 0.42);
+    color: #86efac;
+    font-size: 0.68rem;
+    font-weight: 800;
+    line-height: 1.25;
+    white-space: nowrap;
   }
 
   .runner-card__bio {

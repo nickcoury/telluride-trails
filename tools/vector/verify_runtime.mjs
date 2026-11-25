@@ -63,9 +63,34 @@ console.log(`Startup loadTrailData(): ${startupMs.toFixed(1)} ms (reqs=${fetched
 console.log(`POIs: ${trailData.pois.length} total, ${trailData.pois.filter((p) => p.freeRun).length} freeRun`);
 console.log(`Races: ${trailData.races.length}`);
 
-assert.equal(trailData.races.length, 12, 'Expected 12 races');
+assert.equal(trailData.races.length, 13, 'Expected 13 races');
 assert.ok(!JSON.stringify(trailData.pois).includes('St. Sophia'), 'St. Sophia should be San Sophia');
 assert.ok(!JSON.stringify(trailData.races).includes('St. Sophia'), 'St. Sophia in races should be San Sophia');
+
+// Check Spurs Austin International Half Marathon Easter egg (13th race, index 12, bottom of list)
+const spurs = trailData.races[trailData.races.length - 1];
+assert.equal(spurs.id, 'spurs-half-marathon', 'spurs-half-marathon must be the 13th/last race');
+assert.equal(spurs.name, 'Spurs Austin International Half Marathon');
+assert.equal(spurs.easterEgg, true, 'spurs-half-marathon must have easterEgg: true');
+assert.equal(spurs.seaLevel, true, 'spurs-half-marathon must have seaLevel: true');
+assert.equal(spurs.startTimeLocal, '07:00');
+assert.equal(spurs.cutoffH, 4);
+assert.equal(spurs.gainFt, 197);
+assert.equal(spurs.officialGainFt, 197);
+assert.equal(spurs.lossFt, 561);
+assert.ok(spurs.distanceMi >= 13.0 && spurs.distanceMi <= 13.25, `spurs distanceMi=${spurs.distanceMi} out of range`);
+const spursTotalM = spurs.line[spurs.line.length - 1];
+assert.ok(spursTotalM >= 21050 && spursTotalM <= 21180, `spurs polyline length ${spursTotalM}m outside 21050..21180m`);
+for (let i = 0; i < spurs.line.length; i += 3) {
+  assert.ok(spurs.line[i] >= -17500, `spurs x=${spurs.line[i]} out of safe western bound >= -17500`);
+}
+assert.equal(spurs.elevations.length, 128, 'spurs must have 128 elevation samples');
+const spursMaxE = Math.max(...spurs.elevations);
+const spursMinE = Math.min(...spurs.elevations);
+assert.ok(spursMaxE >= 267 && spursMaxE <= 269, `spurs max elev=${spursMaxE}m should be ~268m`);
+assert.ok(spursMinE >= 148 && spursMinE <= 150, `spurs min elev=${spursMinE}m should be ~149m`);
+assert.equal(spurs.checkpoints.length, 4, 'spurs must have 4 checkpoints');
+assert.ok(spurs.checkpoints[0].name.includes('Shoal Creek') && spurs.checkpoints[3].name.includes('Texas State Capitol'));
 
 // Check Gondola Base & San Sophia POIs + both Rundola races
 const townPoi = trailData.pois.find((p) => p.id === 'telluride-town');
@@ -216,6 +241,23 @@ for (let i = 0; i < rundolaOrig.line.length; i += 3) {
 }
 assert.ok(minLinePylonD >= 5.0, `rundola-original polyline too close to gondola pylon: ${minLinePylonD.toFixed(2)}m`);
 console.log(`Verified both Rundola courses, Gondola Cut nearest()/route(), zero building intersections, and pylon clearance >= ${minLinePylonD.toFixed(2)}m!`);
+
+// Verify Spurs Half Marathon start & finish road nearest() and zero building overlap
+await trailData.loadArea(spurs.start.x, spurs.start.z, 800);
+const nearSpursStart = trailData.nearest(spurs.start.x, spurs.start.z, 10);
+assert.ok(nearSpursStart && nearSpursStart.kind === 'road' && nearSpursStart.dist < 2.0, `Expected paved road at spurs start, got ${JSON.stringify(nearSpursStart)}`);
+for (const b of trailData.buildings) {
+  if (spurs.start.x < b.bbox[0] || spurs.start.x > b.bbox[2] || spurs.start.z < b.bbox[1] || spurs.start.z > b.bbox[3]) continue;
+  assert.ok(!ptInBuilding(spurs.start.x, spurs.start.z, b.coords), `spurs start inside building ${b.id}`);
+}
+await trailData.loadArea(spurs.finish.x, spurs.finish.z, 1200);
+const nearSpursFin = trailData.nearest(spurs.finish.x, spurs.finish.z, 10);
+assert.ok(nearSpursFin && nearSpursFin.kind === 'road' && nearSpursFin.dist < 2.0, `Expected paved road at spurs finish, got ${JSON.stringify(nearSpursFin)}`);
+for (const b of trailData.buildings) {
+  if (spurs.finish.x < b.bbox[0] || spurs.finish.x > b.bbox[2] || spurs.finish.z < b.bbox[1] || spurs.finish.z > b.bbox[3]) continue;
+  assert.ok(!ptInBuilding(spurs.finish.x, spurs.finish.z, b.coords), `spurs finish inside building ${b.id}`);
+}
+console.log(`Verified Spurs Austin Half Marathon (${spurs.distanceMi} mi / ${spursTotalM.toFixed(1)} m, Austin elev ${spursMaxE}m -> ${spursMinE}m, road start='${nearSpursStart.name}', road finish='${nearSpursFin.name}', 0 building overlap)!`);
 
 // 3. Test concurrency cap (<=6) & LRU eviction across full 60km region load
 appState = 'loading';

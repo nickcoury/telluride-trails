@@ -260,6 +260,19 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
   const renderedPatches = [];
   let renderedPatchCount = 0;
   let lastRenderedPatch = null;
+  let syncedCamX = 0;
+  let syncedCamY = 0;
+  let syncedCamZ = 0;
+  let disposed = false;
+  const _preloadFocus = { x: 0, y: 0, z: 0 };
+
+  function syncCameraUniforms(camPos) {
+    if (disposed || !camPos) return;
+    syncedCamX = camPos.x;
+    syncedCamY = camPos.y;
+    syncedCamZ = camPos.z;
+    materialPool.syncAtmosphere(camPos, engine.clock.elapsedTime);
+  }
 
   function walkNode(z, x, y, bounds, camPos, focusPos, isTitle) {
     const maxTerrainZ = isTitle ? Math.min(14, config.maxTerrainZoom) : config.maxTerrainZoom;
@@ -271,11 +284,6 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
     _box.max.set(bounds.maxX, maxH, bounds.maxZ);
 
     const distCam = _box.distanceToPoint(camPos);
-    if (distCam > config.horizonDrawDistance) return;
-
-    // Keep immediate runner surroundings un-culled so 180-deg whip-pans & steep slopes never expose a gap,
-    // while culling unseen patches >190m behind the camera to save ~35% draws & VRAM!
-    const distFocus = _box.distanceToPoint(focusPos);
     const distFocusXZ = distPointToRectXZ(
       focusPos.x,
       focusPos.z,
@@ -284,6 +292,11 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
       bounds.minZ,
       bounds.maxZ,
     );
+    if (Math.min(distCam, distFocusXZ) > config.horizonDrawDistance) return;
+
+    // Keep immediate runner surroundings un-culled so 180-deg whip-pans & steep slopes never expose a gap,
+    // while culling unseen patches >190m behind the camera to save ~35% draws & VRAM!
+    const distFocus = _box.distanceToPoint(focusPos);
     if (distCam > 190 && distFocusXZ > NEAR_PLAYER_RADIUS_M && !_frustum.intersectsBox(_box)) {
       return;
     }
@@ -293,7 +306,7 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
     const minDist = Math.min(distCam, distFocus);
     const maxAllowedZoom = isTitle
       ? Math.min(14, config.maxQuadZoom)
-      : distCam > config.detailDrawDistance
+      : minDist > config.detailDrawDistance
         ? Math.min(12, config.maxQuadZoom)
         : config.maxQuadZoom;
 
@@ -329,7 +342,7 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
     const camPos = cam.position;
     const focusVec = focusPos ? _vec.set(focusPos.x || 0, focusPos.y || camPos.y, focusPos.z || 0) : camPos;
 
-    materialPool.syncAtmosphere(camPos, engine.clock.elapsedTime);
+    syncCameraUniforms(camPos);
 
     leaves.length = 0;
     pinnedKeys.clear();
@@ -513,9 +526,6 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
           hScale: 1,
           morphStart: 1e9,
           invMorphSpan: 0,
-          camX: 0,
-          camY: 0,
-          camZ: 0,
           nearExact: false,
         };
         renderedPatches[i] = rec;
@@ -535,9 +545,6 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
       rec.hScale = uniforms.uHeightUvTransform.value.z;
       rec.morphStart = morphStart;
       rec.invMorphSpan = invMorphSpan;
-      rec.camX = camPos.x;
-      rec.camY = camPos.y;
-      rec.camZ = camPos.z;
       rec.nearExact = !isTitle && (z >= NEAR_PLAYER_ZOOM - 1 || distFocusXZ <= NEAR_PLAYER_RADIUS_M + 20);
 
       mesh.receiveShadow = shadowsEnabled && distCam < config.detailDrawDistance;
@@ -608,7 +615,7 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
     if (p.invMorphSpan > 0 && ((vgx & 1) !== 0 || (vgz & 1) !== 0)) {
       const wx = p.minX + vu * p.width;
       const wz = p.minZ + vv * p.depth;
-      const dist = Math.hypot(wx - p.camX, h - p.camY, wz - p.camZ);
+      const dist = Math.hypot(wx - syncedCamX, h - syncedCamY, wz - syncedCamZ);
       const morphK = Math.max(0, Math.min(1, (dist - p.morphStart) * p.invMorphSpan));
       if (morphK > 0) {
         const ox = vgx & 1;
@@ -742,14 +749,14 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
   }
 
   /**
-   * Synchronous world normal query matching the rendered terrain surface. Never throws.
+   * Synchronous world normal query matching the exact rendered terrain mesh. Never throws.
    */
   function getNormal(x, z) {
-    const e = 2.0;
-    const hL = getHeight(x - e, z);
-    const hR = getHeight(x + e, z);
-    const hN = getHeight(x, z - e);
-    const hS = getHeight(x, z + e);
+    const e = 1.25;
+    const hL = getRenderedHeight(x - e, z);
+    const hR = getRenderedHeight(x + e, z);
+    const hN = getRenderedHeight(x, z - e);
+    const hS = getRenderedHeight(x, z + e);
     const nx = hL - hR;
     const ny = 2 * e;
     const nz = hN - hS;
@@ -852,12 +859,21 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
       done = true;
       if (timer) clearTimeout(timer);
       if (off) off();
+      if (disposed) return;
       // Full flush so every decoded tile is GPU-resident before loading screen drops!
       tileCache.processUploads(999, Infinity);
-      tileCache.setPreloadPinned(null, preloadPinned);
       if (!isTitle && config.useTrailMask) {
         trailMask.warmAround(x, z, config.trailMaskNearZoom || 16);
       }
+      if (!isTitle) {
+        // Populate renderedPatches (including the z18 non-morphed player halo around (x, z))
+        // while preloadPinned protects preloaded tiles, before preload() resolves!
+        _preloadFocus.x = x;
+        _preloadFocus.y = sampleRawDemHeight(x, z);
+        _preloadFocus.z = z;
+        update(_preloadFocus);
+      }
+      tileCache.setPreloadPinned(null, preloadPinned);
     };
 
     const addRect = (kind, tz, rad, blocking = true, prioBase = -1000) => {
@@ -988,6 +1004,7 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
   }
 
   function dispose() {
+    disposed = true;
     engine.scene.remove(rootGroup);
     for (const geo of geometries.values()) geo.dispose();
     geometries.clear();
@@ -999,6 +1016,7 @@ export function createTerrainQuadtree({ engine, tileCache, materialPool, trailMa
 
   return {
     update,
+    syncCameraUniforms,
     getHeight,
     getRenderedHeight,
     getNormal,

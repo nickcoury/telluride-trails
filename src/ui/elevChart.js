@@ -105,7 +105,8 @@ export function createElevationChart({ race, terrain, units = 'imperial' }) {
     if (p.elevM < minE) minE = p.elevM;
     if (p.elevM > maxE) maxE = p.elevM;
   }
-  const pad = Math.max(40, (maxE - minE) * 0.14);
+  const isEaster = Boolean(race?.easterEgg);
+  const pad = Math.max(isEaster ? 18 : 40, (maxE - minE) * 0.14);
   const yMin = minE - pad * 0.4;
   const yMax = maxE + pad;
   const ySpan = Math.max(10, yMax - yMin);
@@ -127,6 +128,9 @@ export function createElevationChart({ race, terrain, units = 'imperial' }) {
     ` L ${toX(pts[pts.length - 1].dM).toFixed(1)},${B} Z`;
 
   const gradId = `elev-grad-${String(race.id || 'race').replace(/[^a-z0-9_-]/gi, '')}`;
+  const strokeColor = isEaster ? '#00b2a9' : '#f4b942';
+  const gradTopColor = isEaster ? '#00b2a9' : '#f4b942';
+  const gradBotColor = isEaster ? '#c4ced4' : '#e65c2e';
 
   const cps = (race.checkpoints || []).slice(0, 12);
   const cpSvg = cps
@@ -142,8 +146,8 @@ export function createElevationChart({ race, terrain, units = 'imperial' }) {
     <svg viewBox="0 0 ${W} ${H}" class="elev-chart__svg" aria-hidden="true" focusable="false">
       <defs>
         <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#f4b942" stop-opacity="0.48" />
-          <stop offset="100%" stop-color="#e65c2e" stop-opacity="0.04" />
+          <stop offset="0%" stop-color="${gradTopColor}" stop-opacity="0.48" />
+          <stop offset="100%" stop-color="${gradBotColor}" stop-opacity="0.06" />
         </linearGradient>
       </defs>
       <line x1="${L}" y1="${T}" x2="${R}" y2="${T}" stroke="rgba(255,255,255,0.08)" />
@@ -151,7 +155,7 @@ export function createElevationChart({ race, terrain, units = 'imperial' }) {
       <line x1="${L}" y1="${B}" x2="${R}" y2="${B}" stroke="rgba(255,255,255,0.14)" />
       ${cpSvg}
       <path d="${areaPath}" fill="url(#${gradId})" />
-      <polyline points="${linePoints}" fill="none" stroke="#f4b942" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" />
+      <polyline points="${linePoints}" fill="none" stroke="${strokeColor}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" />
       <text x="${L + 2}" y="${T - 3}" fill="rgba(244,246,248,0.72)" font-size="9" font-weight="600">High ${fmtElev(maxE, units)}</text>
       <text x="${R - 2}" y="${B + 12}" text-anchor="end" fill="rgba(244,246,248,0.65)" font-size="9">${fmtDist(totalM, units, 1)}</text>
       <text x="${L + 2}" y="${B + 12}" fill="rgba(244,246,248,0.65)" font-size="9">Low ${fmtElev(minE, units)}</text>

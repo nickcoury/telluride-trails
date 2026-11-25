@@ -467,6 +467,7 @@ export function createRunnerCharacter(assetsBase = './') {
   let smoothGrade = 0;
   let smoothPowerHike = 0;
   let pelvisOffsetY = 0;
+  let basePivotY = 0;
   let currentVisualHeight = 1.74;
   let idleTime = 0;
   let strideClock = 0;
@@ -750,6 +751,94 @@ export function createRunnerCharacter(assetsBase = './') {
     applyShadowSetting();
   }
 
+  function alignBlobShadow(terrainNormal, heading) {
+    if (!blobShadow.visible) return;
+    if (terrainNormal && Number.isFinite(terrainNormal.y)) {
+      const cosH = Math.cos(heading);
+      const sinH = Math.sin(heading);
+      _vNorm.set(
+        terrainNormal.x * cosH - terrainNormal.z * sinH,
+        Math.max(0.15, terrainNormal.y),
+        terrainNormal.x * sinH + terrainNormal.z * cosH
+      ).normalize();
+      blobShadow.quaternion.setFromUnitVectors(_vUp, _vNorm);
+      blobShadow.position.set(_vNorm.x * 0.04, _vNorm.y * 0.04, _vNorm.z * 0.04);
+    } else {
+      blobShadow.quaternion.identity();
+      blobShadow.position.set(0, 0.03, 0);
+    }
+  }
+
+  /**
+   * Hardened post-IK zero-penetration floor clamp checking soles (heel+ball),
+   * shins/knees (calf_l/calf_r +0.05m), pelvis (+0.12m), and root center.
+   */
+  function enforceZeroPenetration(getGroundY) {
+    if (typeof getGroundY !== 'function' || !loaded) return;
+    const hasFeet = Boolean(bones.foot_l && bones.foot_r);
+    let maxPen = 0;
+
+    if (hasFeet) {
+      measureFootSole(bones.foot_l, bones.ball_l, bones.ball_leaf_l, footMeasureL, currentScaleY);
+      measureFootSole(bones.foot_r, bones.ball_r, bones.ball_leaf_r, footMeasureR, currentScaleY);
+
+      const gL = Math.max(
+        getGroundY(footMeasureL.heelX, footMeasureL.heelZ),
+        getGroundY(footMeasureL.ballX, footMeasureL.ballZ)
+      );
+      const gR = Math.max(
+        getGroundY(footMeasureR.heelX, footMeasureR.heelZ),
+        getGroundY(footMeasureR.ballX, footMeasureR.ballZ)
+      );
+      const gCenter = getGroundY(root.position.x, root.position.z);
+      const lowestSole = Math.min(footMeasureL.soleY, footMeasureR.soleY);
+
+      maxPen = Math.max(
+        maxPen,
+        gL - footMeasureL.soleY,
+        gR - footMeasureR.soleY,
+        gCenter - lowestSole - 0.06
+      );
+    }
+
+    if (bones.calf_l) {
+      bones.calf_l.getWorldPosition(_vTmp);
+      const gKneeL = getGroundY(_vTmp.x, _vTmp.z);
+      maxPen = Math.max(maxPen, gKneeL + 0.05 * currentScaleY - _vTmp.y);
+    }
+    if (bones.calf_r) {
+      bones.calf_r.getWorldPosition(_vTmp);
+      const gKneeR = getGroundY(_vTmp.x, _vTmp.z);
+      maxPen = Math.max(maxPen, gKneeR + 0.05 * currentScaleY - _vTmp.y);
+    }
+    if (bones.pelvis) {
+      bones.pelvis.getWorldPosition(_vTmp);
+      const gPelvis = getGroundY(_vTmp.x, _vTmp.z);
+      maxPen = Math.max(maxPen, gPelvis + 0.12 * currentScaleY - _vTmp.y);
+    }
+
+    if (maxPen > 0.001) {
+      modelPivot.position.y += Math.min(0.75, maxPen);
+      root.updateMatrixWorld(true);
+    }
+  }
+
+  /**
+   * Idempotent post-terrain grounding resnap (called after terrain.update() in main.js
+   * without re-advancing AnimationMixer).
+   */
+  function resnapGround({ getGroundY = null, terrainNormal = null, heading = root.rotation.y } = {}) {
+    alignBlobShadow(terrainNormal, heading);
+    if (!root.visible || !loaded || typeof getGroundY !== 'function') return;
+    modelPivot.position.y = basePivotY;
+    root.updateMatrixWorld(true);
+    enforceZeroPenetration(getGroundY);
+    if (bones.Head) {
+      bones.Head.getWorldPosition(_vTmp);
+      currentVisualHeight = clamp((_vTmp.y + 0.24 * currentScaleY) - root.position.y, 0.55, 2.05);
+    }
+  }
+
   function updatePose(dt, params) {
     const {
       speedMs = 0,
@@ -782,22 +871,7 @@ export function createRunnerCharacter(assetsBase = './') {
     }
 
     // Align low-tier contact blob shadow flush to sloped terrain
-    if (blobShadow.visible) {
-      if (terrainNormal && Number.isFinite(terrainNormal.y)) {
-        const cosH = Math.cos(heading);
-        const sinH = Math.sin(heading);
-        _vNorm.set(
-          terrainNormal.x * cosH - terrainNormal.z * sinH,
-          Math.max(0.15, terrainNormal.y),
-          terrainNormal.x * sinH + terrainNormal.z * cosH
-        ).normalize();
-        blobShadow.quaternion.setFromUnitVectors(_vUp, _vNorm);
-        blobShadow.position.set(_vNorm.x * 0.04, _vNorm.y * 0.04, _vNorm.z * 0.04);
-      } else {
-        blobShadow.quaternion.identity();
-        blobShadow.position.set(0, 0.03, 0);
-      }
-    }
+    alignBlobShadow(terrainNormal, heading);
 
     // Estimate first-person stride bob even when model hidden in 1st person
     const moving = speedMs > 0.15 && !isFallen && !isKissingRock && !isAirborne;
@@ -1020,8 +1094,10 @@ export function createRunnerCharacter(assetsBase = './') {
           maxPen = Math.max(maxPen, gPelvis + 0.08 - _vTmp.y);
         }
         pelvisOffsetY = clamp(maxPen + 0.015, 0, 0.55);
+        basePivotY = pelvisOffsetY;
         modelPivot.position.y = pelvisOffsetY;
         root.updateMatrixWorld(true);
+        enforceZeroPenetration(getGroundY);
       } else {
         // Step 1: Measure animated feet at neutral pivot (y=0) to extract natural swing lift
         root.updateMatrixWorld(true);
@@ -1041,13 +1117,13 @@ export function createRunnerCharacter(assetsBase = './') {
           getGroundY(footMeasureR.ballX, footMeasureR.ballZ)
         );
 
-        // Step 2: Shift pelvis down toward the lower stance foot on steep grades so the downhill
-        // leg reaches the slope naturally while the uphill knee flexes up onto the higher ground.
+        // Step 2: Shift pelvis gently toward lower stance foot (clamped >= -0.12 so convex crests never bury knees/hips)
         const targetPelvisY = isAirborne
           ? 0
-          : clamp(Math.min(gL, gR) - rootY, -0.28, 0.14);
+          : clamp(Math.min(gL, gR) - rootY, -0.12, 0.22);
         const pelvisRate = snapGround ? 1 : Math.min(1, safeDt * 18);
         pelvisOffsetY = lerp(pelvisOffsetY, targetPelvisY, pelvisRate);
+        basePivotY = pelvisOffsetY;
         modelPivot.position.y = pelvisOffsetY;
         root.updateMatrixWorld(true);
 
@@ -1070,17 +1146,12 @@ export function createRunnerCharacter(assetsBase = './') {
           solveTwoBoneLegIK(bones.thigh_r, bones.calf_r, bones.foot_r, deltaR, fwdX, fwdZ, rightX, rightZ, pitchR);
         }
 
-        // Step 4: Guaranteed zero-penetration safety floor clamp (covers extreme >70% kinks & airborne uphill landings)
-        measureFootSole(bones.foot_l, bones.ball_l, bones.ball_leaf_l, footMeasureL, currentScaleY);
-        measureFootSole(bones.foot_r, bones.ball_r, bones.ball_leaf_r, footMeasureR, currentScaleY);
-        const maxPen = Math.max(0, gL - footMeasureL.soleY, gR - footMeasureR.soleY);
-        if (maxPen > 0.001) {
-          modelPivot.position.y += Math.min(0.45, maxPen);
-          root.updateMatrixWorld(true);
-        }
+        // Step 4: Guaranteed zero-penetration floor clamp across soles, shins/knees, pelvis & center (up to 0.75 m)
+        enforceZeroPenetration(getGroundY);
       }
     } else {
-      modelPivot.position.y = 0.025 * currentScaleY;
+      basePivotY = 0.025 * currentScaleY;
+      modelPivot.position.y = basePivotY;
       root.updateMatrixWorld(true);
     }
 
@@ -1118,6 +1189,7 @@ export function createRunnerCharacter(assetsBase = './') {
     getVisualHeight: () => currentVisualHeight,
     setAppearance,
     updatePose,
+    resnapGround,
     setShadowsEnabled,
     dispose() {
       disposed = true;

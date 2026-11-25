@@ -26,7 +26,7 @@ Startup-loaded array of curated free-run starts, trailheads, viewpoints, peaks, 
 `heading` follows `src/core/camera.js` convention where forward is `(-sin(heading), -cos(heading))` (`heading = atan2(-tx, -tz)`).
 
 ### `races.json`
-Startup-loaded array of 12 real San Juan trail races (including both `rundola` on Telluride Trail and `rundola-original` straight up under Gondola Line 1) reconstructed from official CalTopo/OSM geometries and resampled at 15 m over z14 Terrarium elevation:
+Startup-loaded array of 13 trail/road races (12 real San Juan mountain races including both `rundola` on Telluride Trail and `rundola-original` straight up under Gondola Line 1, plus the `spurs-half-marathon` Austin road Easter egg at index 12) reconstructed from official CalTopo/OSM geometries and resampled at 15 m over z14 Terrarium elevation:
 ```json
 {
   "id": "hardrock-100-cw",

@@ -356,11 +356,28 @@ export function createRaceManager() {
     return null;
   }
 
+  function getVirtualElevationM() {
+    if (!activeRace?.seaLevel) return null;
+    const elevs = activeRace.elevations;
+    if (!Array.isArray(elevs) || elevs.length < 2) return 200;
+    const frac = clamp(courseDistM / Math.max(1, totalDistM), 0, 1);
+    const fIdx = frac * (elevs.length - 1);
+    const i0 = Math.min(elevs.length - 1, Math.floor(fIdx));
+    const i1 = Math.min(elevs.length - 1, i0 + 1);
+    const t = fIdx - i0;
+    return elevs[i0] + (elevs[i1] - elevs[i0]) * t;
+  }
+
   function getHudSummary(speedMs, simEpochMs = Date.now()) {
     if (!activeRace) return null;
     const nextCp = checkpoints[checkpointIdx] || null;
     const remTotalM = Math.max(0, totalDistM - courseDistM);
-    const effectiveSpeed = speedMs > 0.35 ? speedMs : 1.75; // conservative ultrarunner estimate when paused/stopped
+    const curSpeed = speedMs > 0.35 ? speedMs : 1.75;
+    let effectiveSpeed = curSpeed;
+    if (courseDistM > 300 && clockS > 60) {
+      const avgSpeed = clamp(courseDistM / clockS, 0.55, 6.5);
+      effectiveSpeed = avgSpeed * 0.65 + curSpeed * 0.35;
+    }
     const etaS = remTotalM / effectiveSpeed;
     const etaInfo = formatRealTimeEta(etaS, simEpochMs);
 
@@ -432,6 +449,7 @@ export function createRaceManager() {
     isCeremony: () => ceremonyActive,
     getOffCourseM: () => offCourseM,
     getRace: () => activeRace,
+    getVirtualElevationM,
     serialize() {
       if (!activeRace) return null;
       return {

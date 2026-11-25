@@ -81,8 +81,9 @@ export const TELLURIDE_RUNNERS = Object.freeze([
     aliases: ['Becker'],
     hometown: 'Telluride, CO',
     specialty: 'Team USA Mountain Specialist',
-    bio: 'Team USA World Mountain & Trail Championships athlete; TMR 24M champion & CR (3:42:44), 2025 Rundola winner (20:28), Deep Creek Half champ, Speedgoat 50K & Broken Arrow standout.',
+    bio: 'Team USA World Mountain & Trail Championships athlete; TMR 24M champion & CR (3:42:44), 2025 Rundola winner (20:28), Deep Creek Half champ, Speedgoat 50K & Broken Arrow standout. Rarely spotted on San Juan singletrack without his two unstoppable trail dogs.',
     category: 'climbers',
+    hasTrailDogs: true,
     stats: { speed: 94, climbing: 98, technical: 96, endurance: 91, altitude: 95 },
     ovr: 95,
     kit: {
@@ -102,8 +103,9 @@ export const TELLURIDE_RUNNERS = Object.freeze([
     aliases: ['Lindsey Allison', 'Lindsey'],
     hometown: 'Telluride, CO',
     specialty: 'USATF 50K Champ & Rundola Winner',
-    bio: "Telluride pro mountain/ultra runner (Altra); USATF Trail 50K National Champion, Rundola women's winner, 5th overall at TMR, Kodiak 100K/100M podium & UTMB CCC racer.",
+    bio: "Telluride pro mountain/ultra runner (Altra); USATF Trail 50K National Champion, Rundola women's winner, 5th overall at TMR, Kodiak 100K/100M podium & UTMB CCC racer. Runs with her two zooming Telluride trail dogs.",
     category: 'climbers',
+    hasTrailDogs: true,
     stats: { speed: 90, climbing: 93, technical: 92, endurance: 93, altitude: 94 },
     ovr: 92,
     kit: {
@@ -436,6 +438,7 @@ export function normalizeRunnerSelection(sel) {
       return {
         ...preset,
         aliases: preset.aliases ? [...preset.aliases] : [],
+        hasTrailDogs: Boolean(preset.hasTrailDogs),
         stats: { ...preset.stats },
         kit: sanitizeKit(preset.kit),
         isCustom: false,
@@ -479,6 +482,7 @@ export function normalizeRunnerSelection(sel) {
         specialty,
         bio: sel.bio || `Custom runner (${totalPts} stat pts).`,
         category: 'custom',
+        hasTrailDogs: false,
         stats,
         ovr,
         kit,

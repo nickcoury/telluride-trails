@@ -1,7 +1,8 @@
 """
 Build curated pois.json (35+ free-run spots + OSM peaks/passes/waterfalls/lakes/towns)
-and races.json (12 real San Juan races using official CalTopo/OSM geometries,
-15m z14 Terrarium elevation resampling, and graph.json connector injection for route()).
+and races.json (13 races: 12 real San Juan races + Spurs Austin International Half Marathon
+Easter egg using official CalTopo/OSM geometries, 15m z14 Terrarium elevation resampling,
+and graph.json connector injection for route()).
 """
 
 import heapq
@@ -619,15 +620,19 @@ def route_osm_xz(net: TrailNetwork, waypoints_ll: list[tuple[float, float]], kin
 
 
 def project_checkpoints(dense_full: list[tuple[float, float, float, float]], cp_defs: list[dict]) -> list[dict]:
-    """Project checkpoints onto the race polyline in strictly monotonic progression order, honoring targetMi on out-and-backs/loops."""
+    """Project checkpoints onto the race polyline in strictly monotonic progression order, honoring targetMi/byDistM."""
     n = len(dense_full)
     min_idx = 0
     out = []
     for cp in cp_defs:
-        cx, cz = lon_lat_to_world(cp["lon"], cp["lat"])
         if cp.get("isFinish"):
             bi = n - 1
+        elif cp.get("byDistM") is not None:
+            target_d = cp["byDistM"]
+            bi = min(range(min_idx, n), key=lambda i: abs(dense_full[i][3] - target_d))
+            min_idx = min(n - 1, bi + 1)
         elif cp.get("targetMi") is not None:
+            cx, cz = lon_lat_to_world(cp["lon"], cp["lat"])
             target_d = cp["targetMi"] * 1609.344
             window_d = cp.get("windowMi", 2.5) * 1609.344
             bi = min_idx
@@ -645,6 +650,7 @@ def project_checkpoints(dense_full: list[tuple[float, float, float, float]], cp_
                 bi = min(range(min_idx, n), key=lambda i: abs(dense_full[i][3] - target_d))
             min_idx = min(n - 1, bi + 1)
         else:
+            cx, cz = lon_lat_to_world(cp["lon"], cp["lat"])
             bi = min_idx
             best_d2 = float("inf")
             for i in range(min_idx, n):
@@ -944,25 +950,95 @@ def build_races(net: TrailNetwork, sampler: TerrariumSampler) -> tuple[list[dict
         {"name": "Camp Bird Finish", "lon": -107.7240, "lat": 37.9740, "cutoffH": 9.0, "isFinish": True},
     ]
 
+    # 11. Spurs Austin International Half Marathon (Easter Egg — 13th race, always last):
+    # 100% paved continuous road (East Colorado Ave -> West Colorado Ave -> CO 145 down San Miguel canyon past Sawpit),
+    # trimmed to exact half-marathon length (21,097.5 m / 13.11 mi) staying strictly inside x >= -17500.
+    spurs_road_weights = {"road": 1.0, "track": 50.0, "path": 100.0, "trail": 100.0}
+    spurs_raw_xz = route_osm_xz(
+        net,
+        [world_to_lon_lat(1046.7, 265.5), world_to_lon_lat(-17956.3, -6165.7)],
+        kind_weights=spurs_road_weights,
+        prefer_names=("colorado avenue", "co 145"),
+        max_detour_ratio=3.0,
+    )
+    spurs_target_m = 21097.5
+    spurs_xz = [spurs_raw_xz[0]]
+    spurs_cum = 0.0
+    for i in range(1, len(spurs_raw_xz)):
+        ax, az = spurs_raw_xz[i - 1]
+        bx, bz = spurs_raw_xz[i]
+        seg = dist2d(ax, az, bx, bz)
+        if seg < 0.05:
+            continue
+        if spurs_cum + seg >= spurs_target_m:
+            f = (spurs_target_m - spurs_cum) / seg
+            spurs_xz.append((round(ax + (bx - ax) * f, 1), round(az + (bz - az) * f, 1)))
+            break
+        spurs_xz.append((bx, bz))
+        spurs_cum += seg
+
+    # Smooth 128-sample virtual Austin net-downhill elevation profile (meters):
+    # Starts at 268.0 m (879 ft, Research Blvd) -> gentle Austin rollers (+60 m / +197 ft gain) -> 149.0 m (489 ft, 11th & Congress Capitol).
+    austin_knots = [
+        (0.00, 268.0),
+        (0.16, 225.0),
+        (0.26, 243.0),
+        (0.44, 196.0),
+        (0.53, 212.0),
+        (0.69, 174.0),
+        (0.78, 190.0),
+        (0.89, 162.0),
+        (0.94, 172.0),
+        (1.00, 149.0),
+    ]
+    austin_elevs = []
+    for s_i in range(128):
+        u = s_i / 127.0
+        for k in range(len(austin_knots) - 1):
+            u0, e0 = austin_knots[k]
+            u1, e1 = austin_knots[k + 1]
+            if u0 <= u <= u1 + 1e-9:
+                t = max(0.0, min(1.0, (u - u0) / max(1e-9, u1 - u0)))
+                # Cosine easing for smooth road rollers with exact extrema at knots
+                et = 0.5 - 0.5 * math.cos(math.pi * t)
+                austin_elevs.append(round(e0 + (e1 - e0) * et, 1))
+                break
+    austin_elevs[0] = 268.0
+    austin_elevs[-1] = 149.0
+
+    spurs_cps = [
+        {"name": "Shoal Creek Blvd — 3M Tape & Flat Gatorade", "byDistM": 5150.0},
+        {"name": "Allandale — Unsolicited Indie Garage Band #4", "byDistM": 10620.0},
+        {"name": "Hyde Park / UT Tower — Breakfast Taco Handoff", "byDistM": 15770.0},
+        {"name": "11th & Congress — Texas State Capitol Finish", "cutoffH": 4, "isFinish": True},
+    ]
+
     specs = [
-        ("hardrock-100-cw", "Hardrock 100 (Clockwise)", "100+ miles, 33,000+ ft of vert, 13 passes above 12,000 ft, and a painted rock waiting in Silverton. Estimated finish: Thursday.", 102.0, 33441, 48.0, "06:00", [lon_lat_to_world(a, b) for a, b in hr_cw_ll], hr_cw_cps, 2.5),
-        ("hardrock-100-ccw", "Hardrock 100 (Counter-Clockwise)", "The exact same 33,000+ ft of San Juan suffering, starting with Cunningham Gulch instead of KT so your quads are surprised differently.", 102.5, 33441, 48.0, "06:00", [lon_lat_to_world(a, b) for a, b in hr_ccw_ll], hr_ccw_cps, 2.5),
-        ("imogene-pass-run", "Imogene Pass Run", "17.1 miles from Ouray (7,811 ft) up and over 13,114 ft Imogene Pass to Telluride. At least the second half is downhill — until your quads explode.", 17.1, 5300, 7.0, "07:30", imo_xz, imo_cps, 2.0),
-        ("telluride-mountain-run", "Telluride Mountain Run (40M)", "40 rugged miles circling the box canyon, highlighted by the 'Mile and a Half of Sky' ridge above 13,000 ft where gravity becomes optional.", 40.0, 15000, 17.0, "05:00", [lon_lat_to_world(a, b) for a, b in tmr_ll], tmr_cps, 2.0),
-        ("rundola", "Rundola (Telluride Trail)", "Modern USFS-permitted 4th of July course from the Telluride Gondola base up the full Telluride Trail switchbacks to San Sophia Station (10,540 ft). Forest Service switchbacks save the tundra — and you still get to ride the free gondola back down.", 2.6, 1810, 3.0, "08:00", rundola_xz, rundola_cps, 1.5),
-        ("rundola-original", "Rundola — Original (Straight Up Gondola)", "The legendary pre-permit straight-up lung-buster: 1.1 miles and ~1,800 ft of ~31% vertical directly under Gondola Line 1 from Oak St Base to San Sophia Station. Tourists wave from the cabins overhead while your calves negotiate their resignation.", 1.1, 1800, 2.5, "08:00", rundola_orig_xz, rundola_orig_cps, 1.0),
-        ("deep-creek-half", "Deep Creek Trail Half Marathon", "13.1 miles of golden-aspen singletrack from Last Dollar Road across Deep Creek, Mill Creek, Waterline, and Jud Wiebe down to Oak Street.", 13.1, 3100, 5.5, "08:00", [lon_lat_to_world(a, b) for a, b in dc_ll], dc_cps, 2.0),
-        ("kendall-mountain-run", "Kendall Mountain Run", "Born from a 1908 Silverton bar bet: climb nearly 4,000 ft up Kendall Mountain to 13,066 ft and sprint back to Memorial Park.", 12.3, 3960, 5.0, "08:00", [lon_lat_to_world(a, b) for a, b in kendall_ll], kendall_cps, 2.0),
-        ("san-juan-solstice-50", "San Juan Solstice 50", "50-mile counter-clockwise high-alpine tour out of Lake City touching the Continental Divide above 13,300 ft. Bring a rain shell.", 50.0, 12500, 16.0, "05:00", [lon_lat_to_world(a, b) for a, b in sjs_ll], sjs_cps, 2.0),
-        ("silverton-alpine-50k", "Silverton Alpine 50K", "High-altitude Alpine Loop tour linking Howardsville, Eureka, Animas Forks, and 12,930 ft California Pass.", 31.1, 4569, 11.0, "06:30", [lon_lat_to_world(a, b) for a, b in sil_ll], sil_cps, 2.0),
-        ("ouray-50", "Ouray 50", "52 miles and ~24,000 ft of vertical around the Ouray amphitheater, featuring Chief Ouray Mine and the Bridge of Heaven.", 52.0, 23600, 24.0, "06:00", [lon_lat_to_world(a, b) for a, b in o50_ll], o50_cps, 2.5),
-        ("blue-lakes-alpine-classic", "Blue Lakes & Yankee Boy Classic", "Sneffels Wilderness showcase: climb past turquoise Blue Lakes over 13,000 ft Blue Lakes Pass into Yankee Boy Basin.", 11.0, 3800, 9.0, "07:00", bl_xz, bl_cps, 2.0),
+        ("hardrock-100-cw", "Hardrock 100 (Clockwise)", "100+ miles, 33,000+ ft of vert, 13 passes above 12,000 ft, and a painted rock waiting in Silverton. Estimated finish: Thursday.", 102.0, 33441, 48.0, "06:00", [lon_lat_to_world(a, b) for a, b in hr_cw_ll], hr_cw_cps, 2.5, None),
+        ("hardrock-100-ccw", "Hardrock 100 (Counter-Clockwise)", "The exact same 33,000+ ft of San Juan suffering, starting with Cunningham Gulch instead of KT so your quads are surprised differently.", 102.5, 33441, 48.0, "06:00", [lon_lat_to_world(a, b) for a, b in hr_ccw_ll], hr_ccw_cps, 2.5, None),
+        ("imogene-pass-run", "Imogene Pass Run", "17.1 miles from Ouray (7,811 ft) up and over 13,114 ft Imogene Pass to Telluride. At least the second half is downhill — until your quads explode.", 17.1, 5300, 7.0, "07:30", imo_xz, imo_cps, 2.0, None),
+        ("telluride-mountain-run", "Telluride Mountain Run (40M)", "40 rugged miles circling the box canyon, highlighted by the 'Mile and a Half of Sky' ridge above 13,000 ft where gravity becomes optional.", 40.0, 15000, 17.0, "05:00", [lon_lat_to_world(a, b) for a, b in tmr_ll], tmr_cps, 2.0, None),
+        ("rundola", "Rundola (Telluride Trail)", "Modern USFS-permitted 4th of July course from the Telluride Gondola base up the full Telluride Trail switchbacks to San Sophia Station (10,540 ft). Forest Service switchbacks save the tundra — and you still get to ride the free gondola back down.", 2.6, 1810, 3.0, "08:00", rundola_xz, rundola_cps, 1.5, None),
+        ("rundola-original", "Rundola — Original (Straight Up Gondola)", "The legendary pre-permit straight-up lung-buster: 1.1 miles and ~1,800 ft of ~31% vertical directly under Gondola Line 1 from Oak St Base to San Sophia Station. Tourists wave from the cabins overhead while your calves negotiate their resignation.", 1.1, 1800, 2.5, "08:00", rundola_orig_xz, rundola_orig_cps, 1.0, None),
+        ("deep-creek-half", "Deep Creek Trail Half Marathon", "13.1 miles of golden-aspen singletrack from Last Dollar Road across Deep Creek, Mill Creek, Waterline, and Jud Wiebe down to Oak Street.", 13.1, 3100, 5.5, "08:00", [lon_lat_to_world(a, b) for a, b in dc_ll], dc_cps, 2.0, None),
+        ("kendall-mountain-run", "Kendall Mountain Run", "Born from a 1908 Silverton bar bet: climb nearly 4,000 ft up Kendall Mountain to 13,066 ft and sprint back to Memorial Park.", 12.3, 3960, 5.0, "08:00", [lon_lat_to_world(a, b) for a, b in kendall_ll], kendall_cps, 2.0, None),
+        ("san-juan-solstice-50", "San Juan Solstice 50", "50-mile counter-clockwise high-alpine tour out of Lake City touching the Continental Divide above 13,300 ft. Bring a rain shell.", 50.0, 12500, 16.0, "05:00", [lon_lat_to_world(a, b) for a, b in sjs_ll], sjs_cps, 2.0, None),
+        ("silverton-alpine-50k", "Silverton Alpine 50K", "High-altitude Alpine Loop tour linking Howardsville, Eureka, Animas Forks, and 12,930 ft California Pass.", 31.1, 4569, 11.0, "06:30", [lon_lat_to_world(a, b) for a, b in sil_ll], sil_cps, 2.0, None),
+        ("ouray-50", "Ouray 50", "52 miles and ~24,000 ft of vertical around the Ouray amphitheater, featuring Chief Ouray Mine and the Bridge of Heaven.", 52.0, 23600, 24.0, "06:00", [lon_lat_to_world(a, b) for a, b in o50_ll], o50_cps, 2.5, None),
+        ("blue-lakes-alpine-classic", "Blue Lakes & Yankee Boy Classic", "Sneffels Wilderness showcase: climb past turquoise Blue Lakes over 13,000 ft Blue Lakes Pass into Yankee Boy Basin.", 11.0, 3800, 9.0, "07:00", bl_xz, bl_cps, 2.0, None),
+        ("spurs-half-marathon", "Spurs Austin International Half Marathon", "Formerly the 3M Half Marathon in Austin, TX — a blazing-fast, net-downhill road 13.1-miler inexplicably dropped at the bottom of a San Juan mountain ultra game because 40 GB of I-35 overpasses and breakfast taco stands exceeded the WebGL budget. Routed along 13.1 miles of real San Miguel County asphalt with full 680-ft Texas sea-level oxygen simulated free of charge. Leave the trekking poles in the Subaru; lace up the pink carbon super-shoes.", 13.1, 197, 4, "07:00", spurs_xz, spurs_cps, 2.0, {
+            "easterEgg": True,
+            "seaLevel": True,
+            "lossFt": 561,
+            "gainFtOverride": 197,
+            "elevationsOverride": austin_elevs,
+        }),
     ]
 
     races = []
     raw_tracks_xz = []
     print("Evaluating resampled race courses (15m z14 Terrarium):")
-    for rid, name, blurb, off_d, off_g, cutoff_h, start_time, xz_pts, cp_defs, tol_m in specs:
+    for rid, name, blurb, off_d, off_g, cutoff_h, start_time, xz_pts, cp_defs, tol_m, extra in specs:
         dense_full, total_m, gain_m = resample_and_eval(xz_pts, sampler, step_m=15.0, gain_threshold_m=6.0)
         checkpoints = project_checkpoints(dense_full, cp_defs)
         max_seg_m = 45.0 if rid == "rundola-original" else 120.0
@@ -971,30 +1047,33 @@ def build_races(net: TrailNetwork, sampler: TerrariumSampler) -> tuple[list[dict
         for x, _, z, d in simplified:
             line_flat.extend([round(x, 1), round(z, 1), round(d, 1)])
 
-        # 128-sample real DEM elevation profile (meters) preserving true high/low extrema per bin
-        n_prof = 128
-        elevations = []
-        dn = len(dense_full)
-        d_idx = 0
-        for s_i in range(n_prof):
-            target_d = (s_i / (n_prof - 1)) * total_m
-            while d_idx + 1 < dn and dense_full[d_idx + 1][3] < target_d:
-                d_idx += 1
-            if d_idx + 1 < dn:
-                d0 = dense_full[d_idx][3]
-                d1 = dense_full[d_idx + 1][3]
-                t = (target_d - d0) / max(1e-6, d1 - d0)
-                ey = dense_full[d_idx][1] * (1.0 - t) + dense_full[d_idx + 1][1] * t
-            else:
-                ey = dense_full[-1][1]
-            elevations.append(round(ey, 1))
-        # Pin true global max & min elevation into their exact profile bins so 14er summits never alias between bins
-        max_pt = max(dense_full, key=lambda p: p[1])
-        min_pt = min(dense_full, key=lambda p: p[1])
-        max_bin = min(n_prof - 1, max(0, int(round((max_pt[3] / max(1.0, total_m)) * (n_prof - 1)))))
-        min_bin = min(n_prof - 1, max(0, int(round((min_pt[3] / max(1.0, total_m)) * (n_prof - 1)))))
-        elevations[max_bin] = round(max_pt[1], 1)
-        elevations[min_bin] = round(min_pt[1], 1)
+        if extra and extra.get("elevationsOverride"):
+            elevations = extra["elevationsOverride"]
+        else:
+            # 128-sample real DEM elevation profile (meters) preserving true high/low extrema per bin
+            n_prof = 128
+            elevations = []
+            dn = len(dense_full)
+            d_idx = 0
+            for s_i in range(n_prof):
+                target_d = (s_i / (n_prof - 1)) * total_m
+                while d_idx + 1 < dn and dense_full[d_idx + 1][3] < target_d:
+                    d_idx += 1
+                if d_idx + 1 < dn:
+                    d0 = dense_full[d_idx][3]
+                    d1 = dense_full[d_idx + 1][3]
+                    t = (target_d - d0) / max(1e-6, d1 - d0)
+                    ey = dense_full[d_idx][1] * (1.0 - t) + dense_full[d_idx + 1][1] * t
+                else:
+                    ey = dense_full[-1][1]
+                elevations.append(round(ey, 1))
+            # Pin true global max & min elevation into their exact profile bins so 14er summits never alias between bins
+            max_pt = max(dense_full, key=lambda p: p[1])
+            min_pt = min(dense_full, key=lambda p: p[1])
+            max_bin = min(n_prof - 1, max(0, int(round((max_pt[3] / max(1.0, total_m)) * (n_prof - 1)))))
+            min_bin = min(n_prof - 1, max(0, int(round((min_pt[3] / max(1.0, total_m)) * (n_prof - 1)))))
+            elevations[max_bin] = round(max_pt[1], 1)
+            elevations[min_bin] = round(min_pt[1], 1)
 
         s0 = simplified[0]
         s1 = simplified[min(1, len(simplified) - 1)]
@@ -1004,7 +1083,7 @@ def build_races(net: TrailNetwork, sampler: TerrariumSampler) -> tuple[list[dict
         fin_h = compute_heading(e1[0] - e0[0], e1[2] - e0[2])
 
         dist_mi = round(total_m * M_TO_MI, 1)
-        gain_ft = int(round(gain_m * M_TO_FT))
+        gain_ft = extra["gainFtOverride"] if (extra and extra.get("gainFtOverride") is not None) else int(round(gain_m * M_TO_FT))
         d_pct = (dist_mi - off_d) / off_d * 100.0
         g_pct = (gain_ft - off_g) / off_g * 100.0
         print(
@@ -1013,7 +1092,7 @@ def build_races(net: TrailNetwork, sampler: TerrariumSampler) -> tuple[list[dict
         )
 
         raw_tracks_xz.append([(p[0], p[2]) for p in simplified])
-        races.append({
+        race_obj = {
             "id": rid,
             "name": name,
             "blurb": blurb,
@@ -1028,7 +1107,15 @@ def build_races(net: TrailNetwork, sampler: TerrariumSampler) -> tuple[list[dict
             "checkpoints": checkpoints,
             "elevations": elevations,
             "line": line_flat,
-        })
+        }
+        if extra:
+            if extra.get("easterEgg"):
+                race_obj["easterEgg"] = True
+            if extra.get("seaLevel"):
+                race_obj["seaLevel"] = True
+            if extra.get("lossFt") is not None:
+                race_obj["lossFt"] = extra["lossFt"]
+        races.append(race_obj)
 
     return races, raw_tracks_xz
 

@@ -75,6 +75,7 @@ const FALLBACK_PRESETS = [
     hometown: 'Telluride, CO',
     specialty: 'Team USA Mountain Specialist',
     category: 'climbers',
+    hasTrailDogs: true,
     bio: 'Team USA World Mountain & Trail Championships athlete; TMR 24M CR (3:42:44), 2025 Rundola winner (20:28), Deep Creek Half champ.',
     stats: { speed: 94, climbing: 98, technical: 96, endurance: 91, altitude: 95 },
     ovr: 95,
@@ -121,6 +122,7 @@ const FALLBACK_PRESETS = [
     hometown: 'Telluride, CO',
     specialty: 'USATF 50K Champ & Rundola Winner',
     category: 'climbers',
+    hasTrailDogs: true,
     bio: 'Telluride pro mountain/ultra runner; USATF Trail 50K National Champion, Rundola women’s winner, Kodiak 100K/100M podium.',
     stats: { speed: 90, climbing: 93, technical: 92, endurance: 93, altitude: 94 },
     ovr: 92,
@@ -615,6 +617,11 @@ export function createRunnerSelect({ container, engine, game, onRunnerChanged, o
           `;
         }).join('');
 
+        const hasDogs = Boolean(r.hasTrailDogs || (Array.isArray(r.dogs) && r.dogs.length));
+        const dogsBadgeHtml = hasDogs
+          ? `<span class="runner-dogs-pill" title="Runs with 2 trail dogs">🐾 +2 Trail Dogs</span>`
+          : '';
+
         return `
           <article class="runner-card ${isSelected ? 'is-selected' : ''}" data-preset-card="${escapeHtml(r.id)}">
             <div class="runner-card__head">
@@ -626,7 +633,10 @@ export function createRunnerSelect({ container, engine, game, onRunnerChanged, o
                   <h3>${escapeHtml(r.name)}</h3>
                   <span class="runner-ovr-pill">OVR ${ovr}</span>
                 </div>
-                <div class="runner-card__meta">${escapeHtml(r.hometown || 'Telluride, CO')} · <strong>${escapeHtml(r.specialty || 'Mountain Runner')}</strong></div>
+                <div class="runner-card__meta">
+                  <span>${escapeHtml(r.hometown || 'Telluride, CO')} · <strong>${escapeHtml(r.specialty || 'Mountain Runner')}</strong></span>
+                  ${dogsBadgeHtml}
+                </div>
               </div>
             </div>
             <p class="runner-card__bio">${escapeHtml(r.bio || '')}</p>

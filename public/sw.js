@@ -1,5 +1,5 @@
 /* Telluride Trails Service Worker — App shell + bounded immutable tile cache */
-const CACHE_VERSION = 'v5';
+const CACHE_VERSION = 'v6';
 const SHELL_CACHE = `tt-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `tt-tiles-${CACHE_VERSION}`;
 const MAX_TILE_ENTRIES = 1500;

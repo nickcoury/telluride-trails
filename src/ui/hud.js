@@ -64,21 +64,23 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
 
       <div class="hud-sub-row">
         <section class="hud-stats" aria-label="Runner telemetry (tap to expand on mobile)">
-          <div class="hud-stat">
-            <span class="hud-stat__label">Pace</span>
-            <span class="hud-stat__val" data-field="pace">--:--</span>
-          </div>
-          <div class="hud-stat">
-            <span class="hud-stat__label">Distance</span>
-            <span class="hud-stat__val" data-field="dist">0.00 mi</span>
-          </div>
-          <div class="hud-stat">
-            <span class="hud-stat__label">Vert</span>
-            <span class="hud-stat__val" data-field="vert">+0 ft</span>
-          </div>
-          <div class="hud-stat">
-            <span class="hud-stat__label">Elev / Grade</span>
-            <span class="hud-stat__val" data-field="elev"><span data-field="elevOnly">8,750 ft</span><span class="hud-elev-grade" data-field="gradeOnly"> · +0%</span></span>
+          <div class="hud-stats__row">
+            <div class="hud-stat">
+              <span class="hud-stat__label">Pace</span>
+              <span class="hud-stat__val" data-field="pace">--:--</span>
+            </div>
+            <div class="hud-stat">
+              <span class="hud-stat__label">Distance</span>
+              <span class="hud-stat__val" data-field="dist">0.00 mi</span>
+            </div>
+            <div class="hud-stat">
+              <span class="hud-stat__label">Vert</span>
+              <span class="hud-stat__val" data-field="vert">+0 ft</span>
+            </div>
+            <div class="hud-stat">
+              <span class="hud-stat__label">Elev / Grade</span>
+              <span class="hud-stat__val" data-field="elev"><span data-field="elevOnly">8,750 ft</span><span class="hud-elev-grade" data-field="gradeOnly"> · +0%</span></span>
+            </div>
           </div>
 
           <div class="hud-meters">
@@ -91,7 +93,10 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
               <div class="hud-meter__track"><div class="hud-meter__fill" style="--pct: 100%"></div></div>
             </div>
           </div>
-          <div class="hud-gait-badge" data-field="gait" hidden></div>
+          <div class="hud-badges" hidden>
+            <span class="hud-gait-badge" data-field="gait" hidden></span>
+            <span class="hud-sealevel-badge" data-field="seaLevel" hidden>· Sea Level O₂</span>
+          </div>
         </section>
 
         <section class="hud-race-bar" hidden aria-label="Race progress">
@@ -144,7 +149,9 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
   const vertEl = wrap.querySelector('[data-field="vert"]');
   const elevOnlyEl = wrap.querySelector('[data-field="elevOnly"]');
   const gradeOnlyEl = wrap.querySelector('[data-field="gradeOnly"]');
+  const badgesRowEl = wrap.querySelector('.hud-badges');
   const gaitEl = wrap.querySelector('[data-field="gait"]');
+  const seaLevelEl = wrap.querySelector('[data-field="seaLevel"]');
   const staminaFill = wrap.querySelector('[data-meter="stamina"] .hud-meter__fill');
   const staminaMeter = wrap.querySelector('[data-meter="stamina"]');
   const hydrationFill = wrap.querySelector('[data-meter="hydration"] .hud-meter__fill');
@@ -553,16 +560,49 @@ export function createHUD({ container, engine, trailData, getSettings, onPause, 
       hydrationMeter.dataset.warn = hydPct < 25 ? 'low' : 'ok';
     }
 
-    // Gait / altitude badge
-    if (data.gait || (data.altitudeFactor && data.altitudeFactor < 0.9)) {
+    // Gait / sea-level / altitude badges (hide gait cleanly when cruising in run/walk/idle)
+    const rawGait = String(data.gait || '').toLowerCase();
+    let gaitLabel = '';
+    let gaitTone = '';
+    if (rawGait === 'power-hike' || rawGait === 'power_hike') {
+      gaitLabel = '🥾 Power Hike';
+      gaitTone = 'hike';
+    } else if (rawGait === 'hike') {
+      gaitLabel = '🥾 Hike';
+      gaitTone = 'hike';
+    } else if (rawGait === 'sprint') {
+      gaitLabel = '⚡ Sprint';
+      gaitTone = 'sprint';
+    } else if (rawGait === 'winded' || rawGait === 'bonk' || rawGait === 'exhausted') {
+      gaitLabel = '😮‍💨 Winded';
+      gaitTone = 'winded';
+    } else if (
+      (rawGait === 'run' || rawGait === 'walk' || rawGait === 'jog') &&
+      Number.isFinite(data.stamina) &&
+      data.stamina < 0.12
+    ) {
+      gaitLabel = '😮‍💨 Winded';
+      gaitTone = 'winded';
+    }
+
+    const isSeaLevel = Boolean(data.seaLevel || data.race?.seaLevel);
+    const showThinAir = !isSeaLevel && Boolean(data.altitudeFactor && data.altitudeFactor < 0.9);
+    const gaitParts = [];
+    if (gaitLabel) gaitParts.push(gaitLabel);
+    if (showThinAir) gaitParts.push('🏔 Thin Air');
+
+    if (gaitParts.length) {
       setHidden(gaitEl, false);
-      const parts = [];
-      if (data.gait) parts.push(String(data.gait).toUpperCase());
-      if (data.altitudeFactor && data.altitudeFactor < 0.9) parts.push('🏔 Thin Air');
-      setText(gaitEl, parts.join(' · '));
+      setText(gaitEl, gaitParts.join(' · '));
+      const nextTone = gaitTone || 'altitude';
+      if (gaitEl.dataset.gait !== nextTone) gaitEl.dataset.gait = nextTone;
     } else {
       setHidden(gaitEl, true);
+      if (gaitEl.dataset.gait) delete gaitEl.dataset.gait;
     }
+
+    setHidden(seaLevelEl, !isSeaLevel);
+    setHidden(badgesRowEl, !gaitParts.length && !isSeaLevel);
 
     // Race bar
     const race = data.race;

@@ -84,7 +84,7 @@ export function computeAltitudeFactor(elevationM, altitudeStat = 80) {
   const aboveK = (elevFt - 11000) / 1000;
   const extra = elevFt > ALT_SEVERE_FT ? ((elevFt - ALT_SEVERE_FT) / 1000) * 0.04 : 0;
   const rawFactor = clamp(1 - aboveK * 0.075 - extra, 0.62, 1.0);
-  const penaltyScale = clamp(1 - statNorm(altitudeStat) * 0.38, 0.55, 1.55);
+  const penaltyScale = clamp(1 - statNorm(altitudeStat) * 0.48, 0.48, 1.55);
   return clamp(1 - (1 - rawFactor) * penaltyScale, 0.48, 1.0);
 }
 
@@ -218,21 +218,37 @@ export function stepPhysiology(p, dt, ctx, rng = Math.random) {
   p.drowsiness = computeDrowsiness(p, localHour, elapsedHours, stats);
 
   // --- Stamina (short-term reserve) ---
+  const isHiking = effort === 'hike' || effort === 'power-hike';
   const elevPenalty = elevationM > ALT_PENALTY_START_M ? 1 + (1 - p.altitudeFactor) * 1.4 : 1;
   let staminaDrain = 0;
   if (isMoving) {
-    if (effort === 'sprint') staminaDrain = 3.8;
-    else if (effort === 'run') staminaDrain = 0.035; // ~45 min sustained cruise on smooth trail
-    else if (effort === 'hike' || effort === 'power-hike') staminaDrain = -0.6;
-    else staminaDrain = -3.0; // walking recovers stamina
-
-    if (grade > 0.08 && effort !== 'walk') {
-      const climbDrainScale = clamp(1 - nClimb * 0.25, 0.60, 1.50);
-      const gradeEffort = (effort === 'hike' || effort === 'power-hike' ? 0.8 : 2.2) * climbDrainScale;
-      staminaDrain += (grade - 0.08) * gradeEffort;
+    const climbDrainScale = clamp(1 - nClimb * 0.25, 0.60, 1.50);
+    if (effort === 'sprint') {
+      staminaDrain = 3.8;
+      if (grade > 0.08) {
+        staminaDrain += ((grade - 0.08) * 6.0 + Math.max(0, grade - 0.16) * 9.5) * climbDrainScale;
+      }
+    } else if (effort === 'run') {
+      // Aerobic flat/downhill/gentle-climb cruise preserves stamina; steep uphill (>11.5%) drains it sharply
+      staminaDrain = grade <= 0.06 ? -0.15 : 0.0;
+      if (grade > 0.115) {
+        staminaDrain += ((grade - 0.115) * 5.8 + Math.max(0, grade - 0.16) * 8.5) * climbDrainScale;
+      }
+    } else if (isHiking) {
+      // Tactical recovery: power-hiking recovers stamina up to +22% grade and stays gentle even on +35..+60% walls
+      if (grade <= 0.22) {
+        staminaDrain = -0.55;
+      } else {
+        staminaDrain = -0.55 + (grade - 0.22) * 1.15 * climbDrainScale;
+      }
+    } else {
+      staminaDrain = -3.0; // walking recovers stamina rapidly
     }
+
     if (offTrail) staminaDrain += 1.1;
-    if (surface === 'talus' || surface === 'scree' || surface === 'snow') staminaDrain += 0.35;
+    if (surface === 'talus' || surface === 'scree' || surface === 'snow') {
+      staminaDrain += isHiking ? 0.14 : 0.35;
+    }
     if (staminaDrain > 0) staminaDrain *= elevPenalty;
   } else {
     staminaDrain = -8.0; // resting recovers stamina quickly
@@ -244,7 +260,10 @@ export function stepPhysiology(p, dt, ctx, rng = Math.random) {
 
   // --- Energy / Fuel ---
   const intensity = clamp((speedMs - 1.4) / 3.0, 0, 1);
-  const climbKcal = grade > 0 ? Math.max(0, distM * grade) * 0.0095 : 0; // ~10 kcal per 100m vert
+  let climbKcalMul = 1.0;
+  if (isHiking) climbKcalMul = 0.78; // hiking saves 22% climb kcal
+  else if (grade > 0.14 && (effort === 'run' || effort === 'sprint')) climbKcalMul = 1.22; // running steep climbs burns +22% more
+  const climbKcal = grade > 0 ? Math.max(0, distM * grade) * 0.0095 * climbKcalMul : 0; // ~10 kcal per 100m vert
   const offTrailKcal = offTrail ? 1.28 : 1.0;
   const burn = (72 / 3600) * dt + KCAL_PER_METER * distM * offTrailKcal * (1 + 0.14 * Math.max(0, speedMs - 3.0)) + climbKcal;
   const fatIncome = (195 / 3600) * dt * (speedMs < 3.8 ? 1 : 0.65);
@@ -289,11 +308,12 @@ export function stepPhysiology(p, dt, ctx, rng = Math.random) {
   }
 
   // --- Legs / Muscle damage ---
-  // Steep downhills hammer quads (mitigated by technical skill; cumulative wear mitigated by endurance)
+  // Steep downhills hammer quads (mitigated by technical skill, endurance, and downhill hiking -45%)
   const techDownhillScale = clamp(1 - nTech * 0.22, 0.65, 1.45);
   const downhillHammer = grade < -0.08 ? 1 + Math.abs(grade) * 5.0 * techDownhillScale : 1.0;
-  const endLegScale = clamp(1 - nEnd * 0.30, 0.55, 1.55);
-  const legRate = (distM / 1000) * 0.16 * Math.pow(Math.max(0.5, speedMs / 3.0), 1.45) * downhillHammer * endLegScale;
+  const hikeDownhillSave = (grade < -0.04 && isHiking) ? 0.55 : 1.0;
+  const endLegScale = clamp(1 - nEnd * 0.45, 0.40, 1.65);
+  const legRate = (distM / 1000) * 0.58 * Math.pow(Math.max(0.5, speedMs / 3.0), 1.35) * downhillHammer * hikeDownhillSave * endLegScale;
   p.legs = clamp(p.legs + legRate, 0, 100);
   if (speedMs < 0.25) {
     p.legs = Math.max(0, p.legs - (1.8 / 3600) * dt);
@@ -317,14 +337,16 @@ export function stepPhysiology(p, dt, ctx, rng = Math.random) {
 
 /**
  * Probability per second of tripping/falling on technical terrain when tired.
+ * Hiking downhill cuts stumble risk by 70%.
  */
-export function fallProbabilityPerSec(p, speedMs, stumbleMul = 1.0, grade = 0, stats = null) {
+export function fallProbabilityPerSec(p, speedMs, stumbleMul = 1.0, grade = 0, stats = null, effort = 'run') {
   if (speedMs < 1.35) return 0;
   const fatigue = Math.pow(p.legs / 100, 2) * 0.012 + Math.pow(p.drowsiness, 2) * 0.015;
   const lowStam = p.stamina < 18 ? 0.012 : 0;
   const downhillRisk = grade < -0.10 ? 1 + Math.abs(grade) * 3 : 1;
   const speedRisk = speedMs > 3.6 ? 1.8 : speedMs > 2.4 ? 1.0 : 0.4;
   const techFallScale = clamp(1 - statNorm(stats?.technical) * 0.45, 0.45, 1.75);
+  const hikeSafe = (effort === 'hike' || effort === 'power-hike') && grade < 0 ? 0.30 : 1.0;
   // Base rate is tiny unless tired + technical + fast downhill
-  return (0.00015 + fatigue + lowStam) * stumbleMul * downhillRisk * speedRisk * techFallScale;
+  return (0.00015 + fatigue + lowStam) * stumbleMul * downhillRisk * speedRisk * techFallScale * hikeSafe;
 }

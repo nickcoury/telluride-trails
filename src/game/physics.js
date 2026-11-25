@@ -2,9 +2,9 @@
 // trail-keeping magnet, cliff slide-back, and autopilot steering.
 
 import {
+  AUTO_POWER_HIKE_GRADE,
   CLIFF_GRADE,
   M_TO_FT,
-  POWER_HIKE_GRADE,
   SURFACES,
   TRAIL_SNAP_RADIUS_M,
 } from './constants.js';
@@ -14,36 +14,39 @@ const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const statNorm = (s) => (clamp(Number.isFinite(s) ? s : 80, 50, 99) - 80) / 20;
 const ROUGH_SURFACES = new Set(['scree', 'talus', 'forest', 'creek', 'snow']);
 
+const DOWNHILL_PEAK_0 = Math.exp(-Math.pow(0.08 / 0.065, 2));
+
 /**
- * Ultrarunner grade multiplier (modified Tobler hiking/running function).
- * grade = rise / run (e.g. +0.20 = 20% climb, -0.15 = 15% descent).
+ * Running grade multiplier (separate from hiking VAM curve so steep climbs never triple-compound).
+ * - Downhill: sweet spot around -7%..-9% (~1.14x), technical braking past -13%.
+ * - Uphill: smooth 1 / (1 + grade * (4.0 - 0.65 * nClimb)) so strong climbers can run 12–18%
+ *   faster than hiking (at a sharp stamina cost!).
  */
-export function gradeSpeedMultiplier(grade, surface = 'trail', stats = null) {
-  // Smooth Tobler base: peak slightly downhill (~ -0.05)
-  const tobler = Math.exp(-3.2 * Math.abs(grade + 0.045));
-  // Normalize so grade=0 gives 1.0
-  const base0 = Math.exp(-3.2 * 0.045);
-  let mul = tobler / base0;
+export function runGradeMultiplier(grade, surface = 'trail', stats = null) {
+  const nClimb = statNorm(stats?.climbing);
+  const nTech = statNorm(stats?.technical);
 
-  // Gentle downhill bonus on runnable surfaces, technical penalty on steep descents
-  if (grade < -0.12) {
-    const steepness = Math.abs(grade + 0.12);
-    const techPenalty = surface === 'talus' || surface === 'scree' ? 2.4 : 1.35;
-    mul *= Math.max(0.32, 1 - steepness * techPenalty);
-  } else if (grade > 0.15) {
-    // Power hiking preserves reasonable speed on very steep climbs up to ~35%
-    mul = Math.max(mul, clamp(0.62 - (grade - 0.15) * 1.15, 0.20, 0.65));
+  if (grade < 0) {
+    const bump = (Math.exp(-Math.pow((grade + 0.08) / 0.065, 2)) - DOWNHILL_PEAK_0) / (1 - DOWNHILL_PEAK_0);
+    let mul = 1 + 0.14 * Math.max(0, bump);
+    if (grade < -0.13) {
+      const steepness = -grade - 0.13;
+      const brake = surface === 'talus' ? 2.4 : surface === 'scree' ? 2.0 : surface === 'road' ? 0.75 : surface === 'track' ? 0.92 : 1.35;
+      mul *= Math.max(0.32, 1 - steepness * brake);
+    }
+    if (grade < -0.10) {
+      mul *= 1 + nTech * 0.18;
+    }
+    return clamp(mul, 0.28, 1.34);
   }
 
-  // Proportional runner stats: climbing (>5% grade) and technical steep descents (<-10% grade)
-  if (grade > 0.05) {
-    mul *= 1 + statNorm(stats?.climbing) * 0.22;
-  } else if (grade < -0.10) {
-    mul *= 1 + statNorm(stats?.technical) * 0.18;
-  }
-
-  return clamp(mul, 0.14, 1.32);
+  const climbSlope = Math.max(2.3, 3.35 - 0.68 * nClimb);
+  const mul = 1 / (1 + grade * climbSlope);
+  return clamp(mul, 0.18, 1.0);
 }
+
+// Backward-compatible alias
+export const gradeSpeedMultiplier = runGradeMultiplier;
 
 /**
  * Determine active surface key & trail context from terrain.getSurface + trailData.nearest.
@@ -139,61 +142,112 @@ export function applyTrailCenterPull(px, pz, dirX, dirZ, nearest, isTouch = fals
 }
 
 /**
- * Base target speed in m/s for effort level before grade/surface/altitude/physiology.
+ * Base flat singletrack speed in m/s at STAT_BASELINE (80) before stats/grade/surface/physiology.
  */
 export function baseEffortSpeed(effort) {
   switch (effort) {
     case 'idle':   return 0;
-    case 'walk':   return 1.38; // ~19:25/mi
-    case 'hike':   return 1.85; // ~14:30/mi brisk hike
-    case 'run':    return 3.15; // ~8:30/mi trail cruise
-    case 'sprint': return 4.75; // ~5:38/mi hard push
-    default:       return 3.15;
+    case 'walk':   return 1.42; // ~18:53/mi casual walk
+    case 'hike':   return 1.98; // ~13:33/mi brisk trail hike
+    case 'run':    return 3.38; // ~7:56/mi strong local flat singletrack cruise
+    case 'sprint': return 4.45; // ~6:02/mi (~1.32x run)
+    default:       return 3.38;
   }
 }
 
 /**
- * Determine gait label & final target speed.
+ * Direct Horizontal + VAM Euclidean hiking / power-hiking speed (never multiplied by runGradeMultiplier).
  */
-export function computeTargetSpeed({ effort, grade, surface = 'trail', surfaceInfo, phys, stats = null }) {
+export function computeHikeSpeed(grade, stats = null) {
+  const nSpeed = statNorm(stats?.speed);
+  const nClimb = statNorm(stats?.climbing);
+  const vHikeFlat = 1.98 * (1 + nSpeed * 0.08 + nClimb * 0.12);
+  if (grade > 0) {
+    const vamMs = 0.345 * (1 + nClimb * 0.38);
+    return 1 / Math.hypot(1 / vHikeFlat, grade / vamMs);
+  }
+  return vHikeFlat * clamp(1 - grade * 0.8, 0.85, 1.16);
+}
+
+/**
+ * Determine gait label & final target speed.
+ * Separates Run vs. Hike/Power-Hike curves, applies ultra aerobic pacing & optional sea-level boost.
+ */
+export function computeTargetSpeed({ effort, grade, surface = 'trail', surfaceInfo, phys, stats = null, race = null }) {
   if (effort === 'idle') return { speedMs: 0, gait: 'idle', isPowerHike: false };
 
   const nSpeed = statNorm(stats?.speed);
   const nClimb = statNorm(stats?.climbing);
   const nTech = statNorm(stats?.technical);
+  const nEnd = statNorm(stats?.endurance);
 
-  const speedScale = effort === 'walk' ? (1 + nSpeed * 0.06) : (1 + nSpeed * 0.16);
-  let base = baseEffortSpeed(effort) * speedScale;
+  // Hysteresis for low-stamina forced power-hike so runner doesn't stutter between run/hike at 10% stamina
+  const stam = phys?.stamina ?? 100;
+  let forcedByStamina = Boolean(phys?._forcedPowerHike);
+  if (stam < 10) forcedByStamina = true;
+  else if (stam > 28 && grade < AUTO_POWER_HIKE_GRADE) forcedByStamina = false;
+  if (phys) phys._forcedPowerHike = forcedByStamina;
 
-  // Steep uphill automatically shifts running into power-hike unless sprinting on gentle pitch
-  let isPowerHike = false;
-  let gait = effort;
-  if (grade >= POWER_HIKE_GRADE && (effort === 'run' || effort === 'hike' || effort === 'sprint')) {
-    isPowerHike = true;
-    gait = 'power-hike';
-    const phCap = (effort === 'sprint' ? 2.45 : 2.05) * (1 + nClimb * 0.22);
-    base = Math.min(base, phCap);
-  }
+  const sprintShiftGrade = stam > 20 ? 0.32 : AUTO_POWER_HIKE_GRADE;
+  const autoShiftToPowerHike =
+    (effort === 'run' && (grade >= AUTO_POWER_HIKE_GRADE || forcedByStamina)) ||
+    (effort === 'sprint' && (grade >= sprintShiftGrade || forcedByStamina));
 
-  const gMul = gradeSpeedMultiplier(grade, surface, stats);
-  let sMul = surfaceInfo.speedMul ?? 1.0;
+  let sMul = surfaceInfo?.speedMul ?? 1.0;
   if (ROUGH_SURFACES.has(surface)) {
     sMul *= 1 + nTech * 0.18;
   }
   const pMul = physiologySpeedFactor(phys);
+  // Sea-level oxygen + carbon super-shoe road boost (Austin Half Marathon)
+  const seaLevelMul = race?.seaLevel ? 1.19 : 1.0;
 
-  const speedMs = Math.max(0.42, base * gMul * sMul * pMul);
-  return { speedMs, gait, isPowerHike };
+  // Distance-aware race intensity:
+  // - Short sub-8 equivMi trail climbs run at threshold pace (run only, not hike VAM)
+  // - Half-to-100M mountain courses scale aerobic pacing with endurance advantage past 22 equivMi
+  const equivMi = (race?.distanceMi || 0) + (race?.gainFt || 0) / 1000;
+  const shortRunBoost = (race && !race.seaLevel && equivMi > 0 && equivMi < 8)
+    ? 1 + 0.30 * clamp((8 - equivMi) / 5, 0, 1) * (1 + nClimb * 0.28)
+    : 1.0;
+  const ultraEndWeight = clamp((equivMi - 18) / 28, 0, 1);
+  const ultraRunScale = (!race?.seaLevel && equivMi > 14)
+    ? (1 / (1 + 0.26 * Math.log(1 + Math.max(0, equivMi - 13) / 15))) * (1 + nEnd * 0.145 * ultraEndWeight)
+    : 1.0;
+  const ultraHikeScale = (!race?.seaLevel && equivMi > 18)
+    ? (1 / (1 + 0.27 * Math.log(1 + Math.max(0, equivMi - 18) / 18))) * (1 + nEnd * 0.145 * ultraEndWeight)
+    : 1.0;
+
+  if (effort === 'hike' || effort === 'power-hike' || autoShiftToPowerHike) {
+    const isPowerHike = effort === 'power-hike' || autoShiftToPowerHike || grade >= 0.06;
+    const gait = isPowerHike ? 'power-hike' : 'hike';
+    const rawHike = computeHikeSpeed(grade, stats);
+    // Hiking handles uneven trail/path surfaces more steadily than running
+    const hikeSurfaceMul = sMul < 1 ? (0.45 + 0.55 * sMul) : (1 + (sMul - 1) * 0.5);
+    const speedMs = Math.max(0.42, rawHike * hikeSurfaceMul * pMul * ultraHikeScale * seaLevelMul);
+    return { speedMs, gait, isPowerHike };
+  }
+
+  if (effort === 'walk') {
+    const baseWalk = baseEffortSpeed('walk') * (1 + nSpeed * 0.06);
+    const walkGrade = grade > 0 ? 1 / (1 + grade * 2.2) : clamp(1 - grade * 0.4, 0.85, 1.08);
+    const speedMs = Math.max(0.42, baseWalk * walkGrade * Math.min(1.05, sMul) * pMul);
+    return { speedMs, gait: 'walk', isPowerHike: false };
+  }
+
+  // Running or Sprinting
+  const baseRun = baseEffortSpeed(effort) * (1 + nSpeed * 0.31);
+  const gMul = runGradeMultiplier(grade, surface, stats);
+  const speedMs = Math.max(0.48, baseRun * gMul * sMul * pMul * ultraRunScale * shortRunBoost * seaLevelMul);
+  return { speedMs, gait: effort, isPowerHike: false };
 }
 
 /**
  * Cliff collision & slide-back.
  * Given terrain normal (nx, ny, nz) with ny = cos(slopeAngle):
  * Slope grade = sqrt(1 - ny*ny) / max(0.05, ny).
- * If slope > cliffGradeLimit and runner tries to go uphill (dot(dir, horizNormal) < 0),
- * project out the uphill component and apply downhill slide!
+ * Never strips velocity or slides when steering back toward a nearby trail (<=30m) or race course (<=40m),
+ * and validates passive slide destinations to prevent V-gully trapping.
  */
-export function resolveCliffSlide(vx, vz, normal, dt, cliffGradeLimit = CLIFF_GRADE) {
+export function resolveCliffSlide(vx, vz, normal, dt, cliffGradeLimit = CLIFF_GRADE, opts = null) {
   if (!normal) return { vx, vz, onCliff: false };
   const ny = clamp(normal.y, 0.05, 1.0);
   const horizMag = Math.hypot(normal.x, normal.z);
@@ -201,6 +255,33 @@ export function resolveCliffSlide(vx, vz, normal, dt, cliffGradeLimit = CLIFF_GR
 
   if (slopeGrade <= cliffGradeLimit || horizMag < 1e-4) {
     return { vx, vz, onCliff: false };
+  }
+
+  // Never block or slide a runner actively steering back toward a nearby trail or race line
+  if (opts) {
+    const speed = Math.hypot(vx, vz);
+    if (speed > 0.05) {
+      const ux = vx / speed;
+      const uz = vz / speed;
+      const nt = opts.nearestTrail;
+      if (nt && nt.dist <= 30 && Number.isFinite(nt.x) && Number.isFinite(nt.z)) {
+        const tx = nt.x - opts.x;
+        const tz = nt.z - opts.z;
+        const tLen = Math.hypot(tx, tz);
+        if (tLen > 0.1 && (ux * tx + uz * tz) / tLen > 0.15) {
+          return { vx, vz, onCliff: false };
+        }
+      }
+      const ct = opts.courseTarget;
+      if (ct && opts.offCourseM <= 40 && Number.isFinite(ct.x) && Number.isFinite(ct.z)) {
+        const tx = ct.x - opts.x;
+        const tz = ct.z - opts.z;
+        const tLen = Math.hypot(tx, tz);
+        if (tLen > 0.1 && (ux * tx + uz * tz) / tLen > 0.15) {
+          return { vx, vz, onCliff: false };
+        }
+      }
+    }
   }
 
   // Downhill unit horizontal vector = (normal.x, normal.z) / horizMag
@@ -216,10 +297,27 @@ export function resolveCliffSlide(vx, vz, normal, dt, cliffGradeLimit = CLIFF_GR
     outVz -= dot * dz;
   }
 
-  // Add gravity slide downhill proportional to steepness beyond cliffGradeLimit
-  const slideSpeed = clamp((slopeGrade - cliffGradeLimit) * 3.8, 0.6, 5.5);
-  outVx += dx * slideSpeed * Math.min(1, dt * 6 + 0.35);
-  outVz += dz * slideSpeed * Math.min(1, dt * 6 + 0.35);
+  // Validate passive slide destination before sliding (prevents V-gully / water / building traps)
+  let canSlide = true;
+  if (opts && Number.isFinite(opts.x) && Number.isFinite(opts.z)) {
+    const probeX = opts.x + dx * 0.75;
+    const probeZ = opts.z + dz * 0.75;
+    if (typeof opts.isBlocked === 'function' && opts.isBlocked(probeX, probeZ)) {
+      canSlide = false;
+    } else if (typeof opts.getGroundY === 'function') {
+      const hHere = opts.getGroundY(opts.x, opts.z);
+      const hProbe = opts.getGroundY(probeX, probeZ);
+      if (Number.isFinite(hHere) && Number.isFinite(hProbe) && hProbe >= hHere - 0.02) {
+        canSlide = false;
+      }
+    }
+  }
+
+  if (canSlide) {
+    const slideSpeed = clamp((slopeGrade - cliffGradeLimit) * 3.8, 0.6, 5.5);
+    outVx += dx * slideSpeed * Math.min(1, dt * 6 + 0.35);
+    outVz += dz * slideSpeed * Math.min(1, dt * 6 + 0.35);
+  }
 
   return { vx: outVx, vz: outVz, onCliff: true };
 }

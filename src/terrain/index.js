@@ -109,6 +109,11 @@ export function createTerrain(engine) {
     quadtree.update(cameraPos);
   }
 
+  function syncCameraUniforms(camPos) {
+    if (disposed) return;
+    quadtree.syncCameraUniforms(camPos);
+  }
+
   function getHeight(x, z) {
     return quadtree.getHeight(x, z);
   }
@@ -152,6 +157,7 @@ export function createTerrain(engine) {
 
   return {
     update,
+    syncCameraUniforms,
     getHeight,
     getRenderedHeight,
     getNormal,

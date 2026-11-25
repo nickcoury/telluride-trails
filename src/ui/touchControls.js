@@ -349,6 +349,15 @@ export function createTouchControls({ container, engine, getSettings }) {
       autoBtn.classList.toggle('is-active', autopilotActive);
     }
 
+    if (typeof hudState.paceMode === 'string') {
+      const nextHike = hudState.paceMode === 'hike';
+      if (nextHike !== hikeActive) {
+        hikeActive = nextHike;
+        hikeBtn.setAttribute('aria-pressed', String(hikeActive));
+        hikeBtn.classList.toggle('is-active', hikeActive);
+      }
+    }
+
     const fallen = Boolean(hudState.fallen);
     const nearAid = hudState.nearAid;
     const aidName = typeof nearAid === 'object' ? nearAid?.name : nearAid ? 'Aid Station' : '';

@@ -385,14 +385,38 @@ export function createScreens({
       return;
     }
 
-    for (const race of races) {
+    const regularRaces = races.filter((r) => !r.easterEgg);
+    const easterEggRaces = races.filter((r) => Boolean(r.easterEgg));
+
+    const buildRaceCard = (race) => {
       const card = document.createElement('article');
-      card.className = 'race-card';
+      const isEaster = Boolean(race.easterEgg);
+      card.className = isEaster ? 'race-card race-card--easter-egg' : 'race-card';
       const distM = (race.distanceMi || 0) * 1609.344;
-      const gainM = (race.gainFt || 0) / 3.28084;
+      const gainFt = Math.round(race.gainFt || 0);
+      const lossFt = Math.round(race.lossFt || 0);
+      const gainM = gainFt / 3.28084;
+      const isNetDownhill = Boolean(race.lossFt && race.lossFt > (race.gainFt || 0));
+      let vertLabel = 'Vert Gain';
+      let vertValue = fmtElev(gainM, units);
+      if (isNetDownhill) {
+        vertLabel = 'Gain / Drop';
+        if (units === 'metric') {
+          const gM = Math.round(gainFt / 3.28084);
+          const lM = Math.round(lossFt / 3.28084);
+          vertValue = `+${gM.toLocaleString()} / -${lM.toLocaleString()} m`;
+        } else {
+          vertValue = `+${gainFt.toLocaleString()} / -${lossFt.toLocaleString()} ft`;
+        }
+      }
+
       const best = getBestRecord(race.id, game);
       const bestHtml = best
         ? `<span class="race-pb">🏆 PB: ${fmtClock(best.elapsedSec)}${best.asterisk || best.timeDilated ? ' *' : ''}${best.runnerName ? ` · ${escapeHtml(best.runnerName)}` : ''}</span>`
+        : '';
+
+      const easterPillHtml = isEaster
+        ? '<div class="race-easter-pill">🤠 EASTER EGG · SEA-LEVEL ASPHALT</div>'
         : '';
 
       const cps = Array.isArray(race.checkpoints) ? race.checkpoints : [];
@@ -411,6 +435,7 @@ export function createScreens({
         : '';
 
       card.innerHTML = `
+        ${easterPillHtml}
         <div class="race-card__head">
           <div>
             <h2>${race.name}</h2>
@@ -428,7 +453,7 @@ export function createScreens({
 
         <dl class="race-stats">
           <div><dt>Distance</dt><dd>${fmtDist(distM, units, 1)}</dd></div>
-          <div><dt>Vert Gain</dt><dd>${fmtElev(gainM, units)}</dd></div>
+          <div><dt>${vertLabel}</dt><dd>${vertValue}</dd></div>
           <div><dt>Cutoff</dt><dd>${race.cutoffH ? `${race.cutoffH} hrs` : 'None'}</dd></div>
         </dl>
 
@@ -446,7 +471,22 @@ export function createScreens({
       card.querySelector('.race-start-btn').addEventListener('click', () => {
         onStartRace?.(race);
       });
-      racesGridEl.appendChild(card);
+      return card;
+    };
+
+    for (const race of regularRaces) {
+      racesGridEl.appendChild(buildRaceCard(race));
+    }
+
+    if (easterEggRaces.length) {
+      const divider = document.createElement('div');
+      divider.className = 'races-easter-divider';
+      divider.setAttribute('role', 'separator');
+      divider.innerHTML = '<span>🤠 Secret Unlock · Non-Mountain Contraband</span>';
+      racesGridEl.appendChild(divider);
+      for (const race of easterEggRaces) {
+        racesGridEl.appendChild(buildRaceCard(race));
+      }
     }
   }
 
